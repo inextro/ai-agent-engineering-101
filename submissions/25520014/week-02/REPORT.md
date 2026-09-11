@@ -1,145 +1,149 @@
-# Week 02 — 하네스 A/B: ReAct vs Plan-then-Execute
+# Week 02 — Harness A/B: ReAct vs Plan-then-Execute
 
-모델과 태스크와 도구를 상수로 고정하고 하네스만 바꿨다.
+The model, the task, and the tools are held constant. Only the harness varies.
 
-## 재현 방법
+## 1. Variant definition
+
+**What is held constant.** Anyone re-running this needs all of it, and none of it
+differs between the two harnesses.
 
 | | |
 |---|---|
-| 모델 | Claude Sonnet 5 (`claude-sonnet-5`) |
-| 호출 경로 | `claude -p`. 구독 계정으로 Claude Code를 비대화식 실행 |
-| 고정 플래그 | `--output-format json --allowed-tools "" --system-prompt <하네스별> --exclude-dynamic-system-prompt-sections --strict-mcp-config --mcp-config '{"mcpServers":{}}'` |
-| 도구 | `read_file(path)`, `count_pattern(path, pattern)`. 두 하네스가 `tools_shared.py`에서 똑같이 import |
-| 태스크 | `TASK.md`의 `task:` 줄. 첫 실행 전에 커밋했다 |
-| 성공 판정 | `TASK.md`의 `expected:` 줄 `14:00`이 최종 답에 들어 있으면 O (`run_ab.py:judge`) |
-| 입력 | `app.log` 무변경. 14시가 ERROR 6건으로 최다, 12시가 3건으로 2위 |
+| Model | Claude Sonnet 5 (`claude-sonnet-5`) |
+| Call path | `claude -p`, authenticated by a Claude subscription. No API key. |
+| Runtime | `claude` CLI **2.1.251**; Python 3.13, standard library only — nothing to install. The per-call overhead measured in part 2 is a property of this CLI version. |
+| Harnesses | `harness_react.py`, `harness_plan_execute.py`, sharing `tools_shared.py`. `probe_overhead.py` measures the overhead; `run_ab.py` drives the runs and writes the conditions header into each log. |
+| Fixed flags | `--output-format json --allowed-tools "" --system-prompt <per-harness> --exclude-dynamic-system-prompt-sections --strict-mcp-config --mcp-config '{"mcpServers":{}}'` |
+| Tools | `read_file(path)` → file contents, first 4000 chars. `count_pattern(path, pattern)` → number of matching lines. Both harnesses import them from `tools_shared.py`. |
+| Task | the `task:` line of `TASK.md`, committed in `edbdb8a` before the first run and unchanged since |
+| Success | the `expected:` line `14:00` appears in the final answer (`run_ab.py:judge`) |
+| Input | `app.log`, unchanged. Hour 14 has 6 ERROR lines, the maximum; hour 12 is second with 3. |
 
 ```bash
 cd submissions/25520014/week-02
-python run_ab.py --runs 3      # results.csv와 logs/를 쓴다
+python run_ab.py --runs 3      # writes results.csv and logs/
 ```
 
-API 키는 쓰지 않는다. `claude` CLI가 구독 자격증명으로 인증한다.
-하네스 상한은 ReAct `max_steps=8`, Plan-then-Execute `max_replan=1`,
-`max_tool_rounds=3`이다. 이 값은 첫 실행 전에 정했고 결과를 보고 바꾸지 않았다.
+`--allowed-tools ""` is what protects the controlled variable. Without it the
+model reaches `app.log` through Claude Code's own Read/Bash instead of ours and
+"same tools" stops being true; every file access in the logs goes through
+`[tool] read_file(...)`.
 
-### `claude -p`를 쓸 때 반드시 알아야 하는 두 가지
+One property of this call path shapes both harnesses. `claude -p` returns text,
+not `tool_use` blocks, so each harness parses `Action: {"tool": ..., "args":
+{...}}` itself and runs the tool. The original ReAct paper worked this way too,
+and it adds a failure mode the API path does not have — a malformed `Action`
+line. It did not occur in these six runs.
 
-**1. 호출마다 고정 토큰 오버헤드가 붙는다.** Claude Code가 자체 시스템 프롬프트와
-내장 도구 정의를 매 호출에 싣는다. `probe_overhead.py`로 하네스별 시스템 프롬프트를
-써서 최소 호출 1회를 측정한 값이다.
+**What differs.** Elements 1, 3, and 4 of the five. Element 2 is the control.
 
-| 시스템 프롬프트 | 입력 토큰 |
-|---|---|
-| `harness_react.SYSTEM` (534자) | 36,544 |
-| `harness_plan_execute.SYSTEM_PLAN` (187자) | 36,328 |
-| `harness_plan_execute.SYSTEM_EXEC` (513자) | 36,569 |
-
-시스템 프롬프트 길이가 326자 차이나도 오버헤드는 241토큰만 움직인다. Claude Code
-자체 오버헤드가 지배적이라는 뜻이다. 아래 측정표의 `tokens`는 보정하지 않은 실측치이고,
-보정에는 평균 **36,480**을 쓴다(`대화 토큰 = tokens − iters × 36,480`). 이 보정은
-근사다. Plan-then-Execute는 한 런 안에서 세 종류의 시스템 프롬프트를 섞어 쓴다.
-
-이 오버헤드가 실측 `tokens`의 대부분을 차지한다. ReAct는 96%, Plan-then-Execute는
-89%가 대화와 무관한 고정비다. 그래서 **보정 전과 후의 결론이 갈린다.** 실측 배수는
-6.5배로 `iters` 배수 6.0배와 거의 같아 토큰이 반복 횟수의 복사본처럼 보이는데,
-보정하면 18.4배로 벌어진다. 즉 Plan-then-Execute는 호출 수가 많은 것만이 아니라
-**호출당 대화량도 3배 많다**(4,325 대 1,407토큰). 보정하지 않으면 이 사실이 고정비에
-가려진다. 하네스 안에 하네스를 넣은 대가이며, raw Messages API로 부르면 이 항은 사라진다.
-
-**2. `tool_use` 블록을 받을 수 없다.** `claude -p`는 텍스트만 돌려주므로 하네스가
-`Action: {"tool": ..., "args": {...}}` 한 줄을 직접 파싱하고 도구를 실행한다.
-ReAct 원전(Yao et al. 2022)도 `tool_use` API가 없던 시절의 텍스트 파싱 방식이었다.
-대신 **Action 파싱 실패가 새로운 실패 모드로 생긴다.** 이번 6런에서는 발생하지 않았다.
-
-로그의 Observation은 starter의 로깅 방식대로 200자에서 잘린다(`tools_shared.py:191`의
-`out[:200]`과 같다). 실제로 잘리는 것은 `read_file`뿐이고 `count_pattern`의 결과는
-한 자리 숫자라 온전하며, Thought는 어느 것도 잘리지 않는다. 모델이 파일 전체를 봤는지는
-Thought로 확인할 수 있다. 예를 들어 `logs/react-02.txt`의 두 번째 Thought는 14시
-ERROR의 타임스탬프를 `14:04, 14:07, 14:15, 14:30, 14:47, 14:54`로 나열하는데, 이는
-`app.log`의 실제 값 여섯 개와 정확히 일치한다. 잘린 앞 200자에는 09시 줄만 들어 있으므로,
-이 나열 자체가 60줄 전부가 컨텍스트에 있었다는 증거다.
-
-`--allowed-tools ""`는 통제 변수를 지키기 위한 것이다. 이 플래그가 없으면 모델이
-Claude Code의 Read/Bash로 `app.log`를 직접 읽어 "같은 도구"라는 전제가 깨진다.
-로그를 보면 모든 파일 접근이 `[tool] read_file(...)`을 거쳤다.
-
-## 1. 변형 정의 — 다섯 요소를 어디서 다르게 잡았는가
-
-| 요소 | ReAct | Plan-then-Execute |
+| Element | ReAct | Plan-then-Execute |
 |---|---|---|
-| **1. 컨텍스트 관리** | 하나의 `transcript` 리스트. Thought/Action/Observation을 계속 이어붙여 매 호출마다 **통째로** 다시 보낸다. | **역할을 둘로 쪼갠다.** 계획자는 태스크 설명과 도구 목록만 보고 파일 내용을 한 번도 못 본다. 실행자는 단계마다 새 호출이고, 계획 전문 + 현재 단계 + **이전 단계들의 결과 한 줄 요약**만 받는다. 이전 단계의 Thought와 Observation 원문은 넘어가지 않는다. |
-| **2. 도구 granularity** | `read_file`, `count_pattern` | **동일.** `tools_shared.py`에 고정. 통제 변수다. |
-| **3. 종료 조건** | 모델이 `finish(answer)`를 **명시적으로 불러야** 끝난다. `max_steps=8` 상한을 겹친다. | **계획을 다 소진하면** 끝난다. 중간 단계에서 답이 나와도 멈추지 않는다. `finish`가 없다. 단계당 도구 호출 상한 `max_tool_rounds=3`을 겹친다. |
-| **4. 에러 복구** | 1층. 도구 예외와 Action 파싱 실패를 Observation으로 되돌려 모델이 다음 스텝에서 고친다. | 2층. 단계 안에서는 ReAct와 같다. 단계 자체가 막히면 `OFF_PLAN`을 내고 **계획자에게 올라가** 남은 계획을 다시 짠다. `max_replan=1`이 유연성 상한이다. |
-| **5. 인간 개입 지점** | `IRREVERSIBLE`에 든 도구는 실행 전 승인. 집합이 비어 있다. | 같은 훅, 같은 빈 집합. |
+| **1. Context** | One `transcript` list. Thought/Action/Observation are appended and the **whole thing** is resent on every call. | **Split into two roles.** The planner sees only the task and the tool list, never file contents. The executor is a fresh call per step, receiving the plan, the current step, and a **one-line summary** of earlier steps. Earlier Thoughts and raw Observations do not carry over. |
+| **2. Tool granularity** | `read_file`, `count_pattern` | **Identical.** Fixed in `tools_shared.py`. |
+| **3. Termination** | The model must call `finish(answer)` **explicitly**. `max_steps=8` on top. | **Plan exhaustion.** An answer found mid-plan does not stop the loop, and there is no `finish`. `max_tool_rounds=3` per step on top. |
+| **4. Error recovery** | One layer. Tool exceptions and parse failures come back as Observations. | Two layers. Same inside a step; a blocked step emits `OFF_PLAN` and escalates **to the planner**, which rewrites the remaining steps. `max_replan=1` is the flexibility ceiling. |
+| **5. Human intervention** | `IRREVERSIBLE` gates tools before execution. The set is empty. | Same hook, same empty set. |
 
-요소 1, 3, 4가 실질적으로 다르다. 요소 2는 통제 변수로 고정했다. 요소 5는 두
-하네스가 같은 훅을 갖고 있으나 도구가 모두 읽기 전용이라 **한 번도 작동하지 않았다.**
-`interventions` 열이 전부 0인 것은 두 하네스가 비긴 것이 아니라 이 태스크로는
-측정하지 못한 요소라는 뜻이다.
+Element 5 never fired, because every tool is read-only. The zeros in the
+`interventions` column are not a tie between the harnesses; they mean this task
+could not measure that element at all.
 
-## 2. 측정표
+```mermaid
+flowchart TD
+    A["Task"] --> T["<b>transcript</b><br/>Thought / Action / Observation<br/>accumulates"]
+    T -->|"resent whole, every call"| M["claude -p"]
+    M --> P{"parse_step"}
+    P -->|"malformed Action"| O1["Observation = parse error"] --> T
+    P -->|"read_file / count_pattern"| RT["run_tool"] --> O2["Observation"] --> T
+    P -->|"finish(answer)"| D(["answer"])
+    T -.->|"max_steps = 8"| X(["MAX_STEPS incomplete"])
 
-`results.csv` 그대로다. 시간은 각 로그의 `[judge]` 줄에서 가져왔다.
+    classDef ctx fill:#1f6feb22,stroke:#1f6feb,stroke-width:2px
+    classDef term fill:#2da44e22,stroke:#2da44e,stroke-width:2px
+    class T ctx
+    class D,X term
+```
 
-| run | harness | success | tokens | iters | interventions | 보정 토큰 | 시간 | note |
-|---|---|---|---|---|---|---|---|---|
-| 1 | react | O | 114,103 | 3 | 0 | 4,471 | 20.1s | |
-| 2 | react | O | 75,376 | 2 | 0 | 2,288 | 19.6s | |
-| 3 | react | O | 114,140 | 3 | 0 | 4,508 | 11.5s | |
-| 4 | plan_exec | X | 524,627 | 13 | 0 | 50,387 | 89.2s | replans=1 |
-| 5 | plan_exec | X | 910,242 | 22 | 0 | 107,682 | 172.5s | replans=1 |
-| 6 | plan_exec | X | 523,769 | 13 | 0 | 49,529 | 90.2s | replans=1 |
+```mermaid
+flowchart TD
+    A["Task"] --> PL["<b>planner</b><br/>never sees file contents"]
+    PL --> PP{"parse_plan"}
+    PP -->|"fail"| PF(["plan parse failed"])
+    PP -->|"JSON list"| S["step i"]
+    S --> EX["<b>executor</b><br/>fresh context per step<br/>plan + one-line summaries"]
+    EX --> C{"reply"}
+    C -->|"tool"| RT["run_tool"] --> OB["obs_log<br/>within this step only"] --> EX
+    C -->|"DONE"| R["results += one line"]
+    C -->|"OFF_PLAN"| OP
+    OB -.->|"max_tool_rounds = 3"| OP
+    OP["<b>obs_log discarded</b><br/>counts already obtained are lost"]
+    OP -->|"replans &lt; 1"| PL
+    OP -->|"ceiling spent"| R
+    R --> N{"i &lt; len(plan)?"}
+    N -->|"yes"| S
+    N -->|"no — plan exhausted"| FIN["ask_final"] --> ANS(["Answer: ..."])
 
-| | ReAct | Plan-then-Execute | 배수 |
-|---|---|---|---|
-| 성공률 | **3/3** | **0/3** | — |
-| iters 평균 | 2.67 | 16.0 | 6.0× |
-| tokens 평균 (실측) | 101,206 | 652,879 | 6.5× |
-| tokens 평균 (보정) | 3,756 | 69,199 | 18.4× |
-| 시간 평균 | 17.1s | 117.3s | 6.9× |
-| interventions | 0 | 0 | 측정 불가 |
+    classDef ctx fill:#1f6feb22,stroke:#1f6feb,stroke-width:2px
+    classDef term fill:#2da44e22,stroke:#2da44e,stroke-width:2px
+    classDef bad fill:#cf222e22,stroke:#cf222e,stroke-width:2px
+    class PL,EX ctx
+    class ANS,PF term
+    class OP bad
+```
 
-**분산은 Plan-then-Execute 쪽이 훨씬 크다.** ReAct는 2~3 iters(보정 2,288~4,508토큰)
-안에 모였는데, Plan-then-Execute는 13, 22, 13 iters(49,529~107,682토큰)로 벌어진다.
-계획의 품질이 그 런의 비용을 결정하기 때문이다. run 05는 재계획이 이진 탐색 전략을
-내면서 단계가 4개에서 7개로 늘었고, 늘어난 단계만큼 더 많은 단계가 상한에 걸려
-22 iters를 썼다. 세 런의 실패 지점은 같지만 비용은 같지 않다.
+## 2. Measurements
 
-`logs/`에는 채점 런 6개 외에 다음이 더 있다.
+| run | harness | success | tokens | adj. tokens | iters | interventions | note |
+|---|---|---|---|---|---|---|---|
+| 1 | react | O | 114,103 | 4,471 | 3 | 0 |  |
+| 2 | react | O | 75,376 | 2,288 | 2 | 0 |  |
+| 3 | react | O | 114,140 | 4,508 | 3 | 0 |  |
+| 4 | plan_exec | X | 524,627 | 50,387 | 13 | 0 | replans=1 |
+| 5 | plan_exec | X | 910,242 | 107,682 | 22 | 0 | replans=1 |
+| 6 | plan_exec | X | 523,769 | 49,529 | 13 | 0 | replans=1 |
 
-- `react-smoke-01.txt`, `plan_exec-smoke-01.txt` — 배관 검증용 1회 실행. `results.csv`에
-  행이 없다. `plan_exec` 스모크도 채점 런과 같은 방식으로 실패했고, 상한을 고치지 않고
-  그대로 채점 런을 돌렸다.
-- `attempt-01-no-conditions/` — 같은 코드·같은 상한으로 돌린 첫 6런. 로그에 조건 블록이
-  없어 채점 대상에서 내렸지만 지우지 않았다. **같은 실패 메커니즘이 두 시도에서 재현됐다**
-  (react 3/3 성공, plan_exec 0/3 실패). 그쪽은 세 런이 모두 13 iters였고 보정 토큰이
-  11,502~12,548이었다. 실패 여부는 결정적이지만 비용은 런마다 흔들린다는 뜻이다.
+Every column but `adj. tokens` is `results.csv` verbatim. That one is derived,
+because `tokens` cannot be read as it stands: `claude -p` loads Claude Code's own
+system prompt and built-in tool definitions on every call — a fixed 36,480
+tokens, measured per harness with `probe_overhead.py` — so most of each raw
+figure is a constant rather than conversation. `adj. tokens` subtracts it
+(`tokens − iters × 36,480`), averaging 3,756 for ReAct against 69,199 for
+Plan-then-Execute: an **18.4× gap the raw numbers hide**, where raw they show
+6.5×, which merely restates the 6.0× iteration ratio and conceals that
+Plan-then-Execute also spends 3× more per call.
 
-## 3. 해석
+Variance is the asymmetric part. ReAct lands within 2–3 iterations every time,
+while Plan-then-Execute spreads over 13, 22, 13. Run 05 is the outlier: its
+replan produced a binary-search strategy that grew the plan from 4 steps to 7,
+and each added step was another chance to hit the per-step ceiling. The runs fail
+in the same place but not at the same price.
 
-이 태스크에서는 ReAct가 네 지표 전부에서 이겼다. 성공률 3/3 대 0/3, 반복 횟수 2.67 대
-16.0(6.0배), 보정 토큰 3,756 대 69,199(18.4배), 시간 17.1초 대 117.3초(6.9배)이고,
-개입 횟수만 둘 다 0으로 갈리지 않았다. 이 격차를 만든 것은 종료 조건 자체가 아니라
-**컨텍스트 관리(요소 1)가 종료 조건(요소 3)의 상한을 의미 있게 만들었는지 여부**다.
-ReAct에서 `app.log`는 3,022바이트로 `read_file`의 4,000자 상한 안에 들어오므로 한 번
-읽으면 60줄 전부가 `transcript`에 남고, 실제로 run 02와 03은 `count_pattern`을 한 번도
-부르지 않고 두 번째 호출에서 곧바로 `finish(14:00)`을 불렀다(`logs/react-02.txt`).
-같은 파일 내용이 Plan-then-Execute에서는 1단계 끝에서 `DONE: 로그는 09~17시 범위이며
-형식은 ...` 한 줄로 압축되고, 실행자가 단계마다 새 호출이라 2단계는 원문을 보지 못한다.
-그래서 계획자가 짠 "각 시간대별로 센다"를 수행하려면 `count_pattern`을 아홉 번 불러야
-하는데 단계당 상한이 3이어서 구조적으로 불가능하고, 세 런 모두 같은 자리에서 `OFF_PLAN`이
-났다. 조건을 바꾸지 않고 돌린 앞선 6런(`logs/attempt-01-no-conditions/`)에서도 세 런이
-같은 자리에서 같은 이유로 실패했으니, 우연이 아니라 구조가 만든 실패다. 결정적인 대목은
-그 다음이다. 단계가 `OFF_PLAN`으로 끝나면 그 단계에서 이미 얻은
-세 개의 카운트가 함께 버려지기 때문에, `count_pattern(... 09:.*ERROR) -> 1`이 정확히
-나왔는데도 다음 단계는 "비교할 데이터가 없다"며 또 `OFF_PLAN`을 낸다
-(`logs/plan_exec-04.txt`). 에러 복구(요소 4)는 세 런 모두 정상 발동했고 계획자는
-`OFF_PLAN` 메시지에서 상한의 존재를 배워 재계획에 `(도구 호출 상한을 넘지 않도록
-시간대별로 하나씩 순차 호출)`이라고 적기까지 했지만, 아홉 개를 한 단계에 묶은 구조를
-바꾸지는 못했다. 요소 1이 계획자에게서 실행 현실을 차단했기 때문이고, 그래서 요소 4의
-복구 경로가 요소 1의 제약을 넘지 못했다. 다만 이 승패는 조건부다. 입력이 컨텍스트에 다
-들어오는 크기였기 때문에 "전문 누적"이 통째로 이득이 된 것이고, 파일이 그보다 크면 같은
-요소가 곧바로 부담으로 바뀌어 단계마다 컨텍스트를 비우는 쪽이 유리해진다. 이번 결과가
-말해주는 것은 하네스의 우열이 아니라 요소 1과 요소 3 사이의 의존 관계다.
+`logs/` holds one file per row above. Observations in them are cut at 200
+characters, as in the starter; only `read_file` is long enough to be cut and
+Thought lines are never cut. Whether the model really saw the whole file is
+still checkable from those: the second Thought in `logs/react-02.txt` lists the
+14:00-hour ERROR timestamps as `14:04, 14:07, 14:15, 14:30, 14:47, 14:54`, which
+matches `app.log` exactly, while the surviving first 200 characters contain only
+09:00-hour lines.
+
+## 3. Interpretation
+
+ReAct won on every metric that moved — 3/3 against 0/3, 6.0× fewer iterations,
+18.4× fewer adjusted tokens — but the cause is not element 3 by itself: it is
+**whether element 1 left element 3's ceiling reachable.** At 3,022 bytes
+`app.log` fits `read_file`'s 4,000-character cap, so ReAct's single `transcript`
+keeps all 60 lines and runs 02 and 03 never called `count_pattern` at all
+(`logs/react-02.txt`). Plan-then-Execute compresses the same content into one
+`DONE:` line, leaving its per-step executor nine `count_pattern` calls to make
+against a ceiling of 3 — and `OFF_PLAN` discards whatever the step already
+counted, so a correct `-> 1` still became "no data to compare"
+(`logs/plan_exec-04.txt`). All three runs died at the same step of the
+same plan for the same reason, so it is structural, not accidental. Element 4 fired every time
+and the planner even learned the ceiling existed — run 04's replan says *"call
+them one hour at a time so as not to exceed the tool-call limit"* — yet never
+moved those nine counts out of one step, element 1 having cut it off from
+execution reality. The verdict is conditional: the input fit in context, exactly
+when accumulating everything is pure gain; with a larger file that same element
+becomes the liability. These runs show not which harness is better but that
+element 1 decides whether element 3's ceiling binds at all.
