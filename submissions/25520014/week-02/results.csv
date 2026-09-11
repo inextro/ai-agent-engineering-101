@@ -1,0 +1,7 @@
+run,harness,success,tokens,iters,interventions,note
+1,react,O,113667,3,0,
+2,react,O,75234,2,0,
+3,react,O,75287,2,0,
+4,plan_exec,X,485742,13,0,replans=1
+5,plan_exec,X,486788,13,0,replans=1
+6,plan_exec,X,486453,13,0,replans=1
