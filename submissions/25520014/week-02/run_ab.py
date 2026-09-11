@@ -9,15 +9,58 @@ they are data.
 """
 import argparse
 import csv
+import inspect
 import os
+import shlex
 import re
 import time
 from pathlib import Path
 
+import harness_plan_execute
+import harness_react
+import tools_shared
 from harness_plan_execute import run_plan_execute
 from harness_react import run_react
 
 HEADER = ["run", "harness", "success", "tokens", "iters", "interventions", "note"]
+
+# lab 4번: "실행마다 프롬프트, 도구 집합, max_steps 같은 실험 조건을 기록한다".
+# 조건을 손으로 옮겨 적으면 코드와 어긋나므로, 실제 쓰이는 값을 실행 시점에 읽어
+# 각 로그 첫머리에 찍는다. 상한은 함수 시그니처의 기본값에서 가져온다.
+HARNESS_MODULE = {"react": harness_react, "plan_exec": harness_plan_execute}
+SYSTEM_ATTRS = ("SYSTEM", "SYSTEM_PLAN", "SYSTEM_EXEC")
+
+
+def conditions_block(name: str, fn, task: str, expected: str) -> str:
+    """이 런의 실험 조건 전문. 로그 파일 맨 앞에 들어간다."""
+    mod = HARNESS_MODULE[name]
+    out = ["# " + "=" * 70,
+           "# 실험 조건 (이 런에 실제로 쓰인 값)",
+           "# " + "=" * 70,
+           f"# harness            : {name} ({fn.__module__}.{fn.__name__})",
+           f"# model              : {tools_shared.MODEL}",
+           f"# 호출 경로          : claude -p (구독 자격증명, API 키 미사용)",
+           f"# claude -p 플래그   : {shlex.join(tools_shared._BASE_FLAGS)}",
+           f"# 도구 집합          : {', '.join(sorted(tools_shared.TOOLS_IMPL))}"
+           + ("  (+ finish: 하네스가 가로채는 종료 신호)" if name == "react" else ""),
+           f"# IRREVERSIBLE       : {sorted(mod.IRREVERSIBLE) or '(빈 집합)'}"]
+
+    for pname, param in inspect.signature(fn).parameters.items():
+        if param.default is not inspect.Parameter.empty and pname != "log":
+            out.append(f"# {pname:<18} : {param.default}")
+
+    out += [f"# task               : {task}",
+            f"# expected           : {expected}",
+            "#",
+            "# --- 시스템 프롬프트 전문 ---"]
+    for attr in SYSTEM_ATTRS:
+        text = getattr(mod, attr, None)
+        if text is None:
+            continue
+        out.append(f"# [{attr}] ({len(text)}자)")
+        out += ["#   " + line for line in text.splitlines()]
+    out += ["# " + "=" * 70, ""]
+    return "\n".join(out)
 
 
 def read_task(path="TASK.md"):
@@ -77,7 +120,8 @@ def main():
                     f"({time.time() - t0:.1f}s)")
 
                 Path("logs", f"{name}-{run_no:02d}.txt").write_text(
-                    "\n".join(lines) + "\n", encoding="utf-8")
+                    conditions_block(name, fn, task, expected)
+                    + "\n".join(lines) + "\n", encoding="utf-8")
                 w.writerow([run_no, name, "O" if success else "X",
                             meter.tokens if meter else "",
                             meter.iters if meter else "",
