@@ -22,6 +22,7 @@ from collector import SCHEMA  # noqa: E402
 
 OUR_URL = "https://our-shop.trycloudflare.com"
 BREAK = {"A": 0.05, "B": 0.10, "C": 0.25}       # the hidden truth the estimator should find
+US = "inextro"                                  # our buyer: pays 5% under the market at the same shop
 
 
 def main():
@@ -60,6 +61,7 @@ def main():
     seq, t = 1, start
     db.execute("INSERT INTO ledger VALUES (?, ?, ?, ?, ?, ?)", (seq, start, 3, "round", json.dumps({"round": 3}), ""))
     sold = []
+    ratio = {s: random.uniform(0.65, 0.95) for s in [OUR_URL] + [f"https://shop-{i}.example" for i in range(1, 41)]}
     while True:
         t += random.expovariate(total_rate / 3600)
         if t >= now:
@@ -68,14 +70,16 @@ def main():
         x = random.choice(by_cat[c])
         grade = random.choices("ABC", [70, 20, 10] if x["kind"] == "goods" else [25, 50, 25])[0]
         shop = OUR_URL if random.random() < 0.05 else f"https://shop-{random.randint(1, 40)}.example"
-        buyer = f"buyer{random.randint(1, 60)}"
-        price = round(x["list_price"] * random.uniform(0.6, 1.0))
+        buyer = US if random.random() < 0.03 and shop != OUR_URL else f"buyer{random.randint(1, 60)}"
+        r = random.lognormvariate(0, 0.08) * ratio[shop] * (0.95 if buyer == US else 1.0)
+        price = round(x["list_price"] * r)
         seq += 1
-        d = {"shop": shop, "buyer": buyer, "item": x["sku"], "price": price, "grade": grade, "claim": grade,
+        d = {"shop": shop, "buyer": buyer, "item": x["sku"], "amount": price, "grade": grade, "claim": grade,
              "claim_honest": True}
         db.execute("INSERT INTO ledger VALUES (?, ?, ?, ?, ?, ?)", (seq, t, 3, "settle", json.dumps(d), ""))
         if x["kind"] == "goods" and random.random() < BREAK[grade]:
             sold.append((t + random.uniform(0, 6 * 3600), buyer, x["sku"]))
+    (out / "truth.json").write_text(json.dumps(ratio, indent=1), encoding="utf-8")
     for bt, buyer, sku in sorted(sold):
         if bt < now:
             seq += 1
