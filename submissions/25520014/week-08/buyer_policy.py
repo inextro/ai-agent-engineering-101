@@ -5,6 +5,7 @@ data/buyer_playbook.json; only buyer_manager.py writes them, inside the ranges a
 range per decision. The price model and the break rates are not here; model.py computes them from the ledger.
 """
 import json
+import math
 import os
 import time
 
@@ -41,9 +42,12 @@ def clip(new, old=None):
             v = float(new[k])
         except (TypeError, ValueError):
             continue
+        whole = isinstance(NUMBERS[k][0], int)
         step = MAX_STEP * (hi - lo)
+        if whole:                    # at least one unit, rounded half up: round() halves to even and can get stuck
+            step = max(step, 1)
         v = min(max(v, old[k] - step, lo), old[k] + step, hi)
-        out[k] = round(v) if isinstance(NUMBERS[k][0], int) else round(v, 4)
+        out[k] = math.floor(v + 0.5) if whole else round(v, 4)
     return out
 
 

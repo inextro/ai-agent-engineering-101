@@ -30,6 +30,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -45,6 +46,9 @@ from seller import offer_in
 MARKET_DIR = Path(os.environ.get("MARKET_DIR", ".market"))
 LOG = policy.DATA / "buyer.jsonl"
 DEADLINE = 230              # seconds for the whole order; the kit stops the buyer at 300
+HARD_STOP = 280             # past this the result we have is printed and the process ends (the kit kills at 300)
+EDGE = 0.05                 # share of the list price we expect to save under the cap when the shop's usual price is
+                            # at or above it (else a market priced near the cap would leave no goods order worth trying)
 P = buyer_policy.load()     # read once per order (the kit starts this script for every order)
 QUOTES = P["quotes"]        # shops that get the opening message (buyer_policy)
 ROUNDS = 6                  # offers we send to one shop
@@ -58,6 +62,8 @@ FOOD_MARGIN_H = 0.5         # hours of shelf life asked on top of use_within_hou
 REPLY_MODEL, REPLY_EFFORT, REPLY_TIMEOUT = "haiku", "medium", 20
 buyer.RPC_TIMEOUT = 60      # one slow shop must not eat the order: the opening waits for the slowest of QUOTES
 USE_MODEL = os.environ.get("BUYER_LLM", "1") != "0"
+STARTED = time.time()
+LOCK, DONE = threading.Lock(), threading.Event()     # finish() prints the result line once, from main or the timer
 MSGS = {"model": 0, "template": 0}           # how our messages were written this order (for the manager)
 
 
@@ -139,18 +145,28 @@ class Models:
         return sum(SUPPLY[g] * self.breaks[g] for g in "ABC")
 
 
+def value_cap(x, order, m):
+    """(value, cap) of one unit of SKU x for this order."""
+    lp = x["list_price"]
+    value = lp * (1 - m.break_mix()) if x.get("kind") == "goods" else lp
+    return value, min(value, order["budget"])
+
+
 def candidates(order, shops, cat, m):
-    """Every (shop, SKU) that fits, scored by expected surplus, best first."""
+    """Every (shop, SKU) that fits, scored by expected surplus, best first. Food whose whole shelf life is shorter
+    than the order needs is left out: the accept policy would make the kit refuse it after the haggle."""
     out = []
+    need_h = (order.get("use_within_hours") or 0) + FOOD_MARGIN_H
     for s in shops:
         for o in s.get("offers") or []:
             x = cat.get(o.get("sku"))
             if not x or not o.get("qty") or o["sku"] not in (order.get("acceptable") or [o["sku"]]):
                 continue
+            if x.get("kind") == "food" and order.get("use_within_hours") and (x.get("shelf_hours") or 1e9) < need_h:
+                continue
             lp = x["list_price"]
-            value = lp * (1 - m.break_mix()) if x.get("kind") == "goods" else lp
-            cap = min(value, order["budget"])
-            expect = min(lp * m.ratio(s["name"]), cap)
+            value, cap = value_cap(x, order, m)
+            expect = min(lp * m.ratio(s["name"]), cap - EDGE * lp)
             es = m.p_deal(s["name"]) * m.p_within(s["name"], cap, lp) * (value - expect)
             out.append({"shop": s["name"], "url": s["url"], "sku": o["sku"], "name": x["name"], "kind": x.get("kind"),
                         "list": lp, "value": round(value), "cap": int(cap), "expect": round(expect), "es": round(es)})
@@ -158,6 +174,15 @@ def candidates(order, shops, cat, m):
 
 
 # --- talking
+
+def time_left():
+    return HARD_STOP - (time.time() - STARTED)
+
+
+def fit_timeout():
+    """A seller reply may take at most what is left before the hard stop (and never more than 60 s)."""
+    buyer.RPC_TIMEOUT = max(3, min(60, time_left() - 5))
+
 
 def write_message(c, offer, ask, other, history, tag):
     """haiku writes our message around `offer`; the code checks that the offer is the last number and that no other
@@ -181,6 +206,8 @@ def write_message(c, offer, ask, other, history, tag):
     allowed = set(re.findall(r"\d+", c["name"])) | ({str(other["ask"])} if other else set())
     for attempt in (1, 2):
         try:
+            if time_left() < 70:            # no time for haiku and a reply: the template is instant
+                raise TimeoutError("little time left")
             text = harness.call(prompt, timeout=REPLY_TIMEOUT, model=REPLY_MODEL, effort=REPLY_EFFORT).strip()
         except Exception as e:
             log(f"{tag}: harness failed ({type(e).__name__}), template")
@@ -208,16 +235,23 @@ def open_talk(c, url):
     return rpc_url, task, ask
 
 
-def ask_in(task, c):
+def ask_in(task, c, ours=None):
+    """The shop's price in its message. A shop that quotes our offer back ("42000 is my best, I can't do 30000")
+    must not be read as asking our offer: that number is dropped when another price is left."""
     if task["status"]["state"] != "TASK_STATE_INPUT_REQUIRED":
         return None
-    return offer_in(buyer.status_text(task), c["name"], ref=c["list"])
+    text = buyer.status_text(task)
+    ask = offer_in(text, c["name"], ref=c["list"])
+    if ours is not None and ask == ours:
+        rest = re.sub(rf"(?<![\d,])(?:{ours}|{ours:,})(?![\d,])", " ", text)
+        ask = offer_in(rest, c["name"], ref=c["list"]) or ask
+    return ask
 
 
 def haggle(c, rpc_url, task, ask, other, started, rec):
     """Raise toward min(ask, cap) until the shop meets us, stalls under the cap, or the rounds run out.
     Returns the shop's receipt (a dict) or None."""
-    target = min(c["list"] * c["ratio"], c["cap"])
+    target = c["expect"]                 # the usual price, or under the cap by EDGE when the shop asks about the cap
     offer = None
     history = [f"Me: I want to buy {c['name']}.", f"Shop: {buyer.status_text(task)[:400]}"]
     last, stalls = None, 0
@@ -228,6 +262,7 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
         if state != "TASK_STATE_INPUT_REQUIRED":
             rec["end"] = f"shop ended ({state})"
             return None
+        fit_timeout()
         if ask is None:
             rec["end"] = "no price in the shop's message"
             buyer.walk_away(rpc_url, task["id"], rec["end"])
@@ -244,11 +279,15 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
             task = buyer.send(rpc_url, f"OK, {ask} it is. Deal at {ask}.", task["id"])
             if task["status"]["state"] == "TASK_STATE_COMPLETED":
                 return buyer.receipt(task)
-            ask2 = ask_in(task, c)          # some shops confirm once more ("so 35000, final?")
+            ask2 = ask_in(task, c, ask)     # some shops confirm once more ("so 35000, final?")
             if ask2 is not None and ask2 <= ask:
                 task = buyer.send(rpc_url, f"Yes, {ask2}. Deal.", task["id"])
                 if task["status"]["state"] == "TASK_STATE_COMPLETED":
                     return buyer.receipt(task)
+            elif ask2 is not None and task["status"]["state"] == "TASK_STATE_INPUT_REQUIRED" and n < ROUNDS:
+                history.append(f"Shop: {buyer.status_text(task)[:400]}")    # it wants more: keep haggling
+                ask = ask2
+                continue
             rec["end"] = f"accepted {ask} but the shop did not close ({task['status']['state']})"
             buyer.walk_away(rpc_url, task["id"], rec["end"])
             return None
@@ -266,7 +305,7 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
         history.append(f"Me: {text}")
         task = buyer.send(rpc_url, text, task["id"])
         history.append(f"Shop: {buyer.status_text(task)[:400]}")
-        ask = ask_in(task, c)
+        ask = ask_in(task, c, offer)
     return None
 
 
@@ -285,7 +324,7 @@ def main():
     ap.add_argument("--item")
     ap.add_argument("--budget", type=int)
     a = ap.parse_args()
-    started = time.time()
+    started = STARTED
     order, shops = read_json(a.order, {}), read_json(a.shops, [])
     order.setdefault("budget", a.budget)
     cat = read_json(MARKET_DIR / "catalog.json", {})
@@ -294,6 +333,9 @@ def main():
            "kind": order.get("kind"), "use_within_hours": order.get("use_within_hours"), "shops": len(shops),
            "asks": [], "offers": [], "quotes": {}}
     result = {"shop": shops[0]["url"] if shops else "", "receipt": None, "stars": 3, "review": ""}
+    timer = threading.Timer(max(1, time_left()), out_of_time, (rec, result))
+    timer.daemon = True                         # it must not keep the process alive after the result is printed
+    timer.start()
     cands = [c for c in candidates(order, shops, cat, m) if c["es"] > 0]
     picks, seen = [], set()
     for c in cands:
@@ -322,9 +364,10 @@ def main():
         live.append((c, rpc_url, task, ask))
     # where to haggle: the most surplus at the ask we heard (no ask: the expected price)
     live.sort(key=lambda t: -(t[0]["value"] - (t[3] if t[3] is not None else t[0]["expect"])))
-    for c, rpc_url, task, ask in live[1:]:
+    for c, rpc_url, task, ask in live[1:]:      # in the background: a slow shop must not hold up the haggle
         if task["status"]["state"] == "TASK_STATE_INPUT_REQUIRED":
-            buyer.walk_away(rpc_url, task["id"], "bought elsewhere")
+            threading.Thread(target=buyer.walk_away, args=(rpc_url, task["id"], "bought elsewhere"),
+                             daemon=True).start()
     if not live:
         rec["end"] = "no shop answered"
         finish(rec, result)
@@ -348,22 +391,39 @@ def main():
             log(f"{c['shop']}: talk failed ({type(e).__name__}: {str(e)[:160]})")
             rec["end"], receipt = f"error {type(e).__name__}", None
         if receipt:
-            break
-    if receipt:
-        price = receipt.get("price")
-        if not isinstance(price, (int, float)) or price > c["cap"]:
-            log(f"receipt price {price} above our cap {c['cap']}: not taking it")
-            rec["end"], receipt = f"receipt price {price} above the cap", None
-        else:
+            price, item = receipt.get("price"), receipt.get("item")
+            cap = c["cap"]
+            if item and item != c["sku"]:       # signed for another acceptable SKU: its own value sets the cap
+                x = cat.get(item)
+                cap = int(value_cap(x, order, m)[1]) if x else 0
+                log(f"{c['shop']}: receipt for {item}, not {c['sku']}; cap {cap}")
+            if not isinstance(price, (int, float)) or price > cap:
+                log(f"receipt price {price} above our cap {cap}: not taking it")
+                rec["end"], receipt = f"receipt price {price} above the cap", None
+                continue                        # try the next shop while time is left
             rec["end"], rec["price"] = "deal", price
             result["accept"] = accept_policy(order, c, price, m)
             rec["accept"] = result["accept"]
-    result["receipt"] = receipt
+            break
+    with LOCK:
+        result["receipt"] = receipt
     result["review"] = "Deal agreed." if receipt else f"No deal: {rec.get('end')}."
     finish(rec, result)
 
 
+def out_of_time(rec, result):
+    """The hard stop: print what we have (no receipt unless one was already taken) before the kit kills us."""
+    if not DONE.is_set():
+        rec["end"] = f"out of time ({rec.get('end') or 'still talking'})"
+        finish(rec, result)
+        os._exit(0)
+
+
 def finish(rec, result):
+    with LOCK:
+        if DONE.is_set():
+            return
+        DONE.set()
     rec["receipt"] = bool(result.get("receipt"))
     rec["messages"] = dict(MSGS)
     rec["secs"] = round(time.time() - rec["ts"], 1)
@@ -382,5 +442,9 @@ if __name__ == "__main__":
         main()
     except Exception as e:               # the kit needs a last line even when something breaks
         print(f"[buyer] failed: {type(e).__name__}: {e}", flush=True)
-        print(json.dumps({"shop": "", "receipt": None, "stars": 3, "review": ""}), flush=True)
+        with LOCK:
+            printed = DONE.is_set()
+            DONE.set()
+        if not printed:
+            print(json.dumps({"shop": "", "receipt": None, "stars": 3, "review": ""}), flush=True)
         sys.exit(0)

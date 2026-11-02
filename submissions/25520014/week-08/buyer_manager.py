@@ -42,6 +42,7 @@ PURCHASES = policy.DATA / "purchases.jsonl"
 POSTS = policy.DATA / "buyer_forum.jsonl"
 MEMORY_CHARS = 1500
 ORDERS_SHOWN = 12
+PAYMENTS = Path(".market") / "payments.jsonl"      # set from --dir in main: the kit's record of what it paid
 OFFSET = 300               # five minutes after the seller's manager, so the two opus calls do not overlap
 
 
@@ -52,11 +53,24 @@ def log(msg):
 def window(since, until):
     """One window of the buyer, from its own order log."""
     rs = [r for r in jsonl(ORDERS, since) if r["ts"] < until]
-    deals = [r for r in rs if r.get("end") == "deal" and r.get("price") and r.get("list")]
+    agreed = [r for r in rs if r.get("end") == "deal" and r.get("price") and r.get("list")]
+    paid = {}
+    try:
+        for line in PAYMENTS.read_text(encoding="utf-8").splitlines():
+            try:
+                x = json.loads(line)
+                paid[x.get("order")] = x
+            except ValueError:
+                pass
+    except OSError:
+        pass
+    deals = [r for r in agreed if (paid.get(r.get("order")) or {}).get("paid")]   # agreed and paid by the kit
     msgs = Counter()
     for r in rs:
         msgs.update(r.get("messages") or {})
-    return {"orders": len(rs), "deals": len(deals),
+    return {"orders": len(rs), "agreed": len(agreed), "paid_deals": len(deals),
+            "kit_refused": dict(Counter(str((paid.get(r.get("order")) or {}).get("reason"))[:60] for r in agreed
+                                        if r.get("order") in paid and not paid[r["order"]].get("paid"))),
             "ends": dict(Counter(str(r.get("end"))[:60] for r in rs).most_common(8)),
             "price_over_list": round(sum(r["price"] / r["list"] for r in deals) / len(deals), 3) if deals else None,
             "surplus_sum": sum(r["list"] - r["price"] for r in deals),
@@ -240,6 +254,8 @@ def main():
     ap.add_argument("--once", action="store_true")
     a = ap.parse_args()
     md = Path(a.dir) / ".market"
+    global PAYMENTS
+    PAYMENTS = md / "payments.jsonl"
     while True:
         now, inv = time.time(), {}
         try:
