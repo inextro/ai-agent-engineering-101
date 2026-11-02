@@ -42,6 +42,8 @@ def clip(new, old=None):
             v = float(new[k])
         except (TypeError, ValueError):
             continue
+        if not math.isfinite(v):     # "nan" parses as a float and would pass every comparison below
+            continue
         whole = isinstance(NUMBERS[k][0], int)
         step = MAX_STEP * (hi - lo)
         if whole:                    # at least one unit, rounded half up: round() halves to even and can get stuck

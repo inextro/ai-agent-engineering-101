@@ -77,6 +77,9 @@ NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
 ACCEPT = re.compile(r"\b(accept|accepted|agree|agreed|deal|ok|okay|yes|buy it|take it)\b|좋아|좋습니다|살게|구매할게|확정")
 REFUSE = re.compile(r"\b(no|not|don't|dont|won't|cannot|can't|never|reject|walk)\b|안 |못 |싫")
 SKU_RE = re.compile(r"\bG[0-9a-f]{8}\b")
+# amounts in words (a price the code did not choose, or another grade's floor); the warranty's "six-hour" stays allowed
+NUMBER_TEXT = re.compile(r"\b(?:hundreds?|thousands?|millions?|grand|twenty|thirty|forty|fifty|sixty|seventy|eighty|"
+                         r"ninety|ten|eleven|twelve|fifteen)\b|\d\s*k\b|[0-9일이삼사오육칠팔구십백]\s*[만천](?![가-힣])|만\s*원|천\s*원", re.I)
 
 
 def log(msg):
@@ -90,8 +93,9 @@ def append(path, rec):
 
 
 def accepts(text):
+    """A plain yes. A question ("okay, what is your best price?", "is this deal still on?") is not one."""
     t = text.lower()
-    return bool(ACCEPT.search(t)) and not REFUSE.search(t)
+    return bool(ACCEPT.search(t)) and not REFUSE.search(t) and "?" not in t
 
 
 UNIT_AFTER = re.compile(r"\d[\d,]*(?:\.\d+)?\s*(?:hours?\b|hrs?\b|h\b|시간|days?\b|일\b|kg\b|g\b|ml\b|l\b|개|units?\b|"
@@ -103,11 +107,12 @@ def offer_in(text, name, ref=None):
     with a unit ("24 hours", "2 units", "10kg") or, next to the price under talk, too small to be a price (under a
     tenth of `ref`: "2 for 50000"). "3만 5천", "35천" and "35k" read as 35000."""
     clean = SKU_RE.sub(" ", text)
-    for n in re.findall(r"\d[\d,]*", name or ""):   # whole numbers only: "900g" in the name must not eat "9000"
-        clean = re.sub(rf"(?<![\d,]){re.escape(n)}(?![\d,])", " ", clean)
+    # amounts in words first: removing the name's "5" (5단 서랍장) from "3만 5천" left "3만 천", read as 30,000,000
     clean = re.sub(r"(\d+(?:\.\d+)?)\s*만(?:\s*(\d+)\s*천)?",
                    lambda m: f" {round(float(m.group(1)) * 10000 + int(m.group(2) or 0) * 1000)} ", clean)
     clean = re.sub(r"(\d+(?:\.\d+)?)\s*(?:천|k\b)", lambda m: f" {round(float(m.group(1)) * 1000)} ", clean, flags=re.I)
+    for n in re.findall(r"\d[\d,]*", name or ""):   # whole numbers only: "900g" in the name must not eat "9000"
+        clean = re.sub(rf"(?<![\d,]){re.escape(n)}(?![\d,])", " ", clean)
     clean = UNIT_AFTER.sub(" ", clean)
     nums = [int(n.replace(",", "")) for n in re.findall(r"\d[\d,]*(?:\.\d+)?", clean) if n.replace(",", "").isdigit()]
     if ref:
@@ -115,6 +120,7 @@ def offer_in(text, name, ref=None):
     return nums[-1] if nums else None
 
 
+MIN_RAISE = 0.01    # share of the current price a buyer's new offer must add to count as raising
 CLAIM_AHEAD = 30    # seconds from the close to the checkout (the buyer's kit checks out on the receipt)
 
 
@@ -145,7 +151,8 @@ def inventory():
 
 
 RANK = {"C": 0, "B": 1, "A": 2}
-SOLD_HOLD = 15 * 60   # a unit sold stays out of offers this long (inventory.json drops it at the checkout)
+SOLD_HOLD = 6 * 60    # a unit sold stays out of offers this long (inventory.json drops it at the checkout; the kit
+                      # pays within its 300 s order, so an unpaid close frees the unit soon after)
 ABANDONED = 10 * 60   # a talk this old is over (the kit stops a buyer at 300 s, often without a CancelTask)
 
 
@@ -197,7 +204,10 @@ def check_reply(reply, u, price, buyer_text):
     if not nums or nums[-1] != str(price):
         return f"the price {price} must be written as digits as the very last thing in the message"
     if others:
-        return f"it has numbers other than the price ({', '.join(others)}); drop them or spell them out"
+        return f"it has numbers other than the price ({', '.join(others)}); drop them"
+    w = NUMBER_TEXT.search(reply)
+    if w:
+        return f"it writes an amount in words ({w.group()}); the only amount may be the price, in digits, last"
     return None
 
 
@@ -248,7 +258,7 @@ def write_reply(u, price, situation, history, buyer_text, template, how=None, cl
         "facts (delivery dates, returns, freebies, a manufacture date), say plainly that the shop cannot promise it. "
         "Never invent facts. Unless the shop's move says the price is final, do not call it final, best or lowest. "
         f"The price is {price}: write it exactly once, as digits, as the last thing in the message. Write no "
-        "other digits (spell out any other number). Reply with the message text only.")
+        "other digits and no other amounts, not even in words. Reply with the message text only.")
     reply = ask_checked(prompt, lambda a: (a, check_reply(a, u, price, buyer_text)), "reply", how)
     return template if reply is None else reply
 
@@ -335,7 +345,11 @@ def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, s
     if offer is not None and (offer >= o["ask"] or (o["step"] >= steps and offer >= o["floor"])):
         # never above the ask: an offer over it is a misreading ("2 for 50000" read as 50000 for one)
         return {"close": True, "price": min(offer, o["ask"]), "step": o["step"], "final": True}
-    if not opening and (not moved or frozen):
+    if opening:
+        # the first number is where the buyer starts, not a raise: the shop keeps its asking price
+        return {"close": False, "price": o["ask"], "step": o["step"], "final": False, "opening": True,
+                "offer": offer, "first": True}
+    if not moved or frozen:
         return {"close": False, "price": o["ask"], "step": o["step"], "offer": offer, "hold": True,
                 "final": frozen or o["step"] >= steps or (offer is not None and stalls + 1 >= STALLS_FINAL)}
     left = steps - o["step"]
@@ -358,6 +372,8 @@ def situation(m):
                 f"shop sells one unit at {p}; ask them to confirm.")
     if m["close"]:
         return f"the deal closes at {p} and the signed receipt is attached; thank the buyer briefly."
+    if m.get("first"):
+        return f"the buyer opened with {m['offer']}; the asking price is {p}; invite a better offer as a number."
     if m.get("opening"):
         return f"the asking price is {p}; ask for the buyer's offer as a number."
     said = f"the buyer offered {m['offer']}; " if m.get("offer") is not None else ""
@@ -375,7 +391,9 @@ def template(u, m):
         return f"Deal: {u['name']}. Receipt attached. Price {p}"
     if m.get("opening"):
         return f"{u['name']}: {facts(u, u.get('_warranty'))}. Send your offer as a number. Asking {p}"
-    return f"{u['name']}: {'final price' if m['final'] else 'we can come down'}. Asking {p}"
+    word = "final price" if m["final"] else "we can do better if you raise your offer" if m.get("hold") \
+        else "we can come down"
+    return f"{u['name']}: {word}. Asking {p}"
 
 
 def bare(text):
@@ -508,7 +526,8 @@ class Seller(AgentExecutor):
         deal["lines"].append(f"buyer: {text}")
         ref = opts[cur or next(iter(opts))]
         offer = offer_in(text, ref["unit"].get("name"), ref["ask"])
-        moved = offer is not None and offer > deal.get("best_offer", -1)
+        # a raise is at least MIN_RAISE of the price under talk: +1 at a time must not walk the ladder to the floor
+        moved = offer is not None and offer >= deal.get("best_offer", -1) + max(1, round(MIN_RAISE * ref["ask"]))
         moves = {k: next_move(o, offer, deal["steps"], opening, k == cur and offer is None and accepts(text),
                               deal.get("over_seen", False), moved, deal.get("stalls", 0), deal.get("frozen", False))
                  for k, o in opts.items()}

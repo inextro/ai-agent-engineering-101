@@ -112,9 +112,12 @@ def decide(inv, cat, demand, est, p, held, now):
 
     plans, new_held = [], set()
     skip = policy.skipped(policy.load_playbook(), now)   # the manager's playbook: leave these alone for now
+    thin = len(est.sales) < SCOUT_SETTLES
     for c, skus in by_cat.items():
-        if c in skip:
+        if c in skip or left < policy.LAST_HOURS_BELOW_COST:    # the last hours sell below cost: buy nothing
             continue
+        if thin and not est.w[c]:   # thin ledger: an unseen category is only scouted (the pooled prior over a few
+            continue                # minutes made every category look like average demand and held them all)
         kind = skus[0][1]["kind"]
         m = median.get(c) or sorted(x["list_price"] for _, x in skus)[len(skus) // 2]
         unit_cap = p["unit_cap_frac"] * balance
@@ -156,7 +159,7 @@ def decide(inv, cat, demand, est, p, held, now):
                               "worst_cost": WORST_COST * x["list_price"], "cr": round(cr, 3),
                               "p": round(prob, 3)})
 
-    if len(est.sales) < SCOUT_SETTLES:
+    if thin and left >= p["liquidate_hours"]:
         plans += scout(units, by_cat, median, skip, p, balance)
 
     spend = balance - policy.reserve(p, balance)
