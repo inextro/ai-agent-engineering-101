@@ -29,7 +29,7 @@ import buyer_policy
 import model
 import notify
 import policy
-from manager import UPVOTE_RULE, ask_model, jsonl, upvote
+from manager import REPORT_CHARS, REPORT_SPEC, UPVOTE_RULE, ask_model, jsonl, upvote
 
 os.environ["TZ"] = "Asia/Seoul"
 time.tzset()
@@ -164,9 +164,9 @@ Answer with one JSON object only:
  "playbook": {{"negotiation": "<the full new text, or null to keep>", "forum": "<the full new text, or null to keep>"}},
  "reason": "<two sentences: what in the record, what you changed>",
  "notes": "<what to watch next hour, for yourself>",
- "upvote": [<post id>, ...],
+ "upvote": [{{"id": <post id>, "why": "<in Korean, a few words: what in it you used>"}}, ...],
  "memory": "<the full new memory, at most {mem_chars} characters, each lesson with the hours it rests on>",
- "report_ko": "<the owner's report in Korean, a few short lines: what happened, what you found, what you did and why, what you will check next>"}}"""
+ "report_ko": "{report_spec}"}}"""
 
 
 def describe(p):
@@ -179,7 +179,7 @@ def decide(md, now):
     prompt = PROMPT.format(policy=describe(p), negotiation=json.dumps(b["negotiation"] or "(none)"),
                            forum=json.dumps(b["forum"] or "(none)"), chars=policy.GUIDE_CHARS,
                            summary=json.dumps(s, ensure_ascii=False, indent=1), memory=memory or "(empty)",
-                           mem_chars=MEMORY_CHARS) + "\n\n" + UPVOTE_RULE
+                           mem_chars=MEMORY_CHARS, report_spec=REPORT_SPEC) + "\n\n" + UPVOTE_RULE
     answer, used = ask_model(prompt)
     if answer is None or "review" not in answer:
         log("no decision this hour; the policy stays")
@@ -210,7 +210,7 @@ def decide(md, now):
                             "refused": refused, "review": answer.get("review"), "problems": answer.get("problems"),
                             "reason": reason, "notes": str(answer.get("notes", ""))[:1000],
                             "prompt_chars": len(prompt)}, ensure_ascii=False) + "\n")
-    report(now, used, changed, pb_changed, refused, str(answer.get("report_ko", "")), liked)
+    report(now, used, changed, pb_changed, refused, str(answer.get("report_ko", ""))[:REPORT_CHARS], liked)
     log(f"{used}: {'changed ' + json.dumps(changed, ensure_ascii=False) if changed else 'no change'}"
         f"{' | playbook ' + ', '.join(pb_changed) if pb_changed else ''}"
         f"{' | refused ' + '; '.join(refused) if refused else ''} | {reason}")
@@ -226,7 +226,7 @@ def report(now, used, changed, pb_changed, refused, text, liked=()):
     if refused:
         lines += ["- 적용 거부: " + "; ".join(refused)]
     if liked:
-        lines += ["- 좋아요: 게시글 " + ", ".join(map(str, liked))]
+        lines += [f"- 좋아요 #{i}: {why}" for i, why in liked]
     if not (changed or pb_changed):
         lines += ["- 변경 없음"]
     with open(REPORTS, "a", encoding="utf-8") as f:
