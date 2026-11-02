@@ -24,7 +24,7 @@ NUMBERS = {
     "goods_cap_frac":    (0.50, 0.30, 0.70),   # goods stock at cost at most this share of the balance
     "min_margin":        (0.10, 0.05, 0.20),   # floor = cost x (1 + min_margin) + warranty premium
     "max_concessions":   (4, 2, 6),            # counters before the final price
-    "c_discount":        (0.10, 0.00, 0.25),   # extra cut off the opening ask for grade C goods
+    "c_discount":        (0.10, 0.00, 0.25),   # extra cut off the opening ask for grade C (food near its date, refurbished goods)
     "liquidate_hours":   (24, 12, 48),         # from this many hours before the end the floor falls to cost
     "half_life_h":       (24, 6, 72),          # demand memory: weight of a sale halves every this many hours
     "prior_hours":       (2, 0.5, 8),          # gamma prior worth this many hours of observation (beta)
