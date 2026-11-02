@@ -9,11 +9,12 @@ bookshelf at 230 in 2 of 3 runs. A reply that fails, times out or carries a numb
 the product's own name aside) is replaced by a template built from the same facts.
 
 Unit: among the units the buyer named (SKU, else name, else category), skipping units held by another open
-negotiation, the code keeps two: LOW, the stock to clear (food closest to its date, which is its grade; goods of the
-lowest grade) and HIGH, the best unit, when it is really better. Each has its own ask, floor and concession step.
-haiku picks which one to offer from the buyer's words: LOW, said plainly and cheaper, to a buyer who does not mind;
-HIGH to a buyer who asks for freshness or grade, objects to LOW, or looks like a fixed script (it may refuse LOW at
-checkout). A bare number or yes keeps the current unit. When haiku fails the shop offers HIGH.
+negotiation, the code keeps one unit per grade (C, B, A; for food the grade is its shelf life left), the one to
+clear first within it (food closest to its date, goods held longest). Each has its own ask, floor and concession
+step. haiku picks which to offer from the buyer's words: the lowest grade that meets what the buyer asked for, said
+plainly and cheaper, to a buyer who minds nothing; the best grade to a buyer who looks like a fixed script (it may
+refuse a low grade at checkout). A bare number or yes keeps the current unit. When haiku fails the shop offers the
+best grade.
 
 Price:
   opening ask  = list price x the arm Thompson sampling picks (0.7/0.8/0.9/1.0, per kind, model.py), cut by
@@ -108,27 +109,22 @@ RANK = {"C": 0, "B": 1, "A": 2}
 
 
 def find_units(text, taken):
-    """The two units the clerk can offer: LOW (the stock to clear: food closest to its date, goods of the lowest
-    grade) and HIGH (the best unit), or HIGH = None when it is not really better than LOW."""
+    """One unit per grade of what the buyer named, the one to clear first within the grade (food closest to its
+    date, goods held longest): {grade: unit}, empty when there is none."""
     inv = inventory()
     if inv.get("round", 0) < 3:
-        return None, None, inv
+        return {}, inv
     want = text.lower()
-    units = [u for u in inv.get("units", []) if u.get("grade") != "expired" and u["unit"] not in taken]
+    units = [u for u in inv.get("units", []) if u.get("grade") in RANK and u["unit"] not in taken]
     named = [u for u in units if u["sku"].lower() in want]
     if not named:
         named = [u for u in units if (u.get("name") or "").lower() in want]
     if not named:
         named = [u for u in units if (u.get("category") or "").split(">")[-1].lower() in want]
-    if not named:
-        return None, None, inv
-    low = min(named, key=lambda u: (u.get("expires_at") or float("inf"), RANK.get(u.get("grade"), 3),
-                                    u.get("supplied_at") or 0))
-    high = max(named, key=lambda u: (RANK.get(u.get("grade"), -1), u.get("expires_at") or 0,
-                                     -(u.get("supplied_at") or 0)))
-    better = RANK.get(high.get("grade"), -1) > RANK.get(low.get("grade"), -1) or (
-        high.get("expires_at") and low.get("expires_at") and high["expires_at"] - low["expires_at"] > 24 * 3600)
-    return low, (high if better else None), inv
+    by_grade = {}
+    for u in sorted(named, key=lambda u: (u.get("expires_at") or 0, u.get("supplied_at") or 0)):
+        by_grade.setdefault(u["grade"], u)
+    return by_grade, inv
 
 
 def facts(u, warranty):
@@ -148,7 +144,7 @@ def facts(u, warranty):
     return "; ".join(parts)
 
 
-FINAL_WORDS = re.compile(r"\b(best|lowest|final|last)\b|최선|최저|마지막|최종", re.I)
+FINAL_WORDS = re.compile(r"\b(best|lowest|final)\b|최선|최저|마지막|최종", re.I)   # not "last": "it will last"
 
 
 def check_reply(reply, u, price, final, t0, buyer_text=""):
@@ -193,52 +189,54 @@ def write_reply(u, price, situation, history, buyer_text, template, final=True):
 
 
 CHOOSE = """You are the sales clerk of {shop}, an online shop. A buyer wants one unit of what they asked for, and the
-shop has two units it could sell. The code has already set the price of each for this turn:
+shop has units of different grades it could sell. The code has already set the price of each for this turn:
 
-LOW  ({low_name}): {low_facts}. If you offer LOW: {low_move}
-HIGH ({high_name}): {high_facts}. If you offer HIGH: {high_move}
+{options}
 
-The shop would rather sell LOW (older stock, cheaper), but only to a buyer who does not mind it:
-- the buyer asks for freshness, a long shelf life, a good grade or a new item, or objects to LOW: offer HIGH;
+The shop would rather sell the lower grades (older stock), but only to a buyer who does not mind them:
+- offer the lowest grade that meets what the buyer asked for (freshness, how long it must keep, condition, new or
+  not); if they object to the grade on offer, move up to one that meets the objection;
 - the buyer has said nothing about condition and writes like a person or a language model (free text, questions):
-  offer LOW, say plainly what it is and that it is the cheaper one; you may say a better unit costs more, without
-  its number;
+  offer the lowest grade, say plainly what it is and that it is the cheaper one; you may say better grades cost
+  more, without their numbers;
 - the buyer looks like a fixed script (template wording, bare numbers) and has said nothing about condition: offer
-  HIGH, since a script may refuse LOW at checkout;
+  the best grade, since a script may refuse a low grade at checkout;
 - the shop currently offers {current}: keep it unless the buyer's words give a reason to switch.
 
 Conversation so far:
 {history}
 Buyer's last message: {buyer!r}
 
-Answer with one JSON object only: {{"unit": "LOW" or "HIGH", "reply": "<at most three short sentences in the
-buyer's language (English when it is unclear), stating only facts of that unit; if they ask for something not in the facts, say the shop cannot
-promise it; the price of that unit exactly once, as digits, as the last thing; no other digits>"}}"""
+Answer with one JSON object only: {{"unit": one of {keys}, "reply": "<at most three short sentences in the buyer's
+language (English when it is unclear), stating only facts of that unit; if they ask for something not in the
+facts, say the shop cannot promise it; the price of that unit exactly once, as digits, as the last thing; no other
+digits>"}}"""
 
 
 def choose_reply(deal, moves, history, buyer_text):
-    """haiku picks LOW or HIGH from what the buyer said and writes the reply; the code checks it like any reply."""
+    """haiku picks the grade from what the buyer said and writes the reply; the code checks it like any reply."""
     o = deal["opts"]
-    fallback = deal["cur"] or "high"         # unsure: the better unit (a buyer who minds would rate LOW badly)
-    prompt = CHOOSE.format(
-        shop=SHOP, current=(deal["cur"] or "nothing yet").upper(), history=history, buyer=buyer_text,
-        **{f"{k}_{f}": v for k in ("low", "high") for f, v in (
-            ("name", o[k]["unit"]["name"]), ("facts", facts(o[k]["unit"], o[k]["warranty"])),
-            ("move", situation(moves[k])))})
+    best = max(o, key=RANK.get)
+    fallback = deal["cur"] or best           # unsure: the best grade (a buyer who minds would rate a low one badly)
+    options = "\n".join(f"{k} ({o[k]['unit']['name']}): {facts(o[k]['unit'], o[k]['warranty'])}. "
+                        f"If you offer {k}: {situation(moves[k])}" for k in sorted(o, key=RANK.get))
+    prompt = CHOOSE.format(shop=SHOP, options=options, current=deal["cur"] or "nothing yet",
+                           keys=" or ".join(f'"{k}"' for k in sorted(o, key=RANK.get)), history=history,
+                           buyer=buyer_text)
     t0 = time.time()
     try:
         answer = harness.call(prompt, timeout=REPLY_TIMEOUT, model=REPLY_MODEL, effort=REPLY_EFFORT)
         a = json.loads(re.search(r"\{.*\}", answer, re.S).group())
-        key, reply = str(a["unit"]).lower(), str(a["reply"]).strip()
+        key, reply = str(a["unit"]).upper(), str(a["reply"]).strip()
     except Exception as e:
-        log(f"choose: failed after {time.time() - t0:.1f}s ({type(e).__name__}), {fallback.upper()} by template")
+        log(f"choose: failed after {time.time() - t0:.1f}s ({type(e).__name__}), {fallback} by template")
         return fallback, template(o[fallback]["unit"], moves[fallback])
     if key not in o:
         key = fallback
     m = moves[key]
     if not check_reply(reply, o[key]["unit"], m["price"], m["final"] or m["close"], t0, buyer_text):
         return key, template(o[key]["unit"], moves[key])
-    log(f"choose: {time.time() - t0:.1f}s {key.upper()} {reply[:240]!r}")
+    log(f"choose: {time.time() - t0:.1f}s {key} {reply[:240]!r}")
     return key, reply
 
 
@@ -360,28 +358,26 @@ class Seller(AgentExecutor):
             await self.turn(task.id, deal, text, up, say)
 
     def held(self, but=None):
-        """Units promised in open negotiations: the unit each one offers now, or both before it has chosen."""
-        return {o["unit"]["unit"] for t, d in self.open.items() if t != but
-                for k, o in d["opts"].items() if d["cur"] in (None, k)}
+        """Units promised in open negotiations: the unit each one offers now (one still choosing holds none; if two
+        pick the same unit, the market refuses the second checkout)."""
+        return {d["opts"][d["cur"]]["unit"]["unit"] for t, d in self.open.items() if t != but and d["cur"]}
 
     async def opening(self, task_id, text, up, say):
-        low, high, inv = find_units(text, self.held())
-        if low is None:
+        by_grade, inv = find_units(text, self.held())
+        if not by_grade:
             append(MISSED, {"ts": time.time(), "text": text[:300], "round": inv.get("round")})
             log(f"[task {task_id[:8]}] nothing in stock for this request")
             await up.reject(say("Sorry, we have none of that in stock right now."))
             return
         p = policy.load()
         refresh_break_rates()
-        arm = model.pick_arm(low.get("kind", "goods"))
-        opts = {"low": option(low, p, arm)}
-        if high is not None:
-            opts["high"] = option(high, p, arm)
-        deal = self.open[task_id] = {"opts": opts, "cur": None if high else "low", "arm": arm,
+        arm = model.pick_arm(next(iter(by_grade.values())).get("kind", "goods"))
+        opts = {g: option(u, p, arm) for g, u in by_grade.items()}
+        deal = self.open[task_id] = {"opts": opts, "cur": next(iter(opts)) if len(opts) == 1 else None, "arm": arm,
                                      "steps": int(p["max_concessions"]), "lines": [], "t0": time.time()}
         for k, o in opts.items():
             u = o["unit"]
-            log(f"[task {task_id[:8]}] {k.upper()} {u['sku']} {u.get('grade')} cost {u['cost']} list "
+            log(f"[task {task_id[:8]}] {k} {u['sku']} {u.get('grade')} cost {u['cost']} list "
                 f"{u['list_price']}: ask {o['ask']} (arm {arm}), floor {o['floor']}, warranty {o['warranty']} h")
         await self.turn(task_id, deal, text, up, say, opening=True)
 
@@ -393,19 +389,19 @@ class Seller(AgentExecutor):
         for k in [k for k in opts if k != cur and opts[k]["unit"]["unit"] in held]:
             del opts[k]                      # another negotiation took that unit since
         deal["lines"].append(f"buyer: {text}")
-        offer = offer_in(text, opts[cur or "low"]["unit"].get("name"))
+        offer = offer_in(text, opts[cur or next(iter(opts))]["unit"].get("name"))
         moves = {k: next_move(o, offer, deal["steps"], opening, k == cur and offer is None and accepts(text))
                  for k, o in opts.items()}
         history = "\n".join(deal["lines"][-8:])
         if len(opts) == 1 or (cur and bare(text)):
-            key = cur or "low"
+            key = cur or next(iter(opts))
             u, m = opts[key]["unit"], moves[key]
             reply = await asyncio.to_thread(write_reply, u, m["price"], situation(m), history, text,
                                             template(u, m), m["final"] or m["close"])
         else:
             key, reply = await asyncio.to_thread(choose_reply, deal, moves, history, text)
         if cur and key != cur:
-            log(f"[task {task_id[:8]}] switched {cur.upper()} -> {key.upper()}")
+            log(f"[task {task_id[:8]}] switched {cur} -> {key}")
         deal["cur"] = key
         for k, o in opts.items():
             o["ask"], o["step"] = moves[k]["price"], moves[k]["step"]
@@ -420,7 +416,7 @@ class Seller(AgentExecutor):
         if m["close"]:
             await self.close(task_id, deal, m["price"], reply, up, say)
             return
-        log(f"[task {task_id[:8]}] {key.upper()} {'ask' if opening else 'counter'} {m['price']} "
+        log(f"[task {task_id[:8]}] {key} {'ask' if opening else 'counter'} {m['price']} "
             f"step {m['step']}/{deal['steps']} (offer {offer})")
         await up.requires_input(say(reply))
 
@@ -437,7 +433,7 @@ class Seller(AgentExecutor):
                               "unit": u["unit"], "kind": u.get("kind"), "grade": u.get("grade"), "arm": deal["arm"],
                               "list_price": u["list_price"], "cost": u["cost"], "price": price,
                               "step": o["step"], "chose": deal["cur"], "seconds": round(time.time() - deal["t0"], 1)})
-        log(f"[task {task_id[:8]}] DEAL {deal['cur'].upper()} {u['sku']} {u.get('grade')} at {price} "
+        log(f"[task {task_id[:8]}] DEAL {deal['cur']} {u['sku']} {u.get('grade')} at {price} "
             f"(cost {u['cost']}, step {o['step']})")
         await up.complete(say(msg))
         del self.open[task_id]
@@ -446,7 +442,7 @@ class Seller(AgentExecutor):
         task = context.current_task
         deal = self.open.pop(task.id, None)
         if deal:
-            o = deal["opts"][deal["cur"] or "low"]
+            o = deal["opts"][deal["cur"] or next(iter(deal["opts"]))]
             append(NEGOTIATIONS, {"ts": time.time(), "task": task.id, "outcome": "cancel",
                                   "kind": o["unit"].get("kind"), "arm": deal["arm"], "last_ask": o["ask"]})
         await TaskUpdater(event_queue=event_queue, task_id=task.id, context_id=task.context_id).cancel()
