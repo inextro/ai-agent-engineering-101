@@ -22,7 +22,7 @@ It answers with number changes, playbook edits (negotiation and forum guidance a
 policy.clip_playbook refuses digits, unknown categories, too long or too many), notes for the next hour, and a
 report in Korean for the owner, who reads data/reports.md after the fact and corrects the direction when needed.
 
-Model: opus at high effort (an hour between calls leaves room); when it fails, sonnet at high. Each decision is a
+Model: opus at medium effort; when it fails, sonnet at medium. Each decision is a
 line in data/manager.jsonl (summary size, the answer, what changed after clipping, the reason, the notes).
 
 Forum: shop_post builds the shop's status post from the policy and the ledger (no claims the shop does not keep);
@@ -43,7 +43,7 @@ import model
 import policy
 
 EVERY = 3600
-MODELS = (("opus", "high"), ("sonnet", "high"))
+MODELS = (("opus", "medium"), ("sonnet", "medium"))
 LOG = policy.DATA / "manager.jsonl"
 REPORTS = policy.DATA / "reports.md"     # the owner's after-the-fact report, newest at the bottom
 TURNS = policy.DATA / "turns.jsonl"
