@@ -90,3 +90,75 @@ def hours_left(now=None):
 
 def reserve(p, balance):
     return max(p["reserve_frac"] * balance, RESERVE_FLOOR)
+
+
+# The playbook: what the manager may change that is not a number. Text guidance read by the seller's haiku
+# (negotiation) and the forum's opus (forum), and categories restock leaves alone for a while. The code still
+# decides every price, unit and receipt; guidance only steers how the models speak and choose among the code's
+# options. No digits in guidance (it reaches haiku, which must not learn internal numbers).
+PLAYBOOK = DATA / "playbook.json"
+GUIDE_KEYS = ("negotiation", "forum")
+GUIDE_CHARS = 600
+SKIP_MAX, SKIP_HOURS = 10, 24
+
+
+def load_playbook():
+    try:
+        b = json.loads(PLAYBOOK.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        b = {}
+    return {"negotiation": "", "forum": "", "restock_skip": {}, "version": 0, "updated": 0, "reason": "", **b}
+
+
+def skipped(b, now=None):
+    """Categories restock leaves alone now (each skip lasts at most SKIP_HOURS)."""
+    now = now or time.time()
+    return {c for c, until in (b.get("restock_skip") or {}).items() if until > now}
+
+
+def clip_playbook(new, old, categories, now=None):
+    """Apply the manager's playbook edits that pass: guidance without digits and within GUIDE_CHARS, skips of known
+    categories, at most SKIP_MAX, each for at most SKIP_HOURS. Returns (playbook, what was refused)."""
+    now = now or time.time()
+    out, refused = dict(old), []
+    for k in GUIDE_KEYS:
+        v = new.get(k)
+        if v is None:
+            continue
+        v = " ".join(str(v).split())
+        if any(ch.isdigit() for ch in v):
+            refused.append(f"{k}: has digits")
+        elif len(v) > GUIDE_CHARS:
+            refused.append(f"{k}: longer than {GUIDE_CHARS} characters")
+        else:
+            out[k] = v
+    skip = new.get("restock_skip")
+    if isinstance(skip, dict):
+        keep = {c: t for c, t in (old.get("restock_skip") or {}).items() if t > now}
+        for c, hours in skip.items():
+            if c not in categories:
+                refused.append(f"restock_skip: unknown category {c!r}")
+                continue
+            try:
+                h = float(hours)
+            except (TypeError, ValueError):
+                refused.append(f"restock_skip: {c!r} hours not a number")
+                continue
+            if h <= 0:
+                keep.pop(c, None)
+            else:
+                keep[c] = now + min(h, SKIP_HOURS) * 3600
+        if len(keep) > SKIP_MAX:
+            refused.append(f"restock_skip: more than {SKIP_MAX}, kept the {SKIP_MAX} ending last")
+            keep = dict(sorted(keep.items(), key=lambda x: -x[1])[:SKIP_MAX])
+        out["restock_skip"] = {c: round(t) for c, t in keep.items()}
+    return out, refused
+
+
+def save_playbook(b, reason):
+    b = dict(b, updated=time.time(), reason=reason, version=int(b.get("version", 0)) + 1)
+    PLAYBOOK.parent.mkdir(parents=True, exist_ok=True)
+    tmp = PLAYBOOK.with_suffix(".tmp")
+    tmp.write_text(json.dumps(b, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, PLAYBOOK)
+    return b

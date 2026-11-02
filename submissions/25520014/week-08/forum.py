@@ -8,7 +8,8 @@ replies to one of our posts. Each gets one reply, praise or complaint, written b
 from the post, the ledger records it cites (grade, claim_honest, breaks, warranty), what the shop keeps and the
 policy changes of the last day in a buyer's words. Internal numbers (margins, floors, costs, money rules, the
 manager's reasons) never reach the model, and a reply with a number no source gave is retried once, then dropped. The reply promises only what the code does: certificates shown, claims true, the warranty as it is
-now, and that the manager reads the complaint at its next hourly review. Complaints go into data/forum_state.json,
+now, and that the manager reads the complaint at its next hourly review. The manager's playbook may add forum guidance
+(no digits) to the reply prompt. Complaints go into data/forum_state.json,
 which manager.py puts in front of opus; when the policy changes afterwards, opus decides which complaints the change
 answers and the shop follows up in those threads.
 
@@ -164,7 +165,7 @@ The post (id {id}, by {author}): {text!r}
 Ledger records of our sales it cites: {records}
 What the shop keeps (the only things you may promise): {promises}
 Policy changes of the last day: {changes}
-
+{guide}
 Thank praise. For a complaint: say what the ledger shows about it, if it cites our sales; own what went wrong; say
 what the shop keeps that bears on it and that the manager will look at it at the next policy review. Never promise a
 refund, a discount, a date or any change the shop has not made; never deny a record. Use no number that is not in the post,
@@ -178,6 +179,12 @@ For each complaint this change really answers, write a short follow-up (one or t
 language) that says what changed in words a buyer cares about ("more room to haggle", "cheaper grade C"), without
 any number that is not in the change or the complaint. Skip the rest. Answer with one JSON object only:
 {{"follow_ups": [{{"post": <post id>, "reply": "<text>"}}, ...]}}"""
+
+
+def guide():
+    """The manager's forum guidance (playbook.json), as a prompt line; empty when there is none."""
+    g = policy.load_playbook().get("forum")
+    return f"Shop manager's guidance (follow it where it fits; the rules below come first): {g}\n" if g else ""
 
 
 def queue_post(md, line):
@@ -209,7 +216,8 @@ def one_pass(md, st, now):
         sources = [str(post["id"]), (post.get("text") or "")[:1500], json.dumps(records, ensure_ascii=False),
                    promises(p), json.dumps(public_changes(now - 86400), ensure_ascii=False)]
         a, used = ask(REPLY.format(shop=SHOP, id=post["id"], author=post.get("author"), text=sources[1],
-                                   records=sources[2], promises=sources[3], changes=sources[4]),
+                                   records=sources[2], promises=sources[3], changes=sources[4],
+                                   guide=guide()),
                       lambda a: (f"it has numbers no source gave ({', '.join(bad)})"
                                  if (bad := stray_numbers(str(a.get("reply", "")), sources)) else None))
         st["answered"][str(post["id"])] = now

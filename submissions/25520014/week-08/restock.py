@@ -11,7 +11,8 @@ a held category is refilled right after each sale. For each category, over a hor
 Hold when P >= cr + hysteresis, keep holding while P >= cr - hysteresis (so a category does not flip on noise).
 Units per held SKU: the base stock that covers the next `review_minutes` with probability cr. Busy categories get a
 second and third SKU. SKUs are the ones closest to the category's median price, where an order's 0.5-1.5 x price
-band most often falls.
+band most often falls. Categories the manager's playbook skips (at most 24 h each) are not bought; their stock stays
+on sale.
 
 Money rules (policy.py, the manager may move them): a reserve of max(20% of the balance, 1,000,000) is never
 spent, one unit's cost stays under 10% of the balance, goods stock at cost under 50%. Bankruptcy only when the
@@ -77,7 +78,10 @@ def decide(inv, cat, demand, est, p, held, now):
         by_cat.setdefault(x["category"], []).append((sku, x))
 
     plans, new_held = [], set()
+    skip = policy.skipped(policy.load_playbook(), now)   # the manager's playbook: leave these alone for now
     for c, skus in by_cat.items():
+        if c in skip:
+            continue
         kind = skus[0][1]["kind"]
         m = median.get(c) or sorted(x["list_price"] for _, x in skus)[len(skus) // 2]
         unit_cap = p["unit_cap_frac"] * balance
