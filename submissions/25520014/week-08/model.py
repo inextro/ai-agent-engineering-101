@@ -79,12 +79,13 @@ def settled(d):
 
 
 class Estimates:
-    def __init__(self, db=None, pol=None, now=None, competitors=None):
-        """competitors: {category: number of other shops holding stock in it}, from GET /api/shops."""
+    def __init__(self, db=None, pol=None, now=None, competitors=None, cat=None):
+        """competitors: {category: number of other shops holding stock in it}, from GET /api/shops. cat: the kit's
+        catalog.json, used when the collector has not stored the catalog yet (the first minutes of a run)."""
         self.db = db or connect()
         self.p = pol or policy.load()
         self.now = now or time.time()
-        self.cat = catalog(self.db)
+        self.cat = catalog(self.db) or cat or {}
         self.categories = sorted({x["category"] for x in self.cat.values()})
         self.competitors = competitors or {}
         self._demand()

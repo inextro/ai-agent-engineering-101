@@ -11,7 +11,8 @@ a held category is refilled right after each sale. For each category, over a hor
 Hold when P >= cr + hysteresis, keep holding while P >= cr - hysteresis (so a category does not flip on noise).
 Units per held SKU: the base stock that covers the next `review_minutes` with probability cr. Busy categories get a
 second and third SKU. SKUs are the ones closest to the category's median price, where an order's 0.5-1.5 x price
-band most often falls. Categories the manager's playbook skips (at most 24 h each) are not bought; their stock stays
+band most often falls. While the ledger holds fewer than SCOUT_SETTLES settles (the round's start), the shop also
+scouts: one unit in every category it has none of, up to scout_frac of the balance. Categories the manager's playbook skips (at most 24 h each) are not bought; their stock stays
 on sale.
 
 Money rules (policy.py, the manager may move them): a reserve of max(20% of the balance, 1,000,000) is never
@@ -38,6 +39,8 @@ WORST_COST = 0.75                               # grade A at the top of its rang
 FOOD_LIFE = 0.20                                # expected share of shelf life a fresh supply has before grade C
 GOODS_H = 48
 MAX_LINES = 10
+SCOUT_SETTLES = 300                             # market settles in the window below which the shop scouts
+SCOUT_MIN_SHELF = 72                            # food that keeps less than this many hours is not scouted
 
 
 def read(path, default):
@@ -62,6 +65,36 @@ def competitors(catalog):
             if c:
                 out[c] = out.get(c, 0) + 1
     return out
+
+
+def scout(units, by_cat, median, skip, p, balance):
+    """While the ledger is too thin to say what sells (the start of the round), hold one unit in every category
+    we have none of: a shop with no stock in a category is not shown for its orders, and a sale of our own is the
+    best evidence there is. The SKU nearest the category's median price (most likely inside an order's 0.5-1.5 x
+    band), cheapest categories first, until the stock at cost reaches scout_frac of the balance. They come after
+    the newsvendor's lines and fill MAX_LINES a minute, so the shop covers most categories in a quarter of an hour."""
+    stocked = {u.get("category") for u in units}
+    room = p["scout_frac"] * balance - sum(u["cost"] for u in units)
+    out = []
+    for c, skus in by_cat.items():
+        if c in stocked or c in skip:
+            continue
+        m = median.get(c) or sorted(x["list_price"] for _, x in skus)[len(skus) // 2]
+        fit = [s for s in skus if WORST_COST * s[1]["list_price"] <= p["unit_cap_frac"] * balance
+               and (s[1]["kind"] != "food" or (s[1].get("shelf_hours") or 0) >= SCOUT_MIN_SHELF)]
+        if not fit:
+            continue
+        sku, x = min(fit, key=lambda s: abs(math.log(s[1]["list_price"] / m)))
+        out.append({"value": -1, "sku": sku, "qty": 1, "kind": x["kind"], "category": c, "scout": True,
+                    "unit_cost": COST_SHARE[x["kind"]] * x["list_price"], "worst_cost": WORST_COST * x["list_price"]})
+    out.sort(key=lambda pl: pl["unit_cost"])
+    keep = []
+    for pl in out:
+        if pl["worst_cost"] > room:
+            break
+        room -= pl["worst_cost"]
+        keep.append(dict(pl, value=-1 - pl["unit_cost"] / 1e9))   # after every newsvendor line, cheapest first
+    return keep
 
 
 def decide(inv, cat, demand, est, p, held, now):
@@ -123,6 +156,9 @@ def decide(inv, cat, demand, est, p, held, now):
                               "worst_cost": WORST_COST * x["list_price"], "cr": round(cr, 3),
                               "p": round(prob, 3)})
 
+    if len(est.sales) < SCOUT_SETTLES:
+        plans += scout(units, by_cat, median, skip, p, balance)
+
     spend = balance - policy.reserve(p, balance)
     goods_room = p["goods_cap_frac"] * balance - goods_at_cost
     buy = []
@@ -165,7 +201,7 @@ def main():
     demand = read(md / "demand.json", [])
     st = read(STATE, {"held": []})
     try:
-        est = model.Estimates(pol=p, now=now, competitors=competitors(cat))
+        est = model.Estimates(pol=p, now=now, competitors=competitors(cat), cat=cat)
     except Exception as e:                       # no archive yet: hold nothing new, keep what we have
         print(f"[restock] estimates unavailable ({type(e).__name__}: {e}); no purchase", file=sys.stderr)
         print(json.dumps(out))

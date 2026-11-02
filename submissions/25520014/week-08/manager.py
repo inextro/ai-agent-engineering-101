@@ -40,6 +40,7 @@ change can answer them; forum.py then follows up in those threads.
 """
 import argparse
 import json
+import os
 import re
 import sqlite3
 import time
@@ -49,6 +50,9 @@ from pathlib import Path
 import harness
 import model
 import policy
+
+os.environ["TZ"] = "Asia/Seoul"             # the lab server runs on UTC; reports, archive hours and lookups read KST
+time.tzset()
 
 EVERY = 3600
 MODELS = (("opus", "medium"), ("sonnet", "medium"))

@@ -32,6 +32,7 @@ NUMBERS = {
     "hysteresis":        (0.05, 0.02, 0.10),   # hold a category from cr + h, drop it below cr - h
     "review_minutes":    (2, 1, 10),           # base stock covers demand over this many minutes
     "warranty_hours":    (6, 0, 6),            # goods break within 6 h of the sale, so 6 covers all of it
+    "scout_frac":        (0.40, 0.20, 0.50),   # while the ledger is thin: one unit per category, up to this share
 }
 FLAGS = {
     "warranty_A": True, "warranty_B": True, "warranty_C": True,   # offer the warranty on goods of that grade

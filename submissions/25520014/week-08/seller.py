@@ -313,9 +313,15 @@ def option(u, p, arm):
     return {"unit": u, "ask": max(round(ask), floor), "floor": floor, "step": 0, "warranty": warranty}
 
 
-def next_move(o, offer, steps, opening, accepted, over_seen=False):
+STALLS_FINAL = 3   # this many messages in a row without a higher offer and the current price becomes final
+
+
+def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, stalls=0):
     """What the shop does with option o on this buyer message, without changing o: close at a price, or say a price
-    (the opening ask, a concession, the floor as the final price, or the ask again when the offer is above it)."""
+    (the opening ask, a concession, the floor as the final price, the ask again when the offer is above it, or the
+    same price when the buyer did not move). The shop concedes only when the buyer raised its offer: a message with
+    no number or with the same or a lower number holds the price, and after STALLS_FINAL such messages in a row the
+    held price is final. A lowball repeated never reaches the floor; a buyer who keeps raising walks the ladder."""
     if offer is not None and offer > o["ask"] and not over_seen:
         # above the ask is a misreading ("2 for 50000"): say the price of one unit; the same again closes at the ask
         return {"close": False, "price": o["ask"], "step": o["step"], "final": o["step"] >= steps,
@@ -327,6 +333,9 @@ def next_move(o, offer, steps, opening, accepted, over_seen=False):
     if offer is not None and (offer >= o["ask"] or (o["step"] >= steps and offer >= o["floor"])):
         # never above the ask: an offer over it is a misreading ("2 for 50000" read as 50000 for one)
         return {"close": True, "price": min(offer, o["ask"]), "step": o["step"], "final": True}
+    if not opening and not moved:
+        return {"close": False, "price": o["ask"], "step": o["step"], "offer": offer, "hold": True,
+                "final": o["step"] >= steps or stalls + 1 >= STALLS_FINAL}
     left = steps - o["step"]
     if left <= 0:
         ask, step = o["floor"], steps
@@ -350,6 +359,9 @@ def situation(m):
     if m.get("opening"):
         return f"the asking price is {p}; ask for the buyer's offer as a number."
     said = f"the buyer offered {m['offer']}; " if m.get("offer") is not None else ""
+    if m.get("hold") and not m["final"]:
+        return (f"{said}the buyer has not raised their offer, so the shop stays at {p}; invite a better offer, and say "
+                "nothing about whether this price is final, best or lowest.")
     if m["final"]:
         return f"{said}{p} is the shop's final price; say so politely."
     return f"{said}the shop comes down to {p}; say nothing about whether this price is final, best or lowest."
@@ -484,8 +496,9 @@ class Seller(AgentExecutor):
         deal["lines"].append(f"buyer: {text}")
         ref = opts[cur or next(iter(opts))]
         offer = offer_in(text, ref["unit"].get("name"), ref["ask"])
+        moved = offer is not None and offer > deal.get("best_offer", -1)
         moves = {k: next_move(o, offer, deal["steps"], opening, k == cur and offer is None and accepts(text),
-                              deal.get("over_seen", False)) for k, o in opts.items()}
+                              deal.get("over_seen", False), moved, deal.get("stalls", 0)) for k, o in opts.items()}
         history = "\n".join(deal["lines"][-8:])
         how = {}
         if len(opts) == 1 or (cur and bare(text)):
@@ -504,6 +517,9 @@ class Seller(AgentExecutor):
             return
         deal["cur"] = key
         deal["over_seen"] = deal.get("over_seen") or "over" in moves[key]
+        deal["stalls"] = deal.get("stalls", 0) + 1 if moves[key].get("hold") else 0
+        if offer is not None:
+            deal["best_offer"] = max(offer, deal.get("best_offer", -1))
         for k, o in opts.items():
             o["ask"], o["step"] = moves[k]["price"], moves[k]["step"]
         deal["lines"].append(f"shop: {reply}")
