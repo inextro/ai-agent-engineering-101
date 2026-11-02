@@ -17,9 +17,17 @@ The hourly review (added 11-02): besides the numbers, opus gets
     the code's alerts;
   - excerpts of the last hour: negotiations in full (template replies, the ones that went nowhere, the longest) and
     the requests for things not in stock;
-  - its notes from the last hour.
+  - its notes from the last hour;
+  - its memory (data/manager_memory.md): what it has learned so far, rewritten by itself every hour, at most
+    MEMORY_CHARS, each lesson with the hours it rests on;
+  - the archive index (data/manager_archive.jsonl): one line per past hour (deals, margin, misses, balance, alerts,
+    the problems it found, what it changed); every hour of the last two days, older hours only when something
+    happened.
+Before deciding it may look hours up: {"lookup": [{"hour": "MM-DD HH:00", "what": [...]}]} gets the raw record of
+those hours from the collector DB (settles, breaks, forum posts, balance, board) and the shop's logs (negotiations
+verbatim, its own decision then), then it is asked again; at most LOOKUP_ROUNDS rounds of LOOKUP_HOURS hours.
 It answers with number changes, playbook edits (negotiation and forum guidance as text, categories restock skips;
-policy.clip_playbook refuses digits, unknown categories, too long or too many), notes for the next hour, and a
+policy.clip_playbook refuses digits, unknown categories, too long or too many), notes for the next hour, the new memory, and a
 report in Korean for the owner, who reads data/reports.md after the fact and corrects the direction when needed.
 
 Model: opus at medium effort; when it fails, sonnet at medium. Each decision is a
@@ -49,6 +57,12 @@ REPORTS = policy.DATA / "reports.md"     # the owner's after-the-fact report, ne
 TURNS = policy.DATA / "turns.jsonl"
 STALE = 15 * 60                          # a process silent this long gets an alert
 EXCERPTS, MISSED_SHOWN = 6, 12
+MEMORY = policy.DATA / "manager_memory.md"
+ARCHIVE = policy.DATA / "manager_archive.jsonl"
+MEMORY_CHARS = 1500
+ARCHIVE_FULL_H = 48                      # every hour this recent is in the index; older ones only when flagged
+LOOKUP_ROUNDS, LOOKUP_HOURS = 2, 3
+WHAT = ("negotiations", "settles", "broken", "forum", "balance", "board", "decision")
 
 
 def log(msg):
@@ -261,6 +275,128 @@ Answer with one JSON object only:
  "report_ko": "<the owner's report in Korean, a few short lines: what happened, what you found, what you did and why, what you will check next>"}}"""
 
 
+LOOKUP = """
+
+Your memory (what you have learned so far, written by you):
+{memory}
+
+Archive index (one line per past hour; older hours only when something happened):
+{index}
+
+Before deciding you may look up past hours to see their raw record: answer {{"lookup": [{{"hour": "MM-DD HH:00",
+"what": [some of {what}]}}]}} instead (at most {hours} hours; {rounds_left} lookup rounds left). Look up only when an
+hour in the index or your memory bears on what you are deciding now.
+{looked}
+With the decision, also give "memory": the full new text of your memory (at most {chars} characters): lessons that
+should outlive this hour, each with the hours it rests on, e.g. "C warranty off -> more break complaints (11-05 14:00,
+11-06 09:00)". Drop what no longer holds. Keep it the same when nothing new was learned."""
+
+
+def hour_of(text, now):
+    """'MM-DD HH:00' (this year, local time) -> the start of that hour; None when it does not parse."""
+    try:
+        t = time.strptime(f"{time.localtime(now).tm_year}-{text.strip()[:11]}", "%Y-%m-%d %H:%M")
+    except (ValueError, AttributeError):
+        return None
+    return time.mktime(t) // 3600 * 3600
+
+
+def archive_index(now):
+    lines = []
+    for r in jsonl(ARCHIVE, 0):
+        if now - r["ts"] > ARCHIVE_FULL_H * 3600 and not (r.get("problems") or r.get("changed") or r.get("alerts")):
+            continue
+        m = r.get("metrics") or {}
+        lines.append(f"{r['hour']}: deals {m.get('deals')}/{m.get('opened')} opened, margin {m.get('margin_over_cost')}, "
+                     f"missed {m.get('missed_requests')}, templates {m.get('template_replies')}, balance "
+                     f"{m.get('balance_at_end')}"
+                     + (f" | alerts: {'; '.join(r['alerts'])[:200]}" if r.get("alerts") else "")
+                     + (f" | problems: {' / '.join(r['problems'])[:300]}" if r.get("problems") else "")
+                     + (f" | changed: {', '.join(r['changed'])}" if r.get("changed") else ""))
+    return "\n".join(lines) or "(empty: this is the first hour)"
+
+
+def archive(now, s, answer, changed, pb_changed):
+    rec = {"ts": now, "hour": time.strftime("%m-%d %H:00", time.localtime(now - 3600)), "metrics": s["last_hour"],
+           "alerts": s["health"]["alerts"],
+           "problems": [str(x)[:200] for x in (answer or {}).get("problems") or []][:6],
+           "changed": list(changed) + [f"playbook {k}" for k in pb_changed]}
+    with open(ARCHIVE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def lookup(reqs, now, db):
+    """The raw record of the hours asked for (the hour starting at the time given), cut to a readable size."""
+    mine = model.our_urls(db)
+    out = []
+    for q in (reqs or [])[:LOOKUP_HOURS]:
+        t0 = hour_of(str(q.get("hour", "")), now) if isinstance(q, dict) else None
+        if t0 is None or t0 > now:
+            out.append({"hour": q.get("hour") if isinstance(q, dict) else q, "error": "not an hour in MM-DD HH:00"})
+            continue
+        t1, what = t0 + 3600, [w for w in (q.get("what") or WHAT) if w in WHAT]
+        got = {"hour": time.strftime("%m-%d %H:00", time.localtime(t0))}
+
+        def ledger(kind):
+            return [json.loads(r[0]) for r in db.execute(
+                "SELECT data FROM ledger WHERE kind=? AND ts>=? AND ts<? ORDER BY seq", (kind, t0, t1))]
+        if "negotiations" in what:
+            by_task = {}
+            for t in jsonl(TURNS, t0):
+                if t["ts"] < t1:
+                    by_task.setdefault(t["task"], []).append(t)
+            got["negotiations"] = [[f"buyer: {t['buyer'][:200]} | shop ({t.get('unit')}, {t['price']}"
+                                    f"{', template' if t.get('template') else ''}): {t['shop'][:200]}" for t in ts]
+                                   for ts in list(by_task.values())[:8]]
+            got["negotiation_outcomes"] = dict(Counter(r["outcome"] for r in jsonl(model.NEGOTIATIONS, t0)
+                                                       if r["ts"] < t1))
+        if "settles" in what:
+            settles = ledger("settle")
+            ours = [d for d in settles if d.get("shop") in mine]
+            got["our_settles"] = [{k: d.get(k) for k in ("item", "price", "stars", "review", "claim", "claim_honest",
+                                                          "warranty_hours") if k in d} for d in ours[:20]]
+            got["market_settles"] = len(settles)
+            got["market_settles_by_shop"] = dict(Counter(str(d.get("shop"))[-30:] for d in settles).most_common(8))
+        if "broken" in what:
+            got["broken"] = [{k: v for k, v in d.items() if len(str(v)) < 120} for d in ledger("broken")[:20]]
+        if "forum" in what:
+            got["forum"] = [{"id": r[0], "author": r[1], "role": r[2], "text": (r[3] or "")[:300]} for r in db.execute(
+                "SELECT id, author, role, text FROM forum_posts WHERE ts>=? AND ts<? ORDER BY id LIMIT 20", (t0, t1))]
+        if "balance" in what:
+            b = db.execute("SELECT MIN(ts), MAX(ts), COUNT(*) FROM inventory WHERE ts>=? AND ts<?", (t0, t1)).fetchone()
+            if b[2]:
+                first = db.execute("SELECT balance, n_units FROM inventory WHERE ts=?", (b[0],)).fetchone()
+                last = db.execute("SELECT balance, n_units FROM inventory WHERE ts=?", (b[1],)).fetchone()
+                got["balance"] = {"start": first[0], "end": last[0], "units_start": first[1], "units_end": last[1]}
+        if "board" in what:
+            r = db.execute("SELECT raw FROM board WHERE ts>=? AND ts<? ORDER BY ts DESC LIMIT 1", (t0, t1)).fetchone()
+            got["board"] = (r[0] or "")[:1500] if r else None
+        if "decision" in what:
+            got["your_decision"] = [{k: r.get(k) for k in ("review", "problems", "changed", "playbook_changed",
+                                                            "reason", "notes")}
+                                    for r in jsonl(LOG, t0) if r["ts"] < t1 + 600]
+        out.append(got)
+    text = json.dumps(out, ensure_ascii=False)
+    return text[:12000] + (" ...(cut)" if len(text) > 12000 else "")
+
+
+def ask_model(prompt):
+    """opus, else sonnet; the first JSON object of the answer and which model gave it."""
+    for mdl, effort in MODELS:
+        t0 = time.time()
+        try:
+            reply = harness.call(prompt, timeout=900, model=mdl, effort=effort)
+        except Exception as e:
+            log(f"{mdl} failed after {time.time() - t0:.0f}s: {type(e).__name__} {str(e)[:150]}")
+            continue
+        m = re.search(r"\{.*\}", reply, re.S)
+        try:
+            return json.loads(m.group()), f"{mdl} {effort} {time.time() - t0:.0f}s"
+        except (AttributeError, ValueError):
+            log(f"{mdl} answer had no JSON: {reply[:200]!r}")
+    return None, None
+
+
 def describe(p):
     lines = [f"  {k} = {p[k]}  (range {lo} .. {hi})" for k, (_, lo, hi) in policy.NUMBERS.items()]
     lines += [f"  {k} = {p[k]}  (true/false)" for k in policy.FLAGS]
@@ -274,24 +410,31 @@ def decide(md, now):
                            forum=json.dumps(b["forum"] or "(none)"), skips=json.dumps(skips),
                            chars=policy.GUIDE_CHARS, skip_hours=policy.SKIP_HOURS, skip_max=policy.SKIP_MAX,
                            summary=json.dumps(s, ensure_ascii=False, indent=1))
-    answer, used = None, None
-    for mdl, effort in MODELS:
-        t0 = time.time()
-        try:
-            reply = harness.call(prompt, timeout=900, model=mdl, effort=effort)
-        except Exception as e:
-            log(f"{mdl} failed after {time.time() - t0:.0f}s: {type(e).__name__} {str(e)[:150]}")
-            continue
-        m = re.search(r"\{.*\}", reply, re.S)
-        try:
-            answer, used = json.loads(m.group()), f"{mdl} {effort} {time.time() - t0:.0f}s"
+    memory = MEMORY.read_text(encoding="utf-8") if MEMORY.exists() else ""
+    index, looked, used, answer = archive_index(now), [], [], None
+    db = model.connect()
+    for rnd in range(LOOKUP_ROUNDS + 1):
+        left = LOOKUP_ROUNDS - rnd
+        extra = LOOKUP.format(memory=memory or "(empty)", index=index, what=list(WHAT), hours=LOOKUP_HOURS,
+                              rounds_left=left, chars=MEMORY_CHARS,
+                              looked=("\nWhat you looked up:\n" + "\n".join(looked) + "\n") if looked else "")
+        if not left:
+            extra += "\nNo lookups left: answer with the decision now."
+        answer, who = ask_model(prompt + extra)
+        if answer is None:
             break
-        except (AttributeError, ValueError):
-            log(f"{mdl} answer had no JSON: {reply[:200]!r}")
-    if answer is None:
+        used.append(who)
+        if not (left and answer.get("lookup") and "review" not in answer):
+            break
+        got = lookup(answer["lookup"], now, db)
+        looked.append(got)
+        log(f"{who}: looked up {json.dumps(answer['lookup'], ensure_ascii=False)[:200]} ({len(got)} chars)")
+    used = " + ".join(used)
+    if answer is None or "review" not in answer:
         log("no decision this hour; the policy stays")
-        report(now, None, s["health"]["alerts"], {}, {}, [], "모델 호출이 모두 실패해 이번 시간은 판단하지 못했습니다. "
-                                                             "정책과 playbook은 그대로입니다.")
+        report(now, used or None, s["health"]["alerts"], {}, {}, [], "모델 호출이 실패해 이번 시간은 판단하지 "
+                                                                      "못했습니다. 정책과 playbook은 그대로입니다.")
+        archive(now, s, None, {}, {})
         return p, False
     new = policy.clip(answer.get("changes") or {}, p)
     changed = {k: (p[k], new[k]) for k in list(policy.NUMBERS) + list(policy.FLAGS) if new[k] != p[k]}
@@ -302,11 +445,19 @@ def decide(md, now):
     pb_changed = {k: (b.get(k), nb.get(k)) for k in ("negotiation", "forum", "restock_skip") if nb.get(k) != b.get(k)}
     if pb_changed:
         policy.save_playbook(nb, reason)
+    mem = answer.get("memory")
+    if isinstance(mem, str) and mem.strip() and mem.strip() != memory.strip():
+        if len(mem) > MEMORY_CHARS:
+            refused.append(f"memory: longer than {MEMORY_CHARS} characters, kept the old one")
+        else:
+            MEMORY.write_text(mem.strip() + "\n", encoding="utf-8")
+    archive(now, s, answer, changed, pb_changed)
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps({"ts": now, "model": used, "asked": answer.get("changes"), "changed": changed,
                             "playbook_asked": answer.get("playbook"), "playbook_changed": pb_changed,
                             "refused": refused, "review": answer.get("review"), "problems": answer.get("problems"),
                             "reason": reason, "notes": str(answer.get("notes", ""))[:1000],
+                            "lookups": len(looked), "memory": answer.get("memory"),
                             "prompt_chars": len(prompt)}, ensure_ascii=False) + "\n")
     report(now, used, s["health"]["alerts"], changed, pb_changed, refused, str(answer.get("report_ko", "")))
     log(f"{used}: {'changed ' + json.dumps(changed, ensure_ascii=False) if changed else 'no change'}"
