@@ -162,7 +162,7 @@ def decide(inv, cat, demand, est, p, held, now):
     spend = balance - policy.reserve(p, balance)
     goods_room = p["goods_cap_frac"] * balance - goods_at_cost
     buy = []
-    for pl in sorted(plans, key=lambda x: -x["value"]):
+    for pl in sorted(plans, key=lambda x: (x.get("scout", False), -x["value"])):   # scouting after every refill
         if len(buy) >= MAX_LINES:
             break
         qty, worst = pl["qty"], pl["worst_cost"]   # the caps hold even when every unit comes in at the top cost
@@ -202,9 +202,15 @@ def main():
     st = read(STATE, {"held": []})
     try:
         est = model.Estimates(pol=p, now=now, competitors=competitors(cat), cat=cat)
-    except Exception as e:                       # no archive yet: hold nothing new, keep what we have
-        print(f"[restock] estimates unavailable ({type(e).__name__}: {e}); no purchase", file=sys.stderr)
-        print(json.dumps(out))
+    except Exception as e:                       # no archive (collector down): scout only, so the shop is not empty
+        print(f"[restock] estimates unavailable ({type(e).__name__}: {e}); scouting only", file=sys.stderr)
+        by_cat = {}
+        for sku, x in cat.items():
+            by_cat.setdefault(x["category"], []).append((sku, x))
+        units = [u for u in inv.get("units", []) if u.get("grade") != "expired"]
+        plans = scout(units, by_cat, {d["category"]: d["median_price"] for d in demand},
+                      policy.skipped(policy.load_playbook(), now), p, inv.get("balance") or 0)
+        print(json.dumps({"buy": [{"sku": b["sku"], "qty": 1} for b in plans[:MAX_LINES]]}))
         return
     buy, held = decide(inv, cat, demand, est, p, set(st["held"]), now)
     STATE.parent.mkdir(parents=True, exist_ok=True)

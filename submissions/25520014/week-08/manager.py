@@ -120,7 +120,10 @@ def health(md, now, p, b):
     files = {"kit (inventory.json)": md / "inventory.json", "collector (market.db)": model.DB,
              "seller (turns.jsonl)": TURNS, "restock (restock.jsonl)": policy.DATA / "restock.jsonl",
              "forum (forum.jsonl)": policy.DATA / "forum.jsonl"}
-    seen = {k: (round((now - f.stat().st_mtime) / 60, 1) if f.exists() else None) for k, f in files.items()}
+    def mtime(f):                         # sqlite in WAL mode writes to -wal until a checkpoint
+        ts = [g.stat().st_mtime for g in (f, f.with_name(f.name + "-wal")) if g.exists()]
+        return max(ts) if ts else None
+    seen = {k: (round((now - mtime(f)) / 60, 1) if mtime(f) else None) for k, f in files.items()}
     turns = jsonl(TURNS, now - 3600)
     opens = [r for r in jsonl(model.NEGOTIATIONS, now - 3600) if r["outcome"] == "open"]
     alerts = [f"{k} has not written for {m} minutes" for k, m in seen.items()
@@ -257,8 +260,10 @@ at most {skip_max} at once) only for a reason in the record, e.g. it loses money
 
 What the code does by design (guidance cannot change it; guidance against it only makes haiku's words disagree with
 what the shop does): an offer above the asking price gets one request to confirm (such numbers are often for several
-units), then closes at the ask; counters step down a ladder to the floor, which is then said as the final price; an
-offer at or above the current price closes; the shop never walks away; claims are true and certificates shown. If
+units), then closes at the ask; the shop concedes only when the buyer raises its offer (one step down a ladder
+toward the floor), holds its price when the buyer does not, and after three numbers in a row that did not rise calls
+the held price final and never moves it again; an offer at or above the current price closes; the shop never walks
+away; claims are true and certificates shown. If
 the code itself looks wrong (a bug, a process down), say so in "problems" and the report; the owner fixes code.
 
 The record (code-computed; the last hour's negotiations are verbatim):
@@ -341,7 +346,8 @@ def lookup(reqs, now, db):
         if t0 is None or t0 > now:
             out.append({"hour": q.get("hour") if isinstance(q, dict) else q, "error": "not an hour in MM-DD HH:00"})
             continue
-        t1, what = t0 + 3600, [w for w in (q.get("what") or WHAT) if w in WHAT]
+        what = q.get("what") if isinstance(q.get("what"), list) else list(WHAT)
+        t1, what = t0 + 3600, [w for w in what if w in WHAT]
         got = {"hour": time.strftime("%m-%d %H:00", time.localtime(t0))}
 
         def ledger(kind):
@@ -531,7 +537,8 @@ def main():
             log(f"skipped: {type(e).__name__}: {str(e)[:200]}")
         if a.once:
             return
-        time.sleep(max(60, EVERY - (time.time() - now)) if inv.get("round", 0) >= 3 else 120)
+        # at a minute past each hour, so the archive's hour and a lookup's hour cover the same window
+        time.sleep(max(60, 3600 - time.time() % 3600 + 60) if inv.get("round", 0) >= 3 else 120)
 
 
 if __name__ == "__main__":

@@ -102,8 +102,9 @@ PLAYBOOK = DATA / "playbook.json"
 GUIDE_KEYS = ("negotiation", "forum")
 GUIDE_CHARS = 600
 # Words that would carry internal numbers without digits ("floor is cost plus a tenth"): guidance with them is refused.
-INTERNAL = re.compile(r"\b(?:costs?|floors?|margins?|percent|per cent|half|halves|third|quarter|tenth|hundred|"
-                      r"thousand|million)\b|%|원가|최저가|마진|퍼센트|할인율|만원|천원", re.I)
+INTERNAL = re.compile(r"\b(?:costs?|floors?|margins?|percent(?:age)?s?|per cent|half|halves|thirds?|quarters?|"
+                      r"tenths?|fifths?|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundreds?|"
+                      r"thousands?|millions?|dozens?)\b|%|원가|최저가|마진|퍼센트|할인율|만원|천원|반값|절반", re.I)
 SKIP_MAX, SKIP_HOURS = 10, 24
 
 

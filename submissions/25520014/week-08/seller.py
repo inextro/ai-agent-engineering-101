@@ -115,7 +115,7 @@ def offer_in(text, name, ref=None):
     return nums[-1] if nums else None
 
 
-CLAIM_AHEAD = 120   # seconds from the close to the checkout, when the market judges the claim
+CLAIM_AHEAD = 30    # seconds from the close to the checkout (the buyer's kit checks out on the receipt)
 
 
 def catalog():
@@ -316,12 +316,13 @@ def option(u, p, arm):
 STALLS_FINAL = 3   # this many messages in a row without a higher offer and the current price becomes final
 
 
-def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, stalls=0):
+def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, stalls=0, frozen=False):
     """What the shop does with option o on this buyer message, without changing o: close at a price, or say a price
     (the opening ask, a concession, the floor as the final price, the ask again when the offer is above it, or the
     same price when the buyer did not move). The shop concedes only when the buyer raised its offer: a message with
-    no number or with the same or a lower number holds the price, and after STALLS_FINAL such messages in a row the
-    held price is final. A lowball repeated never reaches the floor; a buyer who keeps raising walks the ladder."""
+    no number or with the same or a lower number holds the price, and after STALLS_FINAL numbers in a row that did
+    not rise the held price is final and stays so (frozen: a price called final never moves again). A lowball
+    repeated never reaches the floor; a buyer who keeps raising walks the ladder."""
     if offer is not None and offer > o["ask"] and not over_seen:
         # above the ask is a misreading ("2 for 50000"): say the price of one unit; the same again closes at the ask
         return {"close": False, "price": o["ask"], "step": o["step"], "final": o["step"] >= steps,
@@ -333,9 +334,9 @@ def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, s
     if offer is not None and (offer >= o["ask"] or (o["step"] >= steps and offer >= o["floor"])):
         # never above the ask: an offer over it is a misreading ("2 for 50000" read as 50000 for one)
         return {"close": True, "price": min(offer, o["ask"]), "step": o["step"], "final": True}
-    if not opening and not moved:
+    if not opening and (not moved or frozen):
         return {"close": False, "price": o["ask"], "step": o["step"], "offer": offer, "hold": True,
-                "final": o["step"] >= steps or stalls + 1 >= STALLS_FINAL}
+                "final": frozen or o["step"] >= steps or (offer is not None and stalls + 1 >= STALLS_FINAL)}
     left = steps - o["step"]
     if left <= 0:
         ask, step = o["floor"], steps
@@ -451,11 +452,12 @@ class Seller(AgentExecutor):
 
     def swap_if_taken(self, task_id, deal, key):
         """Two talks that opened together may pick the same unit while haiku answers: the later one moves to
-        another unit of the same SKU and grade (its floor never lower). False when there is none."""
+        another unit of the same SKU and grade (its floor never lower). None when nothing changed, True when it
+        swapped, False when no unit is left."""
         o = deal["opts"][key]
         held = self.held(task_id)
         if o["unit"]["unit"] not in held:
-            return True
+            return None
         u = o["unit"]
         alt = next((x for x in inventory().get("units", []) if x["sku"] == u["sku"] and x.get("grade") == u.get("grade")
                     and x["unit"] not in held and x["unit"] != u["unit"]), None)
@@ -493,12 +495,17 @@ class Seller(AgentExecutor):
         held = self.held(task_id)
         for k in [k for k in opts if k != cur and opts[k]["unit"]["unit"] in held]:
             del opts[k]                      # another negotiation took that unit since
+        if not opts:
+            del self.open[task_id]
+            await up.reject(say("Sorry, the last one of that just sold."))
+            return
         deal["lines"].append(f"buyer: {text}")
         ref = opts[cur or next(iter(opts))]
         offer = offer_in(text, ref["unit"].get("name"), ref["ask"])
         moved = offer is not None and offer > deal.get("best_offer", -1)
         moves = {k: next_move(o, offer, deal["steps"], opening, k == cur and offer is None and accepts(text),
-                              deal.get("over_seen", False), moved, deal.get("stalls", 0)) for k, o in opts.items()}
+                              deal.get("over_seen", False), moved, deal.get("stalls", 0), deal.get("frozen", False))
+                 for k, o in opts.items()}
         history = "\n".join(deal["lines"][-8:])
         how = {}
         if len(opts) == 1 or (cur and bare(text)):
@@ -510,15 +517,25 @@ class Seller(AgentExecutor):
             key, reply = await asyncio.to_thread(choose_reply, deal, moves, history, text, how)
         if cur and key != cur:
             log(f"[task {task_id[:8]}] switched {cur} -> {key}")
-        if not self.swap_if_taken(task_id, deal, key):
+        swapped = self.swap_if_taken(task_id, deal, key)
+        if swapped is False:
             log(f"[task {task_id[:8]}] the unit was sold meanwhile and no other of its grade is left")
             del self.open[task_id]
             await up.reject(say("Sorry, the last one of that just sold."))
             return
+        if swapped and moves[key]["price"] < opts[key]["floor"]:
+            # the price was worked out on the old unit's floor; the new unit costs more: counter at its floor
+            moves[key] = {"close": False, "price": opts[key]["floor"], "step": opts[key]["step"], "final": False,
+                          "offer": offer}
+            reply = template(opts[key]["unit"], moves[key])
         deal["cur"] = key
         deal["over_seen"] = deal.get("over_seen") or "over" in moves[key]
-        deal["stalls"] = deal.get("stalls", 0) + 1 if moves[key].get("hold") else 0
-        if offer is not None:
+        if moves[key].get("hold"):
+            deal["stalls"] = deal.get("stalls", 0) + (offer is not None)   # a question holds, a number not raised counts
+        else:
+            deal["stalls"] = 0
+        deal["frozen"] = deal.get("frozen") or bool(moves[key].get("hold") and moves[key]["final"])
+        if offer is not None and "over" not in moves[key]:   # "2 for 80000" is not a bid for one unit
             deal["best_offer"] = max(offer, deal.get("best_offer", -1))
         for k, o in opts.items():
             o["ask"], o["step"] = moves[k]["price"], moves[k]["step"]
