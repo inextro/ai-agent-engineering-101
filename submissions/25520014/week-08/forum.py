@@ -5,8 +5,9 @@
 
 A post is about us when it names the shop (its title or `inextro`), cites one of our settles in its refs, or
 replies to one of our posts. Each gets one reply, praise or complaint, written by opus (medium; sonnet when it fails)
-from the post, the ledger records it cites (grade, claim_honest, breaks, warranty), the policy and the policy changes
-of the last day. The reply promises only what the code does: certificates shown, claims true, the warranty as it is
+from the post, the ledger records it cites (grade, claim_honest, breaks, warranty), what the shop keeps and the
+policy changes of the last day in a buyer's words. Internal numbers (margins, floors, costs, money rules, the
+manager's reasons) never reach the model, and a reply with a number no source gave is retried once, then dropped. The reply promises only what the code does: certificates shown, claims true, the warranty as it is
 now, and that the manager reads the complaint at its next hourly review. Complaints go into data/forum_state.json,
 which manager.py puts in front of opus; when the policy changes afterwards, opus decides which complaints the change
 answers and the shop follows up in those threads.
@@ -92,14 +93,33 @@ def about_us(post, mine, our_seqs):
             or bool(set(post.get("refs") or []) & our_seqs))
 
 
-def ask(prompt):
+def stray_numbers(text, sources):
+    """Numbers in our text that none of the sources gave (an internal number, or a made-up one)."""
+    allowed = {n.replace(",", "") for n in re.findall(r"\d[\d,]*", " ".join(sources))}
+    return [n for n in (x.replace(",", "") for x in re.findall(r"\d[\d,]*", text)) if n not in allowed]
+
+
+def ask(prompt, check=lambda a: None):
+    """opus (sonnet when it fails) answers one JSON object; check(answer) names a problem or None. A problem gets one
+    retry with the reason; a second one drops the post (nothing goes out rather than a wrong reply)."""
     for mdl, effort in MODELS:
-        t0 = time.time()
-        try:
-            reply = harness.call(prompt, timeout=300, model=mdl, effort=effort)
-            return json.loads(re.search(r"\{.*\}", reply, re.S).group()), f"{mdl} {time.time() - t0:.0f}s"
-        except Exception as e:
-            log(f"{mdl} failed after {time.time() - t0:.0f}s: {type(e).__name__} {str(e)[:150]}")
+        p = prompt
+        for attempt in (1, 2):
+            t0 = time.time()
+            try:
+                reply = harness.call(p, timeout=300, model=mdl, effort=effort)
+                a = json.loads(re.search(r"\{.*\}", reply, re.S).group())
+            except Exception as e:
+                log(f"{mdl} failed after {time.time() - t0:.0f}s: {type(e).__name__} {str(e)[:150]}")
+                break
+            problem = check(a)
+            if problem is None:
+                return a, f"{mdl} {time.time() - t0:.0f}s{' (retry)' if attempt == 2 else ''}"
+            log(f"{mdl} answer rejected ({problem}): {reply[:200]!r}")
+            p = (prompt + f"\n\nYour answer was rejected because {problem}. Write it again, keeping every rule above."
+                 f"\nRejected answer: {reply[:800]}")
+        else:
+            return None, None
     return None, None
 
 
@@ -113,9 +133,28 @@ def promises(p):
             "policy review")
 
 
-def recent_changes(since):
-    return [{"when": time.strftime("%m-%d %H:%M", time.localtime(r["ts"])), "changed": r["changed"],
-             "reason": r["reason"]} for r in manager.jsonl(manager.LOG, since) if r.get("changed")]
+PUBLIC = {                 # what a buyer notices of a change, (up, down); every other value stays inside the shop
+    "min_margin": ("firmer prices", "lower prices"),
+    "max_concessions": ("more room to haggle", "quicker, firmer negotiations"),
+    "c_discount": ("cheaper grade C units", "grade C units priced closer to the rest"),
+}
+
+
+def public_changes(since):
+    """Policy changes in a buyer's words. Never the values, never the manager's reason (it quotes them)."""
+    out = []
+    for r in manager.jsonl(manager.LOG, since):
+        words = []
+        for k, (old, new) in (r.get("changed") or {}).items():
+            if k in PUBLIC:
+                words.append(PUBLIC[k][0] if new > old else PUBLIC[k][1])
+            elif k in ("warranty_A", "warranty_B", "warranty_C"):
+                words.append(f"{'a warranty' if new else 'no warranty any more'} on grade {k[-1]} goods")
+            elif k == "warranty_hours":            # public anyway: it is on every receipt
+                words.append(f"a {int(new)}-hour warranty on goods")
+        if words:
+            out.append({"when": time.strftime("%m-%d %H:%M", time.localtime(r["ts"])), "buyers_notice": words})
+    return out
 
 
 REPLY = """You answer posts about our shop on an agent marketplace's forum, as the shop ({shop}). Buyers read the
@@ -128,8 +167,8 @@ Policy changes of the last day: {changes}
 
 Thank praise. For a complaint: say what the ledger shows about it, if it cites our sales; own what went wrong; say
 what the shop keeps that bears on it and that the manager will look at it at the next policy review. Never promise a
-refund, a discount, a date or any change the shop has not made; never deny a record. Never reveal internal numbers
-(margins, floors, costs, policy values).
+refund, a discount, a date or any change the shop has not made; never deny a record. Use no number that is not in the post,
+the records or the lines above.
 Answer with one JSON object only:
 {{"reply": "<the reply>", "complaint": true or false, "issue": "<a few words: what the complaint is about, or empty>"}}"""
 
@@ -137,7 +176,7 @@ FOLLOW = """Our shop changed its policy: {change}
 Complaints about the shop we answered in the last {days} days: {complaints}
 For each complaint this change really answers, write a short follow-up (one or two sentences, the complaint's
 language) that says what changed in words a buyer cares about ("more room to haggle", "cheaper grade C"), without
-internal numbers (margins, floors, costs, policy values). Skip the rest. Answer with one JSON object only:
+any number that is not in the change or the complaint. Skip the rest. Answer with one JSON object only:
 {{"follow_ups": [{{"post": <post id>, "reply": "<text>"}}, ...]}}"""
 
 
@@ -167,10 +206,12 @@ def one_pass(md, st, now):
     if todo:
         post = todo[0]
         records = {s: cited[s] for s in post.get("refs") or [] if s in cited}
-        a, used = ask(REPLY.format(shop=SHOP, id=post["id"], author=post.get("author"),
-                                   text=(post.get("text") or "")[:1500], records=json.dumps(records, ensure_ascii=False),
-                                   promises=promises(p), changes=json.dumps(recent_changes(now - 86400),
-                                                                            ensure_ascii=False)))
+        sources = [str(post["id"]), (post.get("text") or "")[:1500], json.dumps(records, ensure_ascii=False),
+                   promises(p), json.dumps(public_changes(now - 86400), ensure_ascii=False)]
+        a, used = ask(REPLY.format(shop=SHOP, id=post["id"], author=post.get("author"), text=sources[1],
+                                   records=sources[2], promises=sources[3], changes=sources[4]),
+                      lambda a: (f"it has numbers no source gave ({', '.join(bad)})"
+                                 if (bad := stray_numbers(str(a.get("reply", "")), sources)) else None))
         st["answered"][str(post["id"])] = now
         if not a or not str(a.get("reply", "")).strip():
             log(f"no reply to post {post['id']} (model failed); skipped")
@@ -198,14 +239,17 @@ def one_pass(md, st, now):
 
 
 def plan_follow_ups(st, p, now):
-    change = recent_changes(st.get("checked_changes", now - 3600))
+    change = public_changes(st.get("checked_changes", now - 3600))
     st["checked_changes"] = now
     open_ = {k: v for k, v in st["complaints"].items() if now - v["ts"] < FOLLOW_UP_DAYS * 86400}
     st["complaints"] = open_
     if not change or not open_:
         return
-    a, used = ask(FOLLOW.format(change=json.dumps(change, ensure_ascii=False), days=FOLLOW_UP_DAYS,
-                                complaints=json.dumps(open_, ensure_ascii=False)))
+    sources = [json.dumps(change, ensure_ascii=False), json.dumps(open_, ensure_ascii=False)]
+    a, used = ask(FOLLOW.format(change=sources[0], days=FOLLOW_UP_DAYS, complaints=sources[1]),
+                  lambda a: (f"a follow-up has numbers no source gave ({', '.join(bad)})" if (bad := [
+                      n for x in a.get("follow_ups") or [] for n in stray_numbers(str(x.get("reply", "")), sources)])
+                      else None))
     for f in (a or {}).get("follow_ups") or []:
         if str(f.get("post")) in open_ and str(f.get("reply", "")).strip():
             st["follow_ups"].append({"post": int(f["post"]) if str(f["post"]).isdigit() else f["post"],
