@@ -37,7 +37,9 @@ start_side() {                            # every side process takes the agent f
 pid="" fails=0
 while true; do
   if [[ -z $pid ]] || ! kill -0 $pid 2>/dev/null; then
-    [[ -n $pid ]] && { log "kit exited"; note kit "kit exited, restarting"; cp $OUT $ROOT/kit-stdout.prev.txt; }
+    [[ -n $pid ]] && { log "kit exited"; note kit "kit exited, restarting"; }
+    # keep every run's output (market-kit.log rotates and loses its oldest part; this is the full record)
+    [[ -s $OUT ]] && mv $OUT $ROOT/kit-stdout.$(date +%m%d-%H%M%S).txt
     log "starting kit"
     python -u scripts/market_kit.py join --dir $DIR \
         --market https://market.ourolabs.ai --name inextro --tunnel > $OUT 2>&1 &
@@ -65,6 +67,6 @@ while true; do
   else
     fails=$((fails + 1)); log "card check failed ($fails/3) at $url"
     if (( fails >= 3 )); then log "restarting kit"; note kit "shop card unreachable 3 times, kit restarted"
-      kill $pid; sleep 5; cp $OUT $ROOT/kit-stdout.prev.txt; pid=""; fi
+      kill $pid; sleep 5; pid=""; fi
   fi
 done
