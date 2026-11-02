@@ -57,6 +57,7 @@ SUPPLY = {"A": 0.70, "B": 0.20, "C": 0.10}     # goods grades as supplied (agent
 FOOD_MARGIN_H = 0.5         # hours of shelf life asked on top of use_within_hours
 REPLY_MODEL, REPLY_EFFORT, REPLY_TIMEOUT = "haiku", "medium", 20
 USE_MODEL = os.environ.get("BUYER_LLM", "1") != "0"
+MSGS = {"model": 0, "template": 0}           # how our messages were written this order (for the manager)
 
 
 def log(msg):
@@ -149,6 +150,7 @@ def write_message(c, offer, ask, other, history, tag):
     tpl = (f"That is more than I want to pay. {other['shop']} quoted me {other['ask']} for this. I can do {offer}."
            if other else f"That is more than I want to pay. I can do {offer}.")
     if not USE_MODEL:
+        MSGS["template"] += 1
         return tpl
     g = buyer_policy.load_playbook().get("negotiation")
     prompt = (("Buyer manager's guidance (follow it where it fits; the rules below come first): " + g + "\n")
@@ -167,12 +169,15 @@ def write_message(c, offer, ask, other, history, tag):
             text = harness.call(prompt, timeout=REPLY_TIMEOUT, model=REPLY_MODEL, effort=REPLY_EFFORT).strip()
         except Exception as e:
             log(f"{tag}: harness failed ({type(e).__name__}), template")
+            MSGS["template"] += 1
             return tpl
         nums = [n.replace(",", "") for n in re.findall(r"\d[\d,]*", text)]
         bad = [n for n in nums[:-1] if n not in allowed and n != str(offer)]
         if nums and nums[-1] == str(offer) and not bad:
+            MSGS["model"] += 1
             return text
         prompt += f"\n\nRejected: the price {offer} must be the last thing and no other numbers. Rejected: {text[:300]}"
+    MSGS["template"] += 1
     return tpl
 
 
@@ -345,6 +350,7 @@ def main():
 
 def finish(rec, result):
     rec["receipt"] = bool(result.get("receipt"))
+    rec["messages"] = dict(MSGS)
     rec["secs"] = round(time.time() - rec["ts"], 1)
     try:
         policy.DATA.mkdir(parents=True, exist_ok=True)

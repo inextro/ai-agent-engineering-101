@@ -28,7 +28,8 @@ those hours from the collector DB (settles, breaks, forum posts, balance, board)
 verbatim, its own decision then), then it is asked again; at most LOOKUP_ROUNDS rounds of LOOKUP_HOURS hours.
 It answers with number changes, playbook edits (negotiation and forum guidance as text, categories restock skips;
 policy.clip_playbook refuses digits, unknown categories, too long or too many), notes for the next hour, the new memory, and a
-report in Korean for the owner, who reads data/reports.md after the fact and corrects the direction when needed.
+report in Korean for the owner, who reads data/reports.md (and the same report on Telegram, notify.py) after the
+fact and corrects the direction when needed.
 
 Model: opus at medium effort; when it fails, sonnet at medium. Each decision is a
 line in data/manager.jsonl (summary size, the answer, what changed after clipping, the reason, the notes).
@@ -49,6 +50,7 @@ from pathlib import Path
 
 import harness
 import model
+import notify
 import policy
 
 os.environ["TZ"] = "Asia/Seoul"             # the lab server runs on UTC; reports, archive hours and lookups read KST
@@ -500,6 +502,7 @@ def report(now, used, alerts, changed, pb_changed, refused, text):
         lines += ["- 변경 없음"]
     with open(REPORTS, "a", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n\n")
+    notify.send("[가게 manager] " + "\n".join(lines).removeprefix("## "))
 
 
 def shop_post(md, p, est_db):
