@@ -12,9 +12,10 @@ its range and within a quarter of the range per decision, so one bad answer cann
 Model: opus at medium effort; when it fails, sonnet at medium. Each decision is a line in data/manager.jsonl
 (summary size, the answer, what changed after clipping, the reason).
 
-Forum: one shop post an hour and one whenever the policy changes, built by code from the policy and the ledger
-(no claims the shop does not keep), written to .market/outbox.jsonl for the kit to send. Shop posts do not count
-for the shop's score; they tell buyers what the shop guarantees, with ledger refs to check it.
+Forum: shop_post builds the shop's status post from the policy and the ledger (no claims the shop does not keep);
+forum.py sends it, an hour apart and after each policy change, between its replies to posts about the shop (the
+market takes one shop post per 5 minutes). Complaints forum.py answered appear in the summary below, so a policy
+change can answer them; forum.py then follows up in those threads.
 """
 import argparse
 import json
@@ -103,6 +104,9 @@ def summary(md, now):
         "break_counts_by_grade(breaks, exposure)": est.break_counts,
         "our_claims_honest": f"{sum(1 for h in honest if h)}/{len(honest)}",
         "our_recent_reviews": reviews,
+        "open_complaints_about_us_on_the_forum": list((json.loads((policy.DATA / "forum_state.json").read_text())
+                                                       .get("complaints") or {}).values())
+                                                 if (policy.DATA / "forum_state.json").exists() else [],
         "forum_newest": [{"id": r[0], "author": r[2], "role": r[3], "text": (r[4] or "")[:300],
                           "likes_dislikes": votes.get(r[0])} for r in posts],
     }
@@ -124,7 +128,8 @@ Policy now, with the allowed range of each number (a change moves at most a quar
 The record (code-computed):
 {summary}
 
-Decide what to change, if anything. Change a value only for a reason in the record; no change is a fine answer.
+Decide what to change, if anything. Change a value only for a reason in the record (open complaints on the forum
+count, when the record supports them); no change is a fine answer.
 Answer with one JSON object only:
 {{"changes": {{"<name>": <value>, ...}}, "reason": "<two sentences: what in the record, what you changed>"}}"""
 
@@ -195,8 +200,7 @@ def main():
         try:
             inv = json.loads((md / "inventory.json").read_text(encoding="utf-8"))
             if inv.get("round", 0) >= 3:
-                p, changed = decide(md, now)
-                shop_post(md, p, model.connect())
+                decide(md, now)
             else:
                 log(f"round {inv.get('round')}: waiting for Round 3")
         except (OSError, ValueError, sqlite3.Error) as e:
