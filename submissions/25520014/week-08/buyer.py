@@ -60,9 +60,12 @@ def render_history(lines):
     return "\n".join(f"  {who}: {what}" for who, what in lines)
 
 
+RPC_TIMEOUT = 200     # seconds for one seller reply; market_buyer.py lowers it to fit its 300 s order
+
+
 def rpc(url, method, params):
     body = {"jsonrpc": "2.0", "id": str(uuid.uuid4())[:8], "method": method, "params": params}
-    data = httpx.post(url, json=body, headers=HEADERS, timeout=200).json()
+    data = httpx.post(url, json=body, headers=HEADERS, timeout=RPC_TIMEOUT).json()
     if "error" in data:
         raise A2AError(f"{method} -> error {data['error'].get('code')} {data['error'].get('message')}")
     return data["result"]
@@ -84,8 +87,8 @@ def walk_away(url, task_id, why):
     print(f"-> CancelTask taskId={task_id[:8]} ({why})", flush=True)
     try:
         rpc(url, "CancelTask", {"id": task_id})
-    except A2AError as e:  # the task may already be finished on the seller's side
-        print(f"   {e}", flush=True)
+    except Exception as e:  # finished on the seller's side, or its tunnel is gone: leaving must never fail
+        print(f"   {type(e).__name__}: {str(e)[:160]}", flush=True)
 
 
 def status_text(task):

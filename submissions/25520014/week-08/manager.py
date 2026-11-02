@@ -69,7 +69,6 @@ MEMORY_CHARS = 1500
 ARCHIVE_FULL_H = 48                      # every hour this recent is in the index; older ones only when flagged
 LOOKUP_ROUNDS, LOOKUP_HOURS = 2, 3
 WHAT = ("negotiations", "settles", "broken", "forum", "balance", "board", "decision")
-VOTES = policy.DATA / "votes.json"       # posts we liked, per role, so a post gets our vote once
 UPVOTES_MAX = 5
 REPORT_CHARS = 700                       # the report arrives on Telegram every hour: short
 REPORT_SPEC = ("<the owner's report in Korean, at most five short lines, only what matters. '상황:' what happened "
@@ -499,11 +498,12 @@ def decide(md, now):
 def upvote(md, ids, db, role):
     """Like the posts the manager says it used: known posts by others, not liked by us before, at most UPVOTES_MAX.
     `ids` holds {"id", "why"} objects (bare ids are taken too). Returns [(id, why)] sent (the kit posts the votes from .market/outbox.jsonl; they count once we have 5 deals)."""
+    path = policy.DATA / f"votes_{role}.json"        # one file per role: the two managers never write the same one
     try:
-        voted = json.loads(VOTES.read_text(encoding="utf-8"))
+        done = set(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, ValueError):
-        voted = {}
-    done, sent = set(voted.get(role, [])), []
+        done = set()
+    sent = []
     for x in (ids if isinstance(ids, list) else [])[:UPVOTES_MAX]:
         why = str(x.get("why", ""))[:80] if isinstance(x, dict) else ""
         try:
@@ -518,8 +518,7 @@ def upvote(md, ids, db, role):
         done.add(i)
         sent.append((i, why))
     if sent:
-        voted[role] = sorted(done)[-2000:]
-        VOTES.write_text(json.dumps(voted), encoding="utf-8")
+        path.write_text(json.dumps(sorted(done)[-2000:]), encoding="utf-8")
     return sent
 
 

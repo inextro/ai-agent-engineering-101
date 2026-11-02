@@ -14,6 +14,9 @@ cd $ROOT
 export PATH="$ROOT/.venv/bin:$HOME/.local/bin:$PATH" VIRTUAL_ENV="$ROOT/.venv"
 export MARKET_OWNER=$(cat $ROOT/.market_owner)
 mkdir -p $DIR/logs
+# one copy only: a previous run's kit and side processes (e.g. after tmux kill-session) go first, ours go with us
+pkill -u $(id -u) -f "market_kit.py join --dir $DIR" ; pkill -u $(id -u) -f "\.py --dir $DIR" ; sleep 2
+trap 'kill $(jobs -p) 2>/dev/null; exit' EXIT HUP INT TERM
 log() { echo "$(date +%F' '%T) $*" | tee -a $ROOT/watchdog.log; }
 declare -A last_note
 note() {                                  # $1 process, $2 text; Telegram at most once per process per 10 min
@@ -55,7 +58,8 @@ while true; do
     fi
   done
   sleep 60
-  url=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' $OUT | head -1)
+  # our URL now: the kit's own lines only (buyer lines name other shops' tunnels), the newest after a re-tunnel
+  url=$(grep -E '^[0-9:]+ \[tunnel\]|registered again' $OUT | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1)
   if curl -sf -m 15 "$url/.well-known/agent-card.json" > /dev/null; then
     fails=0
   else

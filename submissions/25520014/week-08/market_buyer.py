@@ -56,6 +56,7 @@ DEAL_PRIOR = (4.0, 1.0)     # Beta prior of P(a shop deals with us)
 SUPPLY = {"A": 0.70, "B": 0.20, "C": 0.10}     # goods grades as supplied (agent.md)
 FOOD_MARGIN_H = 0.5         # hours of shelf life asked on top of use_within_hours
 REPLY_MODEL, REPLY_EFFORT, REPLY_TIMEOUT = "haiku", "medium", 20
+buyer.RPC_TIMEOUT = 60      # one slow shop must not eat the order: the opening waits for the slowest of QUOTES
 USE_MODEL = os.environ.get("BUYER_LLM", "1") != "0"
 MSGS = {"model": 0, "template": 0}           # how our messages were written this order (for the manager)
 
@@ -72,17 +73,31 @@ def read_json(path, default):
 
 
 def past_orders():
+    out = []
     try:
-        return [json.loads(x) for x in LOG.read_text(encoding="utf-8").splitlines() if x.strip()]
-    except (OSError, ValueError):
-        return []
+        lines = LOG.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return out
+    for x in lines:
+        try:
+            out.append(json.loads(x))
+        except ValueError:
+            pass
+    return out
 
 
 def paid_by_shop():
     """shop name -> (paid, not paid) of our past orders there; the kit's payments.jsonl says which deals it paid."""
     paid = {}
-    for p in [json.loads(x) for x in (MARKET_DIR / "payments.jsonl").read_text(encoding="utf-8").splitlines()
-              if x.strip()] if (MARKET_DIR / "payments.jsonl").exists() else []:
+    try:
+        lines = (MARKET_DIR / "payments.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    for x in lines:
+        try:
+            p = json.loads(x)
+        except ValueError:               # one broken line must not cost every later order
+            continue
         paid[p.get("order")] = bool(p.get("paid"))
     out = {}
     for r in past_orders():

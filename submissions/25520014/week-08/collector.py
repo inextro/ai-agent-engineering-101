@@ -92,6 +92,7 @@ class Collector:
         self.c = httpx.Client(timeout=httpx.Timeout(20, connect=10))
         self.args = args
         self.cursor = None                           # last ledger seq read (stored or skipped)
+        self.reset_checked = 0                       # when we last checked that the ledger did not restart its seq
 
     # --- meta: small state that must survive a restart (ledger cursor, round filter, last hashes)
 
@@ -168,6 +169,16 @@ class Collector:
                 self.put("ledger_cursor", self.cursor)
             self.db.commit()
             stored += len(keep)
+            if not rows and time.time() - self.reset_checked > 300:
+                self.reset_checked = time.time()   # a new round may restart seq: then nothing comes after our cursor
+                newest = self.fetch("/api/ledger", after=-1)
+                if newest and newest[-1]["seq"] < self.cursor:
+                    log(f"[ledger] newest seq {newest[-1]['seq']} is below our cursor {self.cursor}: the ledger "
+                        "restarted, reading it from the start")
+                    self.cursor = 0
+                    self.put("ledger_cursor", 0)
+                    self.db.commit()
+                    continue
             if len(rows) < PAGE:
                 if stored:
                     log(f"[ledger] +{stored} up to seq {self.cursor}")

@@ -146,6 +146,7 @@ def inventory():
 
 RANK = {"C": 0, "B": 1, "A": 2}
 SOLD_HOLD = 15 * 60   # a unit sold stays out of offers this long (inventory.json drops it at the checkout)
+ABANDONED = 10 * 60   # a talk this old is over (the kit stops a buyer at 300 s, often without a CancelTask)
 
 
 def find_units(text, taken):
@@ -447,6 +448,11 @@ class Seller(AgentExecutor):
         pick the same unit, the market refuses the second checkout)."""
         now = time.time()
         self.sold = {k: t for k, t in self.sold.items() if now - t < SOLD_HOLD}
+        for t in [t for t, d in self.open.items() if now - d["t0"] > ABANDONED]:   # the buyer left: free its unit
+            d = self.open.pop(t)
+            o = d["opts"][d["cur"] or next(iter(d["opts"]))]
+            append(NEGOTIATIONS, {"ts": now, "task": t, "outcome": "cancel", "why": "abandoned",
+                                  "kind": o["unit"].get("kind"), "arm": d["arm"], "last_ask": o["ask"]})
         return ({d["opts"][d["cur"]]["unit"]["unit"] for t, d in self.open.items() if t != but and d["cur"]}
                 | set(self.sold))
 
