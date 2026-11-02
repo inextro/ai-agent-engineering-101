@@ -7,6 +7,7 @@ on 11-02. Posterior updates (demand, share, break rates, the price bandit) are n
 """
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -99,6 +100,9 @@ def reserve(p, balance):
 PLAYBOOK = DATA / "playbook.json"
 GUIDE_KEYS = ("negotiation", "forum")
 GUIDE_CHARS = 600
+# Words that would carry internal numbers without digits ("floor is cost plus a tenth"): guidance with them is refused.
+INTERNAL = re.compile(r"\b(?:costs?|floors?|margins?|percent|per cent|half|halves|third|quarter|tenth|hundred|"
+                      r"thousand|million)\b|%|원가|최저가|마진|퍼센트|할인율|만원|천원", re.I)
 SKIP_MAX, SKIP_HOURS = 10, 24
 
 
@@ -128,6 +132,8 @@ def clip_playbook(new, old, categories, now=None):
         v = " ".join(str(v).split())
         if any(ch.isdigit() for ch in v):
             refused.append(f"{k}: has digits")
+        elif INTERNAL.search(v):
+            refused.append(f"{k}: names an internal number ({INTERNAL.search(v).group()})")
         elif len(v) > GUIDE_CHARS:
             refused.append(f"{k}: longer than {GUIDE_CHARS} characters")
         else:

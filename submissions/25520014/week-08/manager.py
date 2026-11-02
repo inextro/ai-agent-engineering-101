@@ -206,6 +206,9 @@ def summary(md, now):
         "break_rate_by_grade": {g: round(r, 3) for g, r in est.break_rate.items()},
         "break_counts_by_grade(breaks, exposure)": est.break_counts,
         "our_claims_honest": f"{sum(1 for h in honest if h)}/{len(honest)}",
+        "our_settles_this_round_vs_20_needed_to_rank": [
+            sum(1 for r in db.execute("SELECT data FROM ledger WHERE round >= 3 AND kind='settle'")
+                if json.loads(r[0]).get("shop") in mine), 20],
         "our_recent_reviews": reviews,
         "open_complaints_about_us_on_the_forum": list((json.loads((policy.DATA / "forum_state.json").read_text())
                                                        .get("complaints") or {}).values())
@@ -244,8 +247,8 @@ Playbook now (text and categories the code runs on; you may rewrite it):
   forum guidance (added to opus's prompt when it answers a post about us): {forum}
   categories restock skips, with hours left: {skips}
 Guidance steers how the models speak and which of the code's options they pick (grade, tone, what to say first);
-it cannot change a price, a floor or a warranty, and it must contain no digits (haiku must never learn internal
-numbers; spell nothing out either). At most {chars} characters each. Skip a category (at most {skip_hours} hours,
+it cannot change a price, a floor or a warranty, and it must contain no digits and no words for costs, floors,
+margins, percents or fractions (haiku must never learn internal numbers; such guidance is refused). At most {chars} characters each. Skip a category (at most {skip_hours} hours,
 at most {skip_max} at once) only for a reason in the record, e.g. it loses money or draws complaints.
 
 What the code does by design (guidance cannot change it; guidance against it only makes haiku's words disagree with
@@ -385,7 +388,7 @@ def ask_model(prompt):
     for mdl, effort in MODELS:
         t0 = time.time()
         try:
-            reply = harness.call(prompt, timeout=900, model=mdl, effort=effort)
+            reply = harness.call(prompt, timeout=600, model=mdl, effort=effort)
         except Exception as e:
             log(f"{mdl} failed after {time.time() - t0:.0f}s: {type(e).__name__} {str(e)[:150]}")
             continue
@@ -426,7 +429,8 @@ def decide(md, now):
         used.append(who)
         if not (left and answer.get("lookup") and "review" not in answer):
             break
-        got = lookup(answer["lookup"], now, db)
+        reqs = answer["lookup"]
+        got = lookup(reqs if isinstance(reqs, list) else [reqs], now, db)
         looked.append(got)
         log(f"{who}: looked up {json.dumps(answer['lookup'], ensure_ascii=False)[:200]} ({len(got)} chars)")
     used = " + ".join(used)
@@ -436,12 +440,15 @@ def decide(md, now):
                                                                       "못했습니다. 정책과 playbook은 그대로입니다.")
         archive(now, s, None, {}, {})
         return p, False
-    new = policy.clip(answer.get("changes") or {}, p)
+    for k in ("changes", "playbook"):          # a model answer of the wrong shape counts as no change
+        if not isinstance(answer.get(k), dict):
+            answer[k] = {}
+    new = policy.clip(answer["changes"], p)
     changed = {k: (p[k], new[k]) for k in list(policy.NUMBERS) + list(policy.FLAGS) if new[k] != p[k]}
     reason = str(answer.get("reason", ""))[:600]
     if changed:
         new = policy.save(new, reason)
-    nb, refused = policy.clip_playbook(answer.get("playbook") or {}, b, set(categories), now)
+    nb, refused = policy.clip_playbook(answer["playbook"], b, set(categories), now)
     pb_changed = {k: (b.get(k), nb.get(k)) for k in ("negotiation", "forum", "restock_skip") if nb.get(k) != b.get(k)}
     if pb_changed:
         policy.save_playbook(nb, reason)
@@ -516,7 +523,7 @@ def main():
                 decide(md, now)
             else:
                 log(f"round {inv.get('round')}: waiting for Round 3")
-        except (OSError, ValueError, sqlite3.Error) as e:
+        except Exception as e:                   # one bad hour must not stop the loop for the rest of the round
             log(f"skipped: {type(e).__name__}: {str(e)[:200]}")
         if a.once:
             return

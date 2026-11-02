@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS ledger (
     seq INTEGER PRIMARY KEY, ts REAL, round INTEGER, kind TEXT, data TEXT, hash TEXT);
 CREATE INDEX IF NOT EXISTS ledger_round_kind ON ledger (round, kind);
+CREATE INDEX IF NOT EXISTS ledger_kind_ts ON ledger (kind, ts);
 CREATE TABLE IF NOT EXISTS forum_posts (
     id INTEGER PRIMARY KEY, ts REAL, author TEXT, role TEXT, thread INTEGER, text TEXT, refs TEXT, raw TEXT,
     first_seen REAL);
@@ -211,8 +212,12 @@ class Collector:
         if h == self.get("inventory_hash"):
             return True
         units = inv.get("units") or []
+        raw = None                                # the whole file (certificates and all) once an hour, not per change
+        if time.time() - float(self.get("inventory_raw_at") or 0) >= 3600:
+            raw = dumps(inv)
+            self.put("inventory_raw_at", str(time.time()))
         self.db.execute("INSERT OR REPLACE INTO inventory VALUES (?, ?, ?, ?)",
-                        (time.time(), inv.get("balance"), len(units), dumps(inv)))
+                        (time.time(), inv.get("balance"), len(units), raw))
         self.put("inventory_hash", h)
         self.db.commit()
         log(f"[inventory] balance {inv.get('balance')}, {len(units)} units")

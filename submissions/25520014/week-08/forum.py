@@ -58,11 +58,17 @@ def our_post_ids(md, st):
     ids = set(st["mine"])
     try:
         for line in (md / "outbox.sent.jsonl").read_text(encoding="utf-8").splitlines():
-            rec = json.loads(line)
-            ans = rec.get("answer") or rec.get("result") or {}
-            if isinstance(ans, dict) and rec.get("as", "shop") == "shop" and ans.get("id") is not None:
+            try:
+                rec = json.loads(line)
+                ans = rec.get("answer")
+                ans = json.loads(ans) if isinstance(ans, str) else ans or {}   # the kit keeps the body as text
+            except ValueError:
+                continue
+            sent = rec.get("sent") or {}
+            if (isinstance(ans, dict) and "post" in sent and sent.get("as", "shop") == "shop"
+                    and ans.get("id") is not None):
                 ids.add(ans["id"])
-    except (OSError, ValueError):
+    except OSError:
         pass
     return ids
 

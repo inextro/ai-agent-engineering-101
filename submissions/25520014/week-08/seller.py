@@ -94,13 +94,47 @@ def accepts(text):
     return bool(ACCEPT.search(t)) and not REFUSE.search(t)
 
 
-def offer_in(text, name):
-    """The buyer's number: the last number in the message that is not part of the product's name or a SKU."""
+UNIT_AFTER = re.compile(r"\d[\d,]*(?:\.\d+)?\s*(?:hours?\b|hrs?\b|h\b|시간|days?\b|일\b|kg\b|g\b|ml\b|l\b|개|units?\b|"
+                        r"pcs\b|%|percent|퍼센트|stars?\b|점\b)", re.I)
+
+
+def offer_in(text, name, ref=None):
+    """The buyer's number: the last amount in the message that is not part of the product's name, a SKU, a quantity
+    with a unit ("24 hours", "2 units", "10kg") or, next to the price under talk, too small to be a price (under a
+    tenth of `ref`: "2 for 50000"). "3만 5천", "35천" and "35k" read as 35000."""
     clean = SKU_RE.sub(" ", text)
     for n in re.findall(r"\d[\d,]*", name or ""):   # whole numbers only: "900g" in the name must not eat "9000"
         clean = re.sub(rf"(?<![\d,]){re.escape(n)}(?![\d,])", " ", clean)
+    clean = re.sub(r"(\d+(?:\.\d+)?)\s*만(?:\s*(\d+)\s*천)?",
+                   lambda m: f" {round(float(m.group(1)) * 10000 + int(m.group(2) or 0) * 1000)} ", clean)
+    clean = re.sub(r"(\d+(?:\.\d+)?)\s*(?:천|k\b)", lambda m: f" {round(float(m.group(1)) * 1000)} ", clean, flags=re.I)
+    clean = UNIT_AFTER.sub(" ", clean)
     nums = [int(n.replace(",", "")) for n in re.findall(r"\d[\d,]*(?:\.\d+)?", clean) if n.replace(",", "").isdigit()]
+    if ref:
+        nums = [n for n in nums if n >= 0.1 * ref]
     return nums[-1] if nums else None
+
+
+CLAIM_AHEAD = 120   # seconds from the close to the checkout, when the market judges the claim
+
+
+def catalog():
+    try:
+        return json.loads((MARKET_DIR / "catalog.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def grade_now(u, now=None):
+    """The grade a unit has at checkout. Goods keep theirs; food drops with its shelf life left (A 80% or more,
+    B 45% or more, C less), and inventory.json can be 10 s old and the talk minutes long, so it is worked out
+    again from expires_at and the SKU's shelf_hours, CLAIM_AHEAD seconds on, never above the stored grade."""
+    g = u.get("grade")
+    shelf = (catalog().get(u.get("sku")) or {}).get("shelf_hours")
+    if u.get("kind") != "food" or not u.get("expires_at") or not shelf or g not in RANK:
+        return g
+    left = (u["expires_at"] - (now or time.time()) - CLAIM_AHEAD) / (shelf * 3600)
+    return min(g, "A" if left >= 0.8 else "B" if left >= 0.45 else "C", key=RANK.get)
 
 
 def inventory():
@@ -111,6 +145,7 @@ def inventory():
 
 
 RANK = {"C": 0, "B": 1, "A": 2}
+SOLD_HOLD = 15 * 60   # a unit sold stays out of offers this long (inventory.json drops it at the checkout)
 
 
 def find_units(text, taken):
@@ -198,13 +233,13 @@ def ask_checked(prompt, parse, tag, how=None):
     return None
 
 
-def write_reply(u, price, situation, history, buyer_text, template, how=None):
+def write_reply(u, price, situation, history, buyer_text, template, how=None, closing=False):
     prompt = (
         f"You are the sales clerk of {SHOP}, an online shop. A buyer is negotiating for one unit of "
         f"{u['name']!r}.\n"
         f"Facts about this unit (the only things you may state about it): {facts(u, u.get('_warranty'))}.\n"
         f"What the shop does now: {situation}\n"
-        f"{guidance()}"
+        f"{'' if closing else guidance()}"   # a closing turn has nothing to steer; guidance once made it ask again
         f"Conversation so far:\n{history}\n"
         f"Buyer's last message: {buyer_text!r}\n\n"
         "Write the shop's reply in at most three short sentences, in the buyer's language (English when it is "
@@ -377,6 +412,7 @@ def sign_receipt(receipt, key_path="shop_key.pem"):
 class Seller(AgentExecutor):
     def __init__(self):
         self.open = {}   # task id -> deal
+        self.sold = {}   # unit -> close time: still in inventory.json until the checkout, so still held
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         task = context.current_task
@@ -396,7 +432,27 @@ class Seller(AgentExecutor):
     def held(self, but=None):
         """Units promised in open negotiations: the unit each one offers now (one still choosing holds none; if two
         pick the same unit, the market refuses the second checkout)."""
-        return {d["opts"][d["cur"]]["unit"]["unit"] for t, d in self.open.items() if t != but and d["cur"]}
+        now = time.time()
+        self.sold = {k: t for k, t in self.sold.items() if now - t < SOLD_HOLD}
+        return ({d["opts"][d["cur"]]["unit"]["unit"] for t, d in self.open.items() if t != but and d["cur"]}
+                | set(self.sold))
+
+    def swap_if_taken(self, task_id, deal, key):
+        """Two talks that opened together may pick the same unit while haiku answers: the later one moves to
+        another unit of the same SKU and grade (its floor never lower). False when there is none."""
+        o = deal["opts"][key]
+        held = self.held(task_id)
+        if o["unit"]["unit"] not in held:
+            return True
+        u = o["unit"]
+        alt = next((x for x in inventory().get("units", []) if x["sku"] == u["sku"] and x.get("grade") == u.get("grade")
+                    and x["unit"] not in held and x["unit"] != u["unit"]), None)
+        if alt is None:
+            return False
+        new = option(alt, policy.load(), deal["arm"])
+        o["unit"], o["floor"] = new["unit"], max(o["floor"], new["floor"])
+        log(f"[task {task_id[:8]}] unit {u['unit']} was taken meanwhile; offering {alt['unit']}")
+        return True
 
     async def opening(self, task_id, text, up, say):
         by_grade, inv = find_units(text, self.held())
@@ -406,8 +462,8 @@ class Seller(AgentExecutor):
             await up.reject(say("Sorry, we have none of that in stock right now."))
             return
         p = policy.load()
-        refresh_break_rates()
-        arm = model.pick_arm(next(iter(by_grade.values())).get("kind", "goods"))
+        await asyncio.to_thread(refresh_break_rates)       # both read whole files: off the event loop
+        arm = await asyncio.to_thread(model.pick_arm, next(iter(by_grade.values())).get("kind", "goods"))
         opts = {g: option(u, p, arm) for g, u in by_grade.items()}
         deal = self.open[task_id] = {"opts": opts, "cur": next(iter(opts)) if len(opts) == 1 else None, "arm": arm,
                                      "steps": int(p["max_concessions"]), "lines": [], "t0": time.time(),
@@ -426,7 +482,8 @@ class Seller(AgentExecutor):
         for k in [k for k in opts if k != cur and opts[k]["unit"]["unit"] in held]:
             del opts[k]                      # another negotiation took that unit since
         deal["lines"].append(f"buyer: {text}")
-        offer = offer_in(text, opts[cur or next(iter(opts))]["unit"].get("name"))
+        ref = opts[cur or next(iter(opts))]
+        offer = offer_in(text, ref["unit"].get("name"), ref["ask"])
         moves = {k: next_move(o, offer, deal["steps"], opening, k == cur and offer is None and accepts(text),
                               deal.get("over_seen", False)) for k, o in opts.items()}
         history = "\n".join(deal["lines"][-8:])
@@ -435,11 +492,16 @@ class Seller(AgentExecutor):
             key = cur or next(iter(opts))
             u, m = opts[key]["unit"], moves[key]
             reply = await asyncio.to_thread(write_reply, u, m["price"], situation(m), history, text, template(u, m),
-                                            how)
+                                            how, m["close"])
         else:
             key, reply = await asyncio.to_thread(choose_reply, deal, moves, history, text, how)
         if cur and key != cur:
             log(f"[task {task_id[:8]}] switched {cur} -> {key}")
+        if not self.swap_if_taken(task_id, deal, key):
+            log(f"[task {task_id[:8]}] the unit was sold meanwhile and no other of its grade is left")
+            del self.open[task_id]
+            await up.reject(say("Sorry, the last one of that just sold."))
+            return
         deal["cur"] = key
         deal["over_seen"] = deal.get("over_seen") or "over" in moves[key]
         for k, o in opts.items():
@@ -469,8 +531,11 @@ class Seller(AgentExecutor):
         o = deal["opts"][deal["cur"]]
         u = o["unit"]
         price = int(price)
+        claim = grade_now(u)
+        if claim != u.get("grade"):
+            log(f"[task {task_id[:8]}] {u['sku']} dropped to grade {claim} during the talk; the claim says {claim}")
         receipt = {"shop": SHOP, "item": u["sku"], "price": price, "task": task_id, "unit": u["unit"],
-                   "claim": u.get("grade")}
+                   "claim": claim}
         if o["warranty"]:
             receipt["warranty_hours"] = o["warranty"]
         await up.add_artifact(parts=[new_data_part(sign_receipt(receipt))], name="receipt")
@@ -480,6 +545,7 @@ class Seller(AgentExecutor):
                               "step": o["step"], "chose": deal["cur"], "seconds": round(time.time() - deal["t0"], 1)})
         log(f"[task {task_id[:8]}] DEAL {deal['cur']} {u['sku']} {u.get('grade')} at {price} "
             f"(cost {u['cost']}, step {o['step']})")
+        self.sold[u["unit"]] = time.time()
         await up.complete(say(msg))
         del self.open[task_id]
 

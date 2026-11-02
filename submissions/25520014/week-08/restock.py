@@ -119,7 +119,8 @@ def decide(inv, cat, demand, est, p, held, now):
             need = min(q - have.get(sku, 0), 20)
             if need > 0:
                 plans.append({"value": value, "sku": sku, "qty": need, "kind": kind, "category": c,
-                              "unit_cost": COST_SHARE[kind] * x["list_price"], "cr": round(cr, 3),
+                              "unit_cost": COST_SHARE[kind] * x["list_price"],
+                              "worst_cost": WORST_COST * x["list_price"], "cr": round(cr, 3),
                               "p": round(prob, 3)})
 
     spend = balance - policy.reserve(p, balance)
@@ -128,17 +129,17 @@ def decide(inv, cat, demand, est, p, held, now):
     for pl in sorted(plans, key=lambda x: -x["value"]):
         if len(buy) >= MAX_LINES:
             break
-        qty = pl["qty"]
-        while qty and qty * pl["unit_cost"] > spend:
+        qty, worst = pl["qty"], pl["worst_cost"]   # the caps hold even when every unit comes in at the top cost
+        while qty and qty * worst > spend:
             qty -= 1
         if pl["kind"] == "goods":
-            while qty and qty * pl["unit_cost"] > goods_room:
+            while qty and qty * worst > goods_room:
                 qty -= 1
         if not qty:
             continue
-        spend -= qty * pl["unit_cost"]
+        spend -= qty * worst
         if pl["kind"] == "goods":
-            goods_room -= qty * pl["unit_cost"]
+            goods_room -= qty * worst
         buy.append(dict(pl, qty=qty))
     return buy, new_held
 
