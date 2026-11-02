@@ -20,12 +20,13 @@ Breaks, per goods grade: Beta(1, 9) prior (10%), updated with the `broken` entri
 buyer and SKU, over the exposure of those sales: goods break within 6 h, so a sale counts by the share of its 6 h
 already passed (a sale 3 h ago counts one half).
 
-Prices, per shop (the buyer's model): y = log(price paid / list price) of every settled deal on the ledger, whoever
-bought. A hierarchical normal: y = m_kind + d_shop + b_us + noise. m_kind is the market's mean (food, goods); the
-shop effect d_shop has a N(0, tau^2) prior and its posterior mean is shrunk toward 0 by the shop's (discounted)
-deal count W: d = sum(w (y - m)) / (W + sigma^2 / tau^2). sigma^2 (spread within a shop) and tau^2 (spread
-between shops) come from the data by moments, pulled toward SIGMA0 and TAU0 while there is little. b_us is our
-buyer against the market, shrunk the same way from our own deals. Old deals count less (the same half-life).
+Prices, per shop (the buyer's model): r = price paid / list price of every settled deal on the ledger, whoever
+bought. A shop's ratio is the weighted mean of its deals' r, blended with the market's mean as if the market
+were PRICE_PRIOR_W more deals: (sum w r + 5 x market) / (sum w + 5). A shop with 2 deals sits near the market,
+one with 50 near its own mean. Old deals count less (the same half-life). The same blend gives
+P(we pay at most a price): the share of the shop's deals at or under that ratio. Other buyers haggle differently,
+so the shop's numbers come from their deals only, and our own deals give one factor: what we paid over the shop's
+ratio, blended with 1 the same way.
 
 Price bandit, per kind (food, goods) and arm (share of list price for the opening ask): Beta(1, 1), updated from
 our own negotiations (data/negotiations.jsonl) with a reward in [0, 1]: 0 for no deal, else
@@ -192,10 +193,8 @@ class Estimates:
 
 # --- prices per shop, from everyone's settled deals (the buyer's model)
 
-PRICE_SIGMA0 = 0.15             # log-ratio spread within a shop before data
-PRICE_TAU0 = 0.15               # spread of shop effects before data
-PRICE_M0 = math.log(0.85)       # market mean log ratio before any deal
-PRICE_PRIOR_N = 10              # how many deals' worth the two spreads above weigh
+PRICE_PRIOR_W = 5               # a shop's own deals outweigh the market's mean after 5
+PRICE_R0 = 0.85                 # the market's ratio before any deal
 
 
 def amount_of(d):
@@ -211,62 +210,44 @@ class Prices:
         self.now = now or time.time()
         self.cat = catalog(self.db) or cat or {}
         hl = half_life_h * 3600
-        rows = []                                             # (shop, kind, y, w, ours)
+        self.deals = defaultdict(list)                        # shop -> [(r, w)], other buyers' deals
+        ours = []                                             # (shop, r, w)
         for ts, d in entries(self.db, "settle", self.now - 6 * hl):
             x, a = self.cat.get(sku_of(d)), amount_of(d)
             if not settled(d) or not x or not a or not x.get("list_price") or not d.get("shop"):
                 continue
-            rows.append((d["shop"], x["kind"], math.log(a / x["list_price"]), 0.5 ** ((self.now - ts) / hl),
-                         d.get("buyer") == us))
-        self.n = len(rows)
-        self.m = {}
-        for k in ("food", "goods"):
-            ws = [(y, w) for _, kk, y, w, _ in rows if kk == k]
-            W = sum(w for _, w in ws)
-            self.m[k] = (sum(y * w for y, w in ws) + PRICE_M0) / (W + 1)
-        by = defaultdict(list)                                # shop -> [(residual, w, ours)]
-        for s, k, y, w, ours in rows:
-            by[s].append((y - self.m[k], w, ours))
-        W = {s: sum(w for _, w, _ in r) for s, r in by.items()}
-        mean = {s: sum(e * w for e, w, _ in r) / W[s] for s, r in by.items()}
-        within = sum(w * (e - mean[s]) ** 2 for s, r in by.items() for e, w, _ in r)
-        self.sigma2 = (within + PRICE_PRIOR_N * PRICE_SIGMA0 ** 2) / (sum(W.values()) + PRICE_PRIOR_N)
-        # tau^2 by moments: the spread of shop means minus what their own noise explains
-        big = [s for s in by if W[s] >= 3]
-        raw = (sum((mean[s] ** 2 - self.sigma2 / W[s]) for s in big) / len(big)) if big else 0.0
-        self.tau2 = max((max(raw, 0.0) * len(big) + PRICE_PRIOR_N * PRICE_TAU0 ** 2) / (len(big) + PRICE_PRIOR_N),
-                        0.02 ** 2)
-        k = self.sigma2 / self.tau2
-        self.var = {s: 1 / (W[s] / self.sigma2 + 1 / self.tau2) for s in by}
-        self.W = W
-        # shop effects and our buyer's effect, fitted in turn (our deals would otherwise pull the shop effect
-        # toward our own price and hide part of b)
-        self.Wu = sum(w for r in by.values() for _, w, ours in r if ours)
-        self.b = 0.0
-        for _ in range(5):
-            self.d = {s: sum((e - self.b * ours) * w for e, w, ours in r) / (W[s] + k) for s, r in by.items()}
-            self.b = sum((e - self.d[s]) * w for s, r in by.items() for e, w, ours in r if ours) / (self.Wu + k)
+            r, w = a / x["list_price"], 0.5 ** ((self.now - ts) / hl)
+            if d.get("buyer") == us:
+                ours.append((d["shop"], r, w))
+            else:
+                self.deals[d["shop"]].append((r, w))
+        every = [rw for v in self.deals.values() for rw in v]
+        self.n = len(every) + len(ours)
+        self.market = (sum(r * w for r, w in every) + PRICE_R0) / (sum(w for _, w in every) + 1)
+        self.W = {s: sum(w for _, w in v) for s, v in self.deals.items()}
+        self.shop = {s: (sum(r * w for r, w in v) + PRICE_PRIOR_W * self.market) / (self.W[s] + PRICE_PRIOR_W)
+                     for s, v in self.deals.items()}
+        self.Wu = sum(w for _, _, w in ours)
+        self.us = (sum(r / self.ratio_market(s) * w for s, r, w in ours) + PRICE_PRIOR_W) / (self.Wu + PRICE_PRIOR_W)
 
-    def predict(self, shop, kind):
-        """(mean, sd) of log(price / list) we would pay at `shop`; an unseen shop gets the market mean."""
-        mu = self.m.get(kind, PRICE_M0) + self.d.get(shop, 0.0) + self.b
-        return mu, math.sqrt(self.sigma2 + self.var.get(shop, self.tau2))
+    def ratio_market(self, shop):
+        """The shop's ratio from other buyers' deals (the market's mean for a shop nobody bought from)."""
+        return self.shop.get(shop, self.market)
 
-    def ratio(self, shop, kind):
-        """Median price / list price we would pay at `shop`."""
-        return math.exp(self.predict(shop, kind)[0])
+    def ratio(self, shop):
+        """The price / list price we expect to pay at `shop`."""
+        return self.ratio_market(shop) * self.us
 
-    def p_within(self, shop, kind, price, list_price):
-        """P(the price we end at, at `shop`, is at most `price`), e.g. the budget."""
-        if price <= 0:
-            return 0.0
-        mu, sd = self.predict(shop, kind)
-        return 0.5 * (1 + math.erf((math.log(price / list_price) - mu) / (sd * math.sqrt(2))))
+    def p_within(self, shop, price, list_price):
+        """P(we end at or under `price` at `shop`): the share of its deals at or under that ratio (for us), blended
+        with the market's share the same way."""
+        cut = price / list_price / self.us
+        every = [rw for v in self.deals.values() for rw in v]
+        tot = sum(w for _, w in every)
+        market = sum(w for r, w in every if r <= cut) / tot if tot else float(cut >= PRICE_R0)
+        v = self.deals.get(shop, [])
+        return (sum(w for r, w in v if r <= cut) + PRICE_PRIOR_W * market) / (self.W.get(shop, 0) + PRICE_PRIOR_W)
 
-    def draw(self, shop, kind):
-        """A Thompson draw of the shop's median ratio: the shop effect from its posterior, not a single deal."""
-        return math.exp(self.m.get(kind, PRICE_M0) + self.b
-                        + random.gauss(self.d.get(shop, 0.0), math.sqrt(self.var.get(shop, self.tau2))))
 
 
 # --- price bandit: Thompson sampling over opening-ask arms, from our own negotiations
@@ -327,11 +308,9 @@ if __name__ == "__main__":
         print(f"  {e.rate(c):7.2f}/h  ours {e.w_ours[c]:.1f}  {c}")
     print("break rate by grade:", {g: round(r, 3) for g, r in e.break_rate.items()}, e.break_counts)
     pr = Prices(e.db, cat=e.cat, now=e.now, half_life_h=e.p["half_life_h"])
-    print(f"prices: {pr.n} settles, market median ratio "
-          f"{ {k: round(math.exp(v), 3) for k, v in pr.m.items()} }, sigma {math.sqrt(pr.sigma2):.3f}, "
-          f"tau {math.sqrt(pr.tau2):.3f}, our buyer x{math.exp(pr.b):.3f} ({pr.Wu:.1f} deals)")
-    for s in sorted(pr.d, key=pr.d.get)[:5]:
-        print(f"  x{math.exp(pr.d[s]):.3f}  ({pr.W[s]:.1f} deals)  {s}")
+    print(f"prices: {pr.n} settles, market ratio {pr.market:.3f}, our buyer x{pr.us:.3f} ({pr.Wu:.1f} deals)")
+    for s in sorted(pr.shop, key=pr.shop.get)[:5]:
+        print(f"  {pr.shop[s]:.3f}  ({pr.W[s]:.1f} deals)  {s}")
     s = bandit_stats()
     for k in ("food", "goods"):
         print(k, {a: round(s[(k, a)][0] / sum(s[(k, a)]), 2) for a in policy.ARMS})
