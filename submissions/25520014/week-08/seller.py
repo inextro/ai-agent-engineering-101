@@ -30,7 +30,9 @@ Price:
 Receipt: {shop, item (SKU), price, task, unit, claim (the true grade)}, warranty_hours on goods when the policy
 offers it for that grade. The certificate is always shown (no cert: false). Claims are never false.
 
-Every negotiation is one line in data/negotiations.jsonl when it opens and one when it closes; the price bandit
+The manager's playbook adds its negotiation guidance to haiku's prompt (no digits in it; the code's rules come
+first). Every message and reply is a line in data/turns.jsonl (template or not, tries, policy and playbook
+versions) for the manager's hourly review. Every negotiation is one line in data/negotiations.jsonl when it opens and one when it closes; the price bandit
 counts an open line with no close after 10 minutes as no deal. Requests for things not in stock go to
 data/missed.jsonl (are buyers asking shops that hold none of it?).
 """
@@ -63,6 +65,7 @@ SHOP = os.environ.get("SHOP_TITLE", "Inextro Market")       # the display name; 
 MARKET_DIR = Path(os.environ.get("MARKET_DIR", ".market"))
 NEGOTIATIONS = model.NEGOTIATIONS
 MISSED = policy.DATA / "missed.jsonl"
+TURNS = policy.DATA / "turns.jsonl"         # every message and reply, for the manager's hourly review
 REPLY_MODEL, REPLY_EFFORT, REPLY_TIMEOUT = "haiku", "medium", 20
 GRADE_WORDS = {
     "food": {"A": "grade A, plenty of shelf life left", "B": "grade B, a fair amount of shelf life left",
@@ -94,8 +97,8 @@ def accepts(text):
 def offer_in(text, name):
     """The buyer's number: the last number in the message that is not part of the product's name or a SKU."""
     clean = SKU_RE.sub(" ", text)
-    for n in re.findall(r"\d[\d,]*", name or ""):
-        clean = clean.replace(n, " ")
+    for n in re.findall(r"\d[\d,]*", name or ""):   # whole numbers only: "900g" in the name must not eat "9000"
+        clean = re.sub(rf"(?<![\d,]){re.escape(n)}(?![\d,])", " ", clean)
     nums = [int(n.replace(",", "")) for n in re.findall(r"\d[\d,]*(?:\.\d+)?", clean) if n.replace(",", "").isdigit()]
     return nums[-1] if nums else None
 
@@ -162,33 +165,46 @@ def check_reply(reply, u, price, buyer_text):
     return None
 
 
-def ask_checked(prompt, parse, tag):
+def guidance():
+    """The manager's negotiation guidance (playbook.json), as a prompt line; empty when there is none."""
+    g = policy.load_playbook().get("negotiation")
+    return (f"Shop manager's guidance (follow it where it fits; every rule here and what the shop does now come "
+            f"first): {g}\n") if g else ""
+
+
+def ask_checked(prompt, parse, tag, how=None):
     """haiku's answer through parse(answer) -> (value, problem). A problem gets one retry with the reason and the
-    rejected answer; None when the call fails or both answers fail (the caller then uses a template)."""
+    rejected answer; None when the call fails or both answers fail (the caller then uses a template). `how` gets
+    the number of tries and why the last one failed, for data/turns.jsonl."""
+    how = how if how is not None else {}
     for attempt in (1, 2):
+        how["tries"] = attempt
         t0 = time.time()
         try:
             answer = harness.call(prompt, timeout=REPLY_TIMEOUT, model=REPLY_MODEL, effort=REPLY_EFFORT).strip()
         except Exception as e:
             log(f"{tag}: harness failed after {time.time() - t0:.1f}s ({type(e).__name__}), template")
+            how["failed"] = f"harness {type(e).__name__}"
             return None
         value, problem = parse(answer)
         if problem is None:
             log(f"{tag}: {time.time() - t0:.1f}s{' (retry)' if attempt == 2 else ''} {answer[:240]!r}")
             return value
         log(f"{tag}: {time.time() - t0:.1f}s rejected ({problem}): {answer[:160]!r}")
+        how["failed"] = problem
         prompt += (f"\n\nYour answer was rejected because {problem}. Write it again, keeping every rule above.\n"
                    f"Rejected answer: {answer[:600]}")
     log(f"{tag}: rejected twice, template")
     return None
 
 
-def write_reply(u, price, situation, history, buyer_text, template):
+def write_reply(u, price, situation, history, buyer_text, template, how=None):
     prompt = (
         f"You are the sales clerk of {SHOP}, an online shop. A buyer is negotiating for one unit of "
         f"{u['name']!r}.\n"
         f"Facts about this unit (the only things you may state about it): {facts(u, u.get('_warranty'))}.\n"
         f"What the shop does now: {situation}\n"
+        f"{guidance()}"
         f"Conversation so far:\n{history}\n"
         f"Buyer's last message: {buyer_text!r}\n\n"
         "Write the shop's reply in at most three short sentences, in the buyer's language (English when it is "
@@ -197,7 +213,7 @@ def write_reply(u, price, situation, history, buyer_text, template):
         "Never invent facts. Unless the shop's move says the price is final, do not call it final, best or lowest. "
         f"The price is {price}: write it exactly once, as digits, as the last thing in the message. Write no "
         "other digits (spell out any other number). Reply with the message text only.")
-    reply = ask_checked(prompt, lambda a: (a, check_reply(a, u, price, buyer_text)), "reply")
+    reply = ask_checked(prompt, lambda a: (a, check_reply(a, u, price, buyer_text)), "reply", how)
     return template if reply is None else reply
 
 
@@ -215,7 +231,7 @@ The shop would rather sell the lower grades (older stock), but only to a buyer w
 - the buyer looks like a fixed script (template wording, bare numbers) and has said nothing about condition: offer
   the best grade, since a script may refuse a low grade at checkout;
 - the shop currently offers {current}: keep it unless the buyer's words give a reason to switch.
-
+{guide}
 Conversation so far:
 {history}
 Buyer's last message: {buyer!r}
@@ -226,7 +242,7 @@ facts, say the shop cannot promise it; unless that unit's move says the price is
 or lowest; the price of that unit exactly once, as digits, as the last thing; no other digits>"}}"""
 
 
-def choose_reply(deal, moves, history, buyer_text):
+def choose_reply(deal, moves, history, buyer_text, how=None):
     """haiku picks the grade from what the buyer said and writes the reply; the code checks it like any reply."""
     o = deal["opts"]
     fallback = deal["cur"] or max(o, key=RANK.get)   # unsure: the best grade (a buyer who minds rates a low one badly)
@@ -234,7 +250,7 @@ def choose_reply(deal, moves, history, buyer_text):
                         f"If you offer {k}: {situation(moves[k])}" for k in sorted(o, key=RANK.get))
     prompt = CHOOSE.format(shop=SHOP, options=options, current=deal["cur"] or "nothing yet",
                            keys=" or ".join(f'"{k}"' for k in sorted(o, key=RANK.get)), history=history,
-                           buyer=buyer_text)
+                           buyer=buyer_text, guide=guidance())
 
     def parse(answer):
         try:
@@ -246,7 +262,7 @@ def choose_reply(deal, moves, history, buyer_text):
             return None, f"\"unit\" must be one of {', '.join(o)}"
         return (key, reply), check_reply(reply, o[key]["unit"], moves[key]["price"], buyer_text)
 
-    got = ask_checked(prompt, parse, "choose")
+    got = ask_checked(prompt, parse, "choose", how)
     if got is None:
         return fallback, template(o[fallback]["unit"], moves[fallback])
     return got
@@ -394,7 +410,8 @@ class Seller(AgentExecutor):
         arm = model.pick_arm(next(iter(by_grade.values())).get("kind", "goods"))
         opts = {g: option(u, p, arm) for g, u in by_grade.items()}
         deal = self.open[task_id] = {"opts": opts, "cur": next(iter(opts)) if len(opts) == 1 else None, "arm": arm,
-                                     "steps": int(p["max_concessions"]), "lines": [], "t0": time.time()}
+                                     "steps": int(p["max_concessions"]), "lines": [], "t0": time.time(),
+                                     "pv": p.get("version"), "bv": policy.load_playbook().get("version")}
         for k, o in opts.items():
             u = o["unit"]
             log(f"[task {task_id[:8]}] {k} {u['sku']} {u.get('grade')} cost {u['cost']} list "
@@ -413,12 +430,14 @@ class Seller(AgentExecutor):
         moves = {k: next_move(o, offer, deal["steps"], opening, k == cur and offer is None and accepts(text),
                               deal.get("over_seen", False)) for k, o in opts.items()}
         history = "\n".join(deal["lines"][-8:])
+        how = {}
         if len(opts) == 1 or (cur and bare(text)):
             key = cur or next(iter(opts))
             u, m = opts[key]["unit"], moves[key]
-            reply = await asyncio.to_thread(write_reply, u, m["price"], situation(m), history, text, template(u, m))
+            reply = await asyncio.to_thread(write_reply, u, m["price"], situation(m), history, text, template(u, m),
+                                            how)
         else:
-            key, reply = await asyncio.to_thread(choose_reply, deal, moves, history, text)
+            key, reply = await asyncio.to_thread(choose_reply, deal, moves, history, text, how)
         if cur and key != cur:
             log(f"[task {task_id[:8]}] switched {cur} -> {key}")
         deal["cur"] = key
@@ -427,12 +446,18 @@ class Seller(AgentExecutor):
             o["ask"], o["step"] = moves[k]["price"], moves[k]["step"]
         deal["lines"].append(f"shop: {reply}")
         u, m = opts[key]["unit"], moves[key]
+        append(TURNS, {"ts": time.time(), "task": task_id, "buyer": text[:600], "shop": reply[:600], "unit": key,
+                       "grade": u.get("grade"), "sku": u["sku"], "price": m["price"], "close": bool(m["close"]),
+                       "template": reply == template(u, m),
+                       "tries": how.get("tries"), "failed": how.get("failed"),
+                       "policy": deal["pv"], "playbook": deal["bv"]})
         if opening:
             append(NEGOTIATIONS, {"ts": time.time(), "task": task_id, "outcome": "open", "sku": u["sku"],
                                   "unit": u["unit"], "kind": u.get("kind"), "grade": u.get("grade"),
                                   "arm": deal["arm"], "list_price": u["list_price"], "cost": u["cost"],
                                   "ask": opts[key]["ask"], "floor": opts[key]["floor"], "chose": key,
-                                  "options": {k: o["unit"].get("grade") for k, o in opts.items()}})
+                                  "options": {k: o["unit"].get("grade") for k, o in opts.items()},
+                                  "policy": deal["pv"], "playbook": deal["bv"]})
         if m["close"]:
             await self.close(task_id, deal, m["price"], reply, up, say)
             return
