@@ -191,8 +191,12 @@ def reward(rec):
     return min(1.0, (0.5 * margin + 0.3 * rec["price"]) / (0.8 * rec["list_price"]))
 
 
-def bandit_stats(path=NEGOTIATIONS, since=0):
+def bandit_stats(path=NEGOTIATIONS, since=0, now=None):
+    """Beta counts per (kind, arm). A negotiation is its `open` line plus a `deal` line, or no deal when it was
+    cancelled or has been open for 10 minutes (buyers often just stop answering)."""
+    now = now or time.time()
     stats = {(k, a): [1.0, 1.0] for k in ("food", "goods") for a in policy.ARMS}
+    opened, closed = {}, {}
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -202,10 +206,20 @@ def bandit_stats(path=NEGOTIATIONS, since=0):
             rec = json.loads(line)
         except ValueError:
             continue
-        key = (rec.get("kind"), rec.get("arm"))
-        if key not in stats or rec.get("ts", 0) < since or rec.get("outcome") == "open":
+        if rec.get("ts", 0) < since or not rec.get("task"):
             continue
-        r = reward(rec)
+        if rec.get("outcome") == "open":
+            opened[rec["task"]] = rec
+        else:
+            closed[rec["task"]] = rec
+    for task, rec in opened.items():
+        end = closed.get(task)
+        if end is None and now - rec["ts"] < 600:
+            continue
+        key = (rec.get("kind"), rec.get("arm"))
+        if key not in stats:
+            continue
+        r = reward(end) if end and end.get("outcome") == "deal" else 0.0
         stats[key][0] += r
         stats[key][1] += 1 - r
     return stats
