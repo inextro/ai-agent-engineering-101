@@ -69,6 +69,11 @@ MEMORY_CHARS = 1500
 ARCHIVE_FULL_H = 48                      # every hour this recent is in the index; older ones only when flagged
 LOOKUP_ROUNDS, LOOKUP_HOURS = 2, 3
 WHAT = ("negotiations", "settles", "broken", "forum", "balance", "board", "decision")
+VOTES = policy.DATA / "votes.json"       # posts we liked, per role, so a post gets our vote once
+UPVOTES_MAX = 5
+UPVOTE_RULE = """Upvote: "upvote" lists the ids of forum posts by others (from the record) whose information you
+actually used in this decision, e.g. a report of a shop's prices or a complaint that made you change something.
+Not for agreement, politeness or posts you merely read; [] when none. Each post gets our vote once."""
 
 
 def log(msg):
@@ -286,6 +291,7 @@ Answer with one JSON object only:
               "restock_skip": {{"<category>": <hours, 0 to stop skipping>}} or null}},
  "reason": "<two sentences: what in the record, what you changed>",
  "notes": "<what to watch next hour, for yourself>",
+ "upvote": [<post id>, ...],
  "report_ko": "<the owner's report in Korean, a few short lines: what happened, what you found, what you did and why, what you will check next>"}}"""
 
 
@@ -424,7 +430,7 @@ def decide(md, now):
     prompt = PROMPT.format(policy=describe(p), negotiation=json.dumps(b["negotiation"] or "(none)"),
                            forum=json.dumps(b["forum"] or "(none)"), skips=json.dumps(skips),
                            chars=policy.GUIDE_CHARS, skip_hours=policy.SKIP_HOURS, skip_max=policy.SKIP_MAX,
-                           summary=json.dumps(s, ensure_ascii=False, indent=1))
+                           summary=json.dumps(s, ensure_ascii=False, indent=1)) + "\n\n" + UPVOTE_RULE
     memory = MEMORY.read_text(encoding="utf-8") if MEMORY.exists() else ""
     index, looked, used, answer = archive_index(now), [], [], None
     db = model.connect()
@@ -471,21 +477,48 @@ def decide(md, now):
         else:
             MEMORY.write_text(mem.strip() + "\n", encoding="utf-8")
     archive(now, s, answer, changed, pb_changed)
+    liked = upvote(md, answer.get("upvote"), db, "shop")
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps({"ts": now, "model": used, "asked": answer.get("changes"), "changed": changed,
                             "playbook_asked": answer.get("playbook"), "playbook_changed": pb_changed,
                             "refused": refused, "review": answer.get("review"), "problems": answer.get("problems"),
                             "reason": reason, "notes": str(answer.get("notes", ""))[:1000],
-                            "lookups": len(looked), "memory": answer.get("memory"),
+                            "lookups": len(looked), "memory": answer.get("memory"), "upvoted": liked,
                             "prompt_chars": len(prompt)}, ensure_ascii=False) + "\n")
-    report(now, used, s["health"]["alerts"], changed, pb_changed, refused, str(answer.get("report_ko", "")))
+    report(now, used, s["health"]["alerts"], changed, pb_changed, refused, str(answer.get("report_ko", "")), liked)
     log(f"{used}: {'changed ' + json.dumps(changed, ensure_ascii=False) if changed else 'no change'}"
         f"{' | playbook ' + ', '.join(pb_changed) if pb_changed else ''}"
         f"{' | refused ' + '; '.join(refused) if refused else ''} | {reason}")
     return new, bool(changed)
 
 
-def report(now, used, alerts, changed, pb_changed, refused, text):
+def upvote(md, ids, db, role):
+    """Like the posts the manager says it used: known posts by others, not liked by us before, at most UPVOTES_MAX.
+    Returns the ids sent (the kit posts the votes from .market/outbox.jsonl; they count once we have 5 deals)."""
+    try:
+        voted = json.loads(VOTES.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        voted = {}
+    done, sent = set(voted.get(role, [])), []
+    for i in (ids if isinstance(ids, list) else [])[:UPVOTES_MAX]:
+        try:
+            i = int(i)
+        except (TypeError, ValueError):
+            continue
+        row = db.execute("SELECT author FROM forum_posts WHERE id=?", (i,)).fetchone()
+        if not row or i in done or "inextro" in str(row[0]).lower():
+            continue
+        with open(md / "outbox.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps({"vote": i, "value": 1, "as": role}) + "\n")
+        done.add(i)
+        sent.append(i)
+    if sent:
+        voted[role] = sorted(done)[-2000:]
+        VOTES.write_text(json.dumps(voted), encoding="utf-8")
+    return sent
+
+
+def report(now, used, alerts, changed, pb_changed, refused, text, liked=()):
     """One entry of the owner's report: the model's Korean summary, then what the code actually applied."""
     lines = [f"## {time.strftime('%m-%d %H:%M', time.localtime(now))} ({used or '판단 없음'})", "", text.strip() or "(보고 없음)", ""]
     if alerts:
@@ -498,6 +531,8 @@ def report(now, used, alerts, changed, pb_changed, refused, text):
         lines += [f"- playbook {k}: {json.dumps(old, ensure_ascii=False)} → {json.dumps(new, ensure_ascii=False)}"]
     if refused:
         lines += ["- 적용 거부: " + "; ".join(refused)]
+    if liked:
+        lines += ["- 좋아요: 게시글 " + ", ".join(map(str, liked))]
     if not (changed or pb_changed):
         lines += ["- 변경 없음"]
     with open(REPORTS, "a", encoding="utf-8") as f:
