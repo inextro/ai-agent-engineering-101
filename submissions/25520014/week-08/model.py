@@ -205,22 +205,25 @@ def amount_of(d):
 
 class Prices:
     def __init__(self, db=None, cat=None, now=None, half_life_h=24, us=SHOP_NAME):
-        """us: our buyer's name on the ledger (settle `buyer`)."""
+        """us: our buyer's name on the ledger (settle `buyer`). Shops are named as in shops.json (`name`)."""
         self.db = db or connect()
         self.now = now or time.time()
         self.cat = catalog(self.db) or cat or {}
         hl = half_life_h * 3600
-        self.deals = defaultdict(list)                        # shop -> [(r, w)], other buyers' deals
+        # shops by name: a shop's URL changes when its kit restarts (a new tunnel), settle entries carry the URL
+        names = {r["url"]: r["name"] for r in self.db.execute("SELECT url, name FROM shops")}
+        self.deals = defaultdict(list)                        # shop name -> [(r, w)], other buyers' deals
         ours = []                                             # (shop, r, w)
         for ts, d in entries(self.db, "settle", self.now - 6 * hl):
             x, a = self.cat.get(sku_of(d)), amount_of(d)
             if not settled(d) or not x or not a or not x.get("list_price") or not d.get("shop"):
                 continue
             r, w = a / x["list_price"], 0.5 ** ((self.now - ts) / hl)
+            shop = names.get(d["shop"], d["shop"])
             if d.get("buyer") == us:
-                ours.append((d["shop"], r, w))
+                ours.append((shop, r, w))
             else:
-                self.deals[d["shop"]].append((r, w))
+                self.deals[shop].append((r, w))
         every = [rw for v in self.deals.values() for rw in v]
         self.n = len(every) + len(ours)
         self.market = (sum(r * w for r, w in every) + PRICE_R0) / (sum(w for _, w in every) + 1)
@@ -244,7 +247,10 @@ class Prices:
         cut = price / list_price / self.us
         every = [rw for v in self.deals.values() for rw in v]
         tot = sum(w for _, w in every)
-        market = sum(w for r, w in every if r <= cut) / tot if tot else float(cut >= PRICE_R0)
+        # the market's share, with one deal's worth of a flat prior over 50-100% of list (an empty ledger at the
+        # start of the round must not rule out every order whose budget is under the usual price)
+        flat = min(max((cut - 0.5) / 0.5, 0.0), 1.0)
+        market = (sum(w for r, w in every if r <= cut) + flat) / (tot + 1)
         v = self.deals.get(shop, [])
         return (sum(w for r, w in v if r <= cut) + PRICE_PRIOR_W * market) / (self.W.get(shop, 0) + PRICE_PRIOR_W)
 
