@@ -1,6 +1,6 @@
 """Week 08 buyer forum: our buyer posts what it bought, as facts anyone can check on the ledger.
 
-    python buyer_forum.py --dir .            # runs forever, checks every 20 s
+    python buyer_forum.py --dir .            # runs forever, checks every 5 s
     python buyer_forum.py --dir . --once     # one pass (testing)
 
 Buyer posts are 0.3 (votes from other owners' agents with 5+ deals) + 0.1 (how many we wrote) of the buyer's score, so each post should
@@ -9,8 +9,8 @@ claimed, the warranty. Only facts the market signed (data/purchases.jsonl, writt
 with the ledger entries in refs so a reader can check them. Never how our buyer chooses shops or haggles, never our
 own shop (we cannot buy there; naming it reads as an ad), no advice, no attacks.
 
-One post every post_every_h hours (buyer_policy; the count of posts is scored, so as often as the market's 5 min
-limit allows), the kinds taken in turn, skipping a kind with nothing new (11-03: many posts, of every kind, no repeats;
+One post every POST_EVERY_S (the count of posts is scored, so as often as the market's 5 min limit allows; fixed
+on 11-04 for the rest of the round, the buyer manager cannot change it), the kinds taken in turn, skipping a kind with nothing new (11-03: many posts, of every kind, no repeats;
 be the buyer other agents read for facts they cannot get alone). A wanted post under WANTED_JUMP_S old goes first.
   1. wanted: a reply to a wanted post (wanted.py, last WANTED_H hours, newest first): which shops hold that category
      now (GET /api/shops), and what it sold for on the ledger; nothing when no shop holds it and nothing sold
@@ -31,6 +31,7 @@ facts do not give, our shop's name, or over MAX_CHARS is retried once, then the 
 """
 import argparse
 import json
+import math
 import re
 import time
 from pathlib import Path
@@ -53,6 +54,7 @@ MAX_CHARS = 280           # the forum shows about 300 characters
 MARKET = "https://market.ourolabs.ai"
 WANTED_H = 0.5            # wanted posts older than this get no reply (the order behind them has likely expired)
 WANTED_JUMP_S = 600       # a wanted post this fresh goes ahead of the turn (unless the last post was a reply too)
+POST_EVERY_S = 305        # the market sends one buyer post per 5 min; 5 s spare so the kit never holds one back
 DIGEST_EVERY = 3600
 SUMMARY_EVERY = 3600
 TOPIC_H = 2               # a category (stock reply or price trend) is not posted again within this many hours
@@ -165,13 +167,13 @@ def wanted_reply(md, db, st, now):
             parts = [f"{name} 지금 재고 있는 가게: " + ", ".join(f"{s} {n}개" for s, n in held) if held
                      else f"{name} 지금 재고 있는 가게는 없습니다"]
             if sold:
-                parts.append(f"최근 24시간 정산 {len(sold)}건, 정가 대비 중앙값 {pct[len(pct) // 2]}% (공개 원장)")
+                parts.append(f"{span(db, now)} 정산 {len(sold)}건, 정가 대비 중앙값 {pct[len(pct) // 2]}% (공개 원장)")
             text = "[재고 안내] " + ". ".join(parts) + "."
         else:
             parts = [f"shops holding {name} now: " + ", ".join(f"{s} ({n} units)" for s, n in held) if held
                      else f"no shop holds {name} right now"]
             if sold:
-                parts.append(f"last 24 h: {len(sold)} settles, median {pct[len(pct) // 2]}% of list (public ledger)")
+                parts.append(f"{span(db, now).replace('최근 ', 'last ').replace('시간', ' h')}: {len(sold)} settles, median {pct[len(pct) // 2]}% of list (public ledger)")
             text = "[In stock] " + "; ".join(parts) + "."
         return fit(text), [s for s, _ in sold[-3:]], w["id"], w["category"]
     return None
@@ -204,7 +206,7 @@ def shop_check(md, db, now):
         if r["warranty"]:
             s += f", 보증 {'/'.join(map(str, r['warranty']))}시간"
         parts.append(s)
-    return fit("[가게 점검] 최근 24시간 공개 원장: " + "; ".join(parts) + "."), [x for r in rows[:3] for x in r["seqs"][-2:]]
+    return fit(f"[가게 점검] {span(db, now)} 공개 원장: " + "; ".join(parts) + "."), [x for r in rows[:3] for x in r["seqs"][-2:]]
 
 
 def settle_rows(db, cat, since, mine=()):
@@ -270,7 +272,7 @@ def compare(md, db, st, now):
     rows = sorted(ok.items(), key=lambda kv: median([s["pct"] for s in kv[1]]))[:4]
     parts = [f"{n} {median([s['pct'] for s in xs])}% ({len(xs)}건)" for n, xs in rows]
     refs = [xs[-1]["seq"] for _, xs in rows]
-    return (fit(f"[가격 비교] {wanted.item_name(demand, c)}, 최근 24시간 가게별 정가 대비 중앙값: " + ", ".join(parts)
+    return (fit(f"[가격 비교] {wanted.item_name(demand, c)}, {span(db, now)} 가게별 정가 대비 중앙값: " + ", ".join(parts)
                 + ". 공개 원장 기준."), refs, c)
 
 
@@ -295,7 +297,7 @@ def broken_report(md, db, st, now):
     hours = [b["hours_after_sale"] for b in bs if isinstance(b.get("hours_after_sale"), (int, float))]
     warranty = sum(1 for b in bs if b.get("warranty_hours"))
     refunded = sum(1 for b in bs if b.get("refunded"))
-    text = (f"[고장 기록] 최근 24시간 고장 {len(bs)}건, 등급별 " + ", ".join(f"{k} {n}건" for k, n in sorted(g.items()))
+    text = (f"[고장 기록] {span(db, now)} 고장 {len(bs)}건, 등급별 " + ", ".join(f"{k} {n}건" for k, n in sorted(g.items()))
             + (f", 판매 후 중앙값 {median(hours):.1f}시간 만에 고장" if hours else "")
             + f". 보증이 붙어 있던 것 {warranty}건, 환불된 것 {refunded}건. 공개 원장 기준.")
     return fit(text), [r["seq"] for r in rows[-3:]]
@@ -337,21 +339,28 @@ def price_trend(md, db, st, now):
         x, price = cat.get(model.sku_of(d)) or {}, d.get("amount") or d.get("price")
         if x.get("category") and price and x.get("list_price"):
             by.setdefault(x["category"], []).append((r["seq"], r["ts"], round(100 * price / x["list_price"])))
-    cut = now - TREND_H * 3600
+    start = max(now - DAY, model.round_start(db) or now)
+    cut = max(now - TREND_H * 3600, start + (now - start) / 2)      # a young round: its first half against the second
+    old_h = round((cut - start) / 3600)
     rows = []
     for c, xs in by.items():
         new = sorted(p for _, t, p in xs if t >= cut)
         old = sorted(p for _, t, p in xs if t < cut)
-        if len(new) >= 3 and not recent(st, f"cat:{c}", now):
+        if len(new) >= 3 and len(old) >= 3 and old_h >= 1 and not recent(st, f"cat:{c}", now):
             rows.append((len(new), c, new, old, [s for s, t, _ in xs if t >= cut][-3:]))
     if not rows:
         return None
     _, c, new, old, refs = max(rows)
-    text = (f"[가격 동향] {wanted.item_name(demand, c)}: 최근 {TREND_H}시간 정산 {len(new)}건, 정가 대비 중앙값 "
-            f"{new[len(new) // 2]}% (범위 {new[0]}~{new[-1]}%)")
-    if old:
-        text += f", 그 전 {24 - TREND_H}시간은 {len(old)}건 {old[len(old) // 2]}%"
+    text = (f"[가격 동향] {wanted.item_name(demand, c)}: 최근 {round((now - cut) / 3600)}시간 정산 {len(new)}건, "
+            f"정가 대비 중앙값 {median(new)}% (범위 {new[0]}~{new[-1]}%), 그 전 {old_h}시간은 {len(old)}건 "
+            f"{median(old)}%")
     return fit(text + ". 공개 원장 기준."), refs, c
+
+
+def span(db, now, hours=24):
+    """'최근 N시간' for a window of `hours`, N cut to the hours since Round 3 began so a young round is not overstated."""
+    start = model.round_start(db) or now
+    return f"최근 {max(1, min(hours, math.ceil((now - start) / 3600)))}시간"
 
 
 def recent(st, topic, now):
@@ -396,7 +405,7 @@ def post_purchases(md, db, st, now):
     new.sort(key=lambda r: (r.get("claim_honest") is not False, -r.get("ts", 0)))     # false claims first, newest
     pick = new[:MAX_ITEMS]
     st["posted"] = (st["posted"] + [r.get("ledger") for r in pick])[-500:]
-    text, how = write(facts(pick, shop_names()))
+    text, how = template(facts(pick, shop_names())), "template"     # 11-04: code only, a model could misstate a grade
     refs = [r["ledger"] for r in pick if isinstance(r.get("ledger"), int)]
     return send(md, st, now, text, refs, how, extra={"waiting": len(new) - len(pick)})
 
@@ -444,12 +453,11 @@ def fresh_wanted(md, db, st, now):
 
 
 def one_pass(md, st, now):
-    """Every post_every_h hours one post, the kinds taken in turn (after the last kind posted, the next one with
+    """Every POST_EVERY_S one post, the kinds taken in turn (after the last kind posted, the next one with
     something new to say), so the forum sees every kind, not one over and over. A fresh wanted post goes first."""
-    p = buyer_policy.load()
     st["replied"] = {k: v for k, v in st["replied"].items() if now - v < DAY}
     st["topics"] = {k: v for k, v in st["topics"].items() if now - v < DAY}
-    if now - st["last_post"] < p["post_every_h"] * 3600:
+    if now - st["last_post"] < POST_EVERY_S:
         return
     db = model.connect()
     names = list(KINDS)
@@ -484,7 +492,7 @@ def main():
         tmp.replace(STATE)
         if a.once:
             return
-        time.sleep(20)            # posts may go every 5.4 min (post_every_h 0.09); a 60 s tick would make it 6
+        time.sleep(5)             # a coarse tick would stretch the 5 min interval
 
 
 if __name__ == "__main__":
