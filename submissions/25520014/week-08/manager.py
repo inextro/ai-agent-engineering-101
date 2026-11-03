@@ -177,6 +177,20 @@ def excerpts(now):
     return talks, [{"request": k, "times": n} for k, n in missed.most_common(MISSED_SHOWN)]
 
 
+def restock_plan(units):
+    """restock's last plan beside what we actually hold: the target is what the money and the demand posterior ask
+    for, not stock (11-03: a target of 138 categories read as 'held' looked like a counting bug)."""
+    st = json.loads((policy.DATA / "restock_state.json").read_text()) if (policy.DATA / "restock_state.json").exists() else {}
+    target = st.get("target") or {}
+    have = Counter(u.get("category") for u in units if u.get("grade") != "expired")
+    return {"target_categories": len(target), "target_units": sum(target.values()),
+            "held_categories_now": len(have), "held_units_now": sum(have.values()),
+            "target_categories_with_no_stock_now": sum(1 for c in target if not have.get(c)),
+            **{k: st.get(k) for k in ("cycle_minutes", "lines_per_window", "window_minutes", "reserve",
+                                      "refunds_expected", "refunds_sd", "cash_to_spend", "price_ours_factor",
+                                      "price_market_ratio")}}
+
+
 def summary(md, now):
     """What opus sees: numbers by code, plus the newest forum posts and our reviews as text."""
     p = policy.load()
@@ -210,8 +224,7 @@ def summary(md, now):
                   "at_cost": round(sum(u.get("cost", 0) for u in units)),
                   "grades": dict(Counter(u.get("grade") for u in units)),
                   "food_expiring_6h": sum(1 for u in units if u.get("expires_at") and u["expires_at"] - now < 6 * 3600)},
-        "held_categories": len(json.loads((policy.DATA / "restock_state.json").read_text())["held"])
-                           if (policy.DATA / "restock_state.json").exists() else None,
+        "restock_plan": restock_plan(units),
         "restock_last_hour": {"runs": len(restocks), "units_bought": sum(b["qty"] for r in restocks for b in r["buy"])},
         "negotiations_6h": {"opened": len(opened), "deals": len(deals),
                             "deal_price_over_list": round(sum(d["price"] / d["list_price"] for d in deals) / len(deals), 3)
@@ -251,9 +264,13 @@ def summary(md, now):
 
 PROMPT = """You are the manager of a shop in an agent marketplace (Round 3, 14 days). The shop's code sells units
 it bought from the market, negotiates with buyer agents (haiku writes the replies; the code sets every price and
-unit), answers forum posts about the shop (opus), and restocks by a newsvendor rule on a gamma-Poisson demand estimate,
-buying only in the market's supply windows (planned so stock lasts until the next window; few restock runs an hour
-are expected). You do not trade. Once an hour you review the last hour and set what the code runs on next. The
+unit), answers forum posts about the shop (opus), and restocks in the market's supply windows (a few runs an hour are
+expected). restock prices every unit by the gamma-Poisson demand posterior: the k-th unit of a category is worth
+P(we sell at least k before the category is refilled) x the margin minus the rest x what an unsold unit costs
+(storage, food ageing), with the sale price expected from the ledger (the market's ratio per category times our
+shop's factor). Units are bought best value per won first until the cash above the reserve (bankruptcy line +
+warranty refunds we may still owe + refund_sd standard deviations) runs out; categories that do not make the cut
+are not held. restock_plan in the record shows the plan beside what is actually held. You do not trade. Once an hour you review the last hour and set what the code runs on next. The
 owner does not watch; they read your report afterwards and correct you when needed.
 
 Score (percentiles among shops): 0.5 x profit (balance - 5,000,000 - bankruptcy money; unsold stock counts as a

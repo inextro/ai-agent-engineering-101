@@ -13,8 +13,19 @@ Our share of a category's deals: Beta, prior mean 1 / (shops holding stock in th
 weight 5, updated with our deals against everyone's deals in the categories we sold in. One share for the shop.
 
 Then for a horizon of H hours, with our rate s * lambda, the gamma-Poisson predictive count is negative binomial:
-    P(we sell none in H) = (beta / (beta + s H)) ** alpha
-which is what the newsvendor rule in restock.py compares with its critical ratio.
+    P(we sell none in H) = (beta / (beta + s H)) ** alpha,   and tail(c, H)[k-1] = P(we sell at least k in H)
+which restock.py uses to price the k-th unit of a category (11-03: one rule for whether to hold and how many).
+
+Sale prices, per category (what restock expects a unit to sell for; the fixed 0.85 x list it used before was a
+guess): r = price paid / list price of the other shops' settled deals, a category's weighted mean blended with the
+market's mean as if the market were PRICE_PRIOR_W more deals, times one factor for our shop: what our deals got over
+their category's ratio, blended with 1 the same way. Our 71 deals by 11-03 23 h spread over 23 categories (5 with
+5 or more), too few for a ratio per category; the market had 3,480, and ours sold about 1.08 x the market's ratio.
+
+Refund exposure: our goods sold under a warranty in the last warranty window and not broken yet. Each may still
+break with its grade's rate over the part of the 6 h not yet passed; the market refunds the full price from our
+balance, and a refund we cannot pay takes the shop under the bankruptcy line. restock keeps the line plus the
+expected refunds plus `refund_sd` standard deviations of them out of what it spends.
 
 Breaks, per goods grade: a Beta prior worth BREAK_PRIOR_W sales at the rates said in class on 11-03 (A 3%, B 15%,
 C 35%: normal, damaged box, refurbished; said in passing, so the ledger corrects it), updated with the `broken` entries matched to settled goods by
@@ -105,6 +116,7 @@ class Estimates:
         self._demand()
         self._share()
         self._breaks()
+        self._prices()
 
     # --- demand: gamma-Poisson per category with exponential forgetting
 
@@ -113,7 +125,7 @@ class Estimates:
         start = round_start(self.db) or self.now
         horizon = min(self.now - start, 6 * hl)               # older sales weigh under 1/64: skip them
         watched = hl / math.log(2) * (1 - 0.5 ** (horizon / hl)) / 3600 if horizon > 0 else 0.0
-        mine = our_urls(self.db)
+        mine = self.mine = our_urls(self.db)
         self.w = defaultdict(float)                           # category -> discounted deals (everyone)
         self.w_ours = defaultdict(float)
         self.sales = []                                       # (ts, data) for the manager's summary
@@ -164,16 +176,64 @@ class Estimates:
         s = self.share(c)
         return (self.beta / (self.beta + s * hours)) ** self.alpha[c]
 
-    def base_stock(self, c, minutes, cr):
-        """Smallest stock q with P(our deals in the next `minutes` <= q) >= cr; at least 1 when held."""
-        r, p = self.alpha[c], self.beta / (self.beta + self.share(c) * minutes / 60)
-        k, pmf = 0, p ** r
-        cdf = pmf
-        while cdf < cr and k < 20:
-            pmf *= (k + r) / (k + 1) * (1 - p)
-            k += 1
+    def tail(self, c, hours, kmax=40):
+        """[P(we sell at least k in c within `hours`) for k = 1..kmax]: the negative binomial predictive."""
+        r, q = self.alpha[c], self.beta / (self.beta + self.share(c) * hours)
+        pmf = q ** r
+        cdf, out = pmf, []
+        for k in range(kmax):
+            out.append(max(0.0, 1 - cdf))
+            pmf *= (k + r) / (k + 1) * (1 - q)
             cdf += pmf
-        return max(1, k)
+        return out
+
+    # --- sale prices: the market's ratio per category, times our shop's factor
+
+    def _prices(self):
+        hl = self.p["half_life_h"] * 3600
+        rows = []                                             # (category, paid / list, weight, ours)
+        for ts, d in self.sales:
+            x, a = self.cat.get(sku_of(d)), amount_of(d)
+            if x and a and x.get("list_price"):
+                rows.append((x["category"], a / x["list_price"], 0.5 ** ((self.now - ts) / hl), d.get("shop") in self.mine))
+        others = [(c, r, w) for c, r, w, o in rows if not o]
+        self.price_market = (sum(r * w for _, r, w in others) + PRICE_R0) / (sum(w for *_, w in others) + 1)
+        sw, srw = defaultdict(float), defaultdict(float)
+        for c, r, w in others:
+            sw[c] += w
+            srw[c] += r * w
+        self.price_cat = {c: (srw[c] + PRICE_PRIOR_W * self.price_market) / (sw[c] + PRICE_PRIOR_W) for c in sw}
+        ours = [(c, r, w) for c, r, w, o in rows if o]
+        self.price_ours_n = len(ours)
+        self.price_ours = ((sum(w * r / self.cat_ratio(c) for c, r, w in ours) + PRICE_PRIOR_W)
+                           / (sum(w for *_, w in ours) + PRICE_PRIOR_W))
+
+    def cat_ratio(self, c):
+        """The market's price paid / list in category c (its mean when nobody sold there yet)."""
+        return self.price_cat.get(c, self.price_market)
+
+    def price_ratio(self, c):
+        """What we expect a unit of category c to sell for, as a share of its list price (never above list)."""
+        return min(1.0, self.cat_ratio(c) * self.price_ours)
+
+    # --- refunds we may still owe: our goods under warranty, not broken yet
+
+    def refund_exposure(self, hours):
+        """(expected refunds, their standard deviation) over our goods sold in the last `hours` with a warranty."""
+        sold = [(ts, d) for ts, d in entries(self.db, "settle", self.now - hours * 3600)
+                if settled(d) and d.get("shop") in self.mine and (d.get("warranty_hours") or 0) > 0
+                and self.cat.get(sku_of(d), {}).get("kind") == "goods"]
+        broke = {(d.get("buyer"), sku_of(d)) for _, d in entries(self.db, "broken", self.now - hours * 3600)}
+        mean = var = 0.0
+        for ts, d in sold:
+            a = amount_of(d) or 0
+            if (d.get("buyer"), sku_of(d)) in broke:          # already refunded (or will be at once)
+                continue
+            p, e = self.break_rate.get(d.get("grade"), max(self.break_rate.values())), min(1.0, (self.now - ts) / BREAK_WINDOW)
+            p = p * (1 - e) / (1 - p * e) if p * e < 1 else 0.0   # it has not broken in the part already passed
+            mean += a * p
+            var += a * a * p * (1 - p)
+        return mean, math.sqrt(var)
 
     # --- break rates per goods grade
 

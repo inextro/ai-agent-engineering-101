@@ -21,24 +21,24 @@ MAX_STEP = 0.25                 # share of a value's range one manager decision 
 
 # name: (initial, low, high). Booleans have no range and are flipped freely.
 NUMBERS = {
-    "reserve_frac":      (0.20, 0.15, 0.30),   # cash kept out of restock: max(frac x balance, RESERVE_FLOOR)
+    "refund_sd":         (2.0, 1.0, 3.0),      # cash kept out of restock: bankruptcy line + expected refunds + this many sd
     "unit_cap_frac":     (0.10, 0.05, 0.20),   # one unit's cost at most this share of the balance
-    "goods_cap_frac":    (0.50, 0.30, 0.70),   # goods stock at cost at most this share of the balance
     "min_margin":        (0.10, 0.05, 0.20),   # floor = cost x (1 + min_margin) + warranty premium
     "max_concessions":   (4, 2, 6),            # counters before the final price
     "c_discount":        (0.10, 0.00, 0.25),   # extra cut off the opening ask for grade C (food near its date, refurbished goods)
     "liquidate_hours":   (24, 12, 48),         # from this many hours before the end the floor falls to cost
     "half_life_h":       (24, 6, 72),          # demand memory: weight of a sale halves every this many hours
     "prior_hours":       (2.0, 0.5, 8),          # gamma prior worth this many hours of observation (beta)
-    "hysteresis":        (0.05, 0.02, 0.10),   # hold a category from cr + h, drop it below cr - h
-    "review_minutes":    (25, 10, 60),         # base stock covers this many minutes: supply opens 3 min every 20, the time moves a little
     "warranty_hours":    (6, 0, 6),            # goods break within 6 h of the sale, so 6 covers all of it
-    "scout_frac":        (0.40, 0.20, 0.50),   # while the ledger is thin: one unit per category, up to this share
 }
+# 11-03 23 h: reserve_frac, goods_cap_frac, review_minutes, scout_frac and hysteresis are gone. restock prices each
+# unit by the demand posterior over the refill cycle it measures, and spends unit by unit, best value per won first,
+# so a separate goods cap, a fixed coverage time, scouting and a hold band only overrode that ranking. The reserve
+# is the refunds we may still owe, not a share of the balance. Old keys left in policy.json are ignored.
 FLAGS = {
     "warranty_A": True, "warranty_B": True, "warranty_C": True,   # offer the warranty on goods of that grade
 }
-RESERVE_FLOOR = 1_000_000       # never below this, whatever reserve_frac says (bankruptcy line is 500,000)
+BANKRUPT_LINE = 500_000         # agent.md; inventory.json's bankrupt_line wins when present
 ARMS = (0.70, 0.80, 0.90, 1.00) # opening ask as a share of the list price; the bandit picks one per negotiation
 LAST_HOURS_BELOW_COST = 6       # in the last hours the floor may go to half the cost: unsold stock is a total loss
 
@@ -96,8 +96,10 @@ def hours_left(now=None):
     return max(0.0, (ROUND_END - (now or time.time())) / 3600)
 
 
-def reserve(p, balance):
-    return max(p["reserve_frac"] * balance, RESERVE_FLOOR)
+def reserve(p, line, refunds_mean, refunds_sd):
+    """Cash restock never spends: below the line the shop is bankrupt, and a warranty refund is paid from the
+    balance whether or not the cash is there."""
+    return (line or BANKRUPT_LINE) + refunds_mean + p["refund_sd"] * refunds_sd
 
 
 # The playbook: what the manager may change that is not a number. Text guidance read by the seller's haiku
