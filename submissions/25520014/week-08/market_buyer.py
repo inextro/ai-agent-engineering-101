@@ -385,6 +385,28 @@ def accept_policy(order, c, price, m):
     return {} if ok == ["A", "B", "C"] else {"grades": ok or ["A"]}
 
 
+FOOD_BAND_TOP = {"A": 1.0, "B": 0.80, "C": 0.45}   # a food grade's highest share of shelf life left (agent.md)
+
+
+def doomed(receipt, acc, x):
+    """Why the kit's accept check is sure to fail on this receipt, or None. Only certain failures: a food claim
+    whose band tops out under the hours we need (C: under 45% of the shelf life left, B: under 80%), a goods claim
+    outside the accepted grades, or a receipt that hides the certificate we require. 11-04: of 56 food deals the kit
+    refused for shelf life, 33 came with claim C and 16 with B; orders often ask 75% of the whole shelf life."""
+    claim = receipt.get("claim")
+    if acc.get("cert") and receipt.get("cert") is False:
+        return "hides the certificate"
+    if claim not in FOOD_BAND_TOP:
+        return None                                    # no claim: it may still pass
+    if x.get("kind") == "food" and acc.get("min_hours_left") and x.get("shelf_hours"):
+        top = FOOD_BAND_TOP[claim] * x["shelf_hours"]
+        if top < acc["min_hours_left"]:
+            return f"claims {claim} (at most {top:.0f} h left), we need {acc['min_hours_left']:g} h"
+    elif x.get("kind") == "goods" and acc.get("grades") and claim not in acc["grades"]:
+        return f"claims {claim}, we pay only for {''.join(acc['grades'])}"
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shops", required=True)
@@ -493,8 +515,15 @@ def main():
                 log(f"receipt price {price} above our cap {cap}: not taking it")
                 rec["end"], receipt = f"receipt price {price} above the cap", None
                 continue                        # try the next shop while time is left
+            acc = accept_policy(order, c, price, m)
+            why = doomed(receipt, acc, cat.get(item or c["sku"]) or {})
+            if why:                             # the kit would refuse to pay: no deal here, the next shop may do
+                log(f"{c['shop']}: receipt {why}: not taking it")
+                rec.setdefault("doomed", []).append(f"{c['shop']}: {why}")
+                rec["end"], receipt = f"receipt {why}", None
+                continue
             rec["end"], rec["price"] = "deal", price
-            result["accept"] = accept_policy(order, c, price, m)
+            result["accept"] = acc
             rec["accept"] = result["accept"]
             break
     with LOCK:
