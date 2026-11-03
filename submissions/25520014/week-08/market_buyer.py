@@ -52,6 +52,7 @@ EDGE = 0.05                 # share of the list price we expect to save under th
 P = buyer_policy.load()     # read once per order (the kit starts this script for every order)
 QUOTES = P["quotes"]        # shops that get the opening message (buyer_policy)
 ROUNDS = 6                  # offers we send to one shop
+SMALL_STEP = 0.02           # a shop's concession under this share of its last ask: take the ask (under our cap)
 OPEN_UNDER = P["open_under"]    # the first offer: this share of the lower of the ask and the usual price (buyer_policy)
 RAISE = P["raise"]          # each new offer closes this share of the gap to min(ask, cap) (buyer_policy)
 STALLS = 2                  # the same ask this many times in a row: the shop will not move
@@ -382,11 +383,17 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
             return None
         rec["asks"].append(ask)
         stalls = stalls + 1 if ask == last else 0
+        # the shop came down under SMALL_STEP of its last ask: it is near its floor, and shops end the talk then
+        # (11-04, 6 h: 30 orders lost with an ask under our cap, 23 of them after such a step; taking those asks
+        # would have paid 196,427 more on 112 deals and gained 471,049 surplus on 23 more)
+        creeping = last is not None and ask < last and last - ask < SMALL_STEP * last
         last = ask
         late = time.time() - started > DEADLINE or n == ROUNDS
-        if ask <= c["cap"] and (ask <= target or (offer is not None and ask <= offer) or stalls >= STALLS or late):
+        if ask <= c["cap"] and (ask <= target or (offer is not None and ask <= offer) or stalls >= STALLS or creeping
+                                or late):
             why = ("at or under the usual price" if ask <= target else "met our offer" if offer and ask <= offer
-                   else "the shop stopped moving" if stalls >= STALLS else "last round")
+                   else "the shop stopped moving" if stalls >= STALLS
+                   else "the shop barely moved" if creeping else "last round")
             log(f"{c['shop']}: accept {ask} ({why}; cap {c['cap']}, usual {round(target)})")
             rec["offers"].append(ask)
             task = buyer.send(rpc_url, f"OK, {ask} it is. Deal at {ask}.", task["id"])

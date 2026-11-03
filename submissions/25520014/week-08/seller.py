@@ -16,7 +16,8 @@ clear first within it (food closest to its date, goods held longest). Each has i
 step. haiku picks which to offer from the buyer's words: the lowest grade that meets what the buyer asked for, said
 plainly and cheaper, to a buyer who minds nothing; the best grade to a buyer who looks like a fixed script (it may
 refuse a low grade at checkout). A bare number or yes keeps the current unit. When haiku fails the shop offers the
-best grade.
+best grade. Since 11-04 01:50 the lower grades are offered only to a buyer who asks for one (LOWER_OK):
+buyers' kits left 59% of our food C deals and 55% of goods C unpaid, none of food A.
 
 Price:
   opening ask  = list price x the arm Thompson sampling picks (0.7/0.8/0.9/1.0, per kind, model.py), cut by
@@ -81,6 +82,10 @@ NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
 ACCEPT = re.compile(r"\b(accept|accepted|agree|agreed|deal|ok|okay|yes|buy it|take it)\b|좋아|좋습니다|살게|구매할게|확정")
 REFUSE = re.compile(r"\b(no|not|don't|dont|won't|cannot|can't|never|reject|walk)\b|안 |못 |싫")
 SKU_RE = re.compile(r"\bG[0-9a-f]{8}\b")
+# a buyer who asks for a lower grade in so many words (it is offered the grades then; anyone else gets the best)
+LOWER_OK = re.compile(r"\b(?:grade\s*[bc]|[bc][ -]grade|refurb\w*|any grade|any condition|cheapest|cheaper one|"
+                      r"box damaged|damaged box|close to (?:its|the) date|near(?:ing)? expiry)\b|리퍼|[BC]\s*등급|"
+                      r"등급\s*[BC]|아무 등급|임박|박스\s*훼손|가장 싼|제일 싼", re.I)
 # amounts in words (a price the code did not choose, or another grade's floor); the warranty's "six-hour" stays allowed
 NUMBER_TEXT = re.compile(r"\b(?:hundreds?|thousands?|millions?|grand|twenty|thirty|forty|fifty|sixty|seventy|eighty|"
                          r"ninety|ten|eleven|twelve|fifteen)\b|\d\s*k\b|[0-9일이삼사오육칠팔구십백]\s*[만천](?![가-힣])|만\s*원|천\s*원", re.I)
@@ -557,6 +562,11 @@ class Seller(AgentExecutor):
         await asyncio.to_thread(clearance.table)           # rebuilt from the ledger every 10 min: off the loop too
         arm = await asyncio.to_thread(model.pick_arm, next(iter(by_grade.values())).get("kind", "goods"))
         opts = {g: option(u, p, arm) for g, u in by_grade.items()}
+        if len(opts) > 1 and not LOWER_OK.search(text):
+            # the best grade only, unless the buyer asked for a lower one: their kits refuse to pay for low grades
+            # (11-04, 6 h of our receipts: unpaid food A 0 of 33, B 29 of 105, C 34 of 58; goods C 6 of 11)
+            best = max(opts, key=RANK.get)
+            opts = {best: opts[best]}
         deal = self.open[task_id] = {"opts": opts, "cur": next(iter(opts)) if len(opts) == 1 else None, "arm": arm,
                                      # a clearance price is not the arm's: the bandit must not learn from it
                                      "log_arm": "clearance" if any(o["clearance"] for o in opts.values()) else arm,
