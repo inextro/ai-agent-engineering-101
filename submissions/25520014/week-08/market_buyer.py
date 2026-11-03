@@ -248,6 +248,12 @@ def ask_in(task, c, ours=None):
     return ask
 
 
+def said(rec, shop, task):
+    """Keep the shop's last words when a talk ends without a deal (a rejection, a shop that would not close), so the
+    record says why; buyer.jsonl had only our side of the ending."""
+    rec.setdefault("shop_said", {})[shop] = f"{task['status']['state']}: {buyer.status_text(task)[:300]}"
+
+
 def haggle(c, rpc_url, task, ask, other, started, rec):
     """Raise toward min(ask, cap) until the shop meets us, stalls under the cap, or the rounds run out.
     Returns the shop's receipt (a dict) or None."""
@@ -261,10 +267,12 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
             return buyer.receipt(task)
         if state != "TASK_STATE_INPUT_REQUIRED":
             rec["end"] = f"shop ended ({state})"
+            said(rec, c["shop"], task)
             return None
         fit_timeout()
         if ask is None:
             rec["end"] = "no price in the shop's message"
+            said(rec, c["shop"], task)
             buyer.walk_away(rpc_url, task["id"], rec["end"])
             return None
         rec["asks"].append(ask)
@@ -289,6 +297,7 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
                 ask = ask2
                 continue
             rec["end"] = f"accepted {ask} but the shop did not close ({task['status']['state']})"
+            said(rec, c["shop"], task)
             buyer.walk_away(rpc_url, task["id"], rec["end"])
             return None
         if late or (stalls >= STALLS and ask > c["cap"]):
@@ -359,6 +368,8 @@ def main():
         if task is None:
             continue
         rec["quotes"][c["shop"]] = ask
+        if task["status"]["state"] not in ("TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED"):
+            said(rec, c["shop"], task)          # turned down at the first question: keep why
         if ask is None and task["status"]["state"] == "TASK_STATE_COMPLETED":
             ask = (buyer.receipt(task) or {}).get("price")
         live.append((c, rpc_url, task, ask))
