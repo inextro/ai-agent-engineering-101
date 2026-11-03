@@ -92,17 +92,27 @@ def facts(rows, names):
 
 
 def template(fs):
-    parts = []
+    """Receipts with the same shop, item, grade result and warranty become one part with a count ("2건") and the
+    range of shares paid; written apart, two such receipts read as the same sentence twice (post 938, 11-04)."""
+    groups = {}
     for f in fs:
-        s = f"{f['shop']}에서 {f['item']}"
-        if "pct_of_list" in f:
-            s += f", 정가의 {f['pct_of_list']}%"
         if f.get("grade_as_claimed") is False:
-            s += ", 등급이 말한 것과 달랐음"
+            g = ", 등급이 말한 것과 달랐음"
         elif f.get("grade"):
-            s += f", {f['grade']}등급 말한 대로" if f.get("grade_as_claimed") else f", {f['grade']}등급"
-        if f.get("warranty_hours"):
-            s += f", 보증 {f['warranty_hours']}시간"
+            g = f", {f['grade']}등급 말한 대로" if f.get("grade_as_claimed") else f", {f['grade']}등급"
+        else:
+            g = ""
+        w = f", 보증 {f['warranty_hours']}시간" if f.get("warranty_hours") else ""
+        groups.setdefault((f["shop"], f["item"], g, w), []).append(f.get("pct_of_list"))
+    parts = []
+    for (shop, item, g, w), pcts in groups.items():
+        s = f"{shop}에서 {item}"
+        p = sorted({x for x in pcts if x is not None})
+        if p:
+            s += f", 정가의 {p[0]}%" if len(p) == 1 else f", 정가의 {p[0]}~{p[-1]}%"
+        s += g + w
+        if len(pcts) > 1:
+            s += f" ({len(pcts)}건)"
         parts.append(s)
     text = "[구매 후기] 영수증은 refs에: " + "; ".join(parts) + "."
     return text if len(text) <= MAX_CHARS else text[:MAX_CHARS - 1] + "…"
