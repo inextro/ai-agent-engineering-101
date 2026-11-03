@@ -104,10 +104,20 @@ def our_settles(db, seqs):
     return out
 
 
+def ref_seqs(post):
+    """Ledger seqs a post cites. The forum expands each ref into {"seq", "found", "kind", "data"} (seen 11-03)."""
+    out = []
+    for r in post.get("refs") or []:
+        s = r.get("seq") if isinstance(r, dict) else r
+        if isinstance(s, int):
+            out.append(s)
+    return out
+
+
 def about_us(post, mine, our_seqs):
     text = (post.get("text") or "").lower()
     return (any(n in text for n in NAMES) or post.get("thread") in mine
-            or bool(set(post.get("refs") or []) & our_seqs))
+            or bool(set(ref_seqs(post)) & our_seqs))
 
 
 def stray_numbers(text, sources):
@@ -274,7 +284,7 @@ def one_pass(md, st, now):
     st["mine"] = sorted(mine)
     db = model.connect()
     our_seqs = set()
-    refs = {r for post in forum for r in post.get("refs") or []}
+    refs = {r for post in forum for r in ref_seqs(post)}
     cited = our_settles(db, refs)
     our_seqs |= set(cited)
     todo = sorted((post for post in forum if not ours(post, mine) and str(post["id"]) not in st["answered"]
@@ -287,7 +297,7 @@ def one_pass(md, st, now):
         return
     if todo:
         post = todo[0]
-        records = {s: cited[s] for s in post.get("refs") or [] if s in cited}
+        records = {s: cited[s] for s in ref_seqs(post) if s in cited}
         sources = [str(post["id"]), (post.get("text") or "")[:1500], json.dumps(records, ensure_ascii=False),
                    promises(p), json.dumps(public_changes(now - 86400), ensure_ascii=False)]
         a, used = ask(REPLY.format(shop=SHOP, id=post["id"], author=post.get("author"), text=sources[1],
