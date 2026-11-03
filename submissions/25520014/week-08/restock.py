@@ -172,13 +172,14 @@ def categories(inv, cat, demand, est, p, now):
         for s, x in skus:
             if WORST_COST * x["list_price"] > unit_cap:
                 continue
-            cap = math.ceil(est.sku_rate(s) * share * CAP_HOURS - 1e-9)
+            cap = math.ceil(est.own_sku_rate(s) * CAP_HOURS - 1e-9)    # our own paid sales of it (owner, 11-04)
             if est.asked_sku.get(s, 0.0) > 0:
                 cap = max(cap, 1)                       # a buyer asked us for it
             if cap > have_sku.get(s, 0):
                 room[s] = cap - have_sku.get(s, 0)
         fit = sorted((s for s in skus if s[0] in room),
-                     key=lambda s: (-est.sku_rate(s[0]),                    # the SKU the market buys most,
+                     key=lambda s: (-est.own_sku_rate(s[0]),                # the SKU we sell most,
+                                    -est.sku_rate(s[0]),                    # then the one the market buys most,
                                     -est.asked_sku.get(s[0], 0.0),          # then the one buyers asked us for,
                                     abs(math.log(s[1]["list_price"] / m)))) # then the one nearest the median price
         if not fit:
