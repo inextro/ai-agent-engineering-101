@@ -451,6 +451,11 @@ def reward(rec):
     return min(1.0, (0.5 * margin + 0.3 * rec["price"]) / (0.8 * rec["list_price"]))
 
 
+STAR_W = 0.2     # the bandit's reward: this share from the buyer's stars (the shop score weighs stars 0.2). On
+                 # Round 3's first 24 h, with stars left out the bandit chose 0.9/1.0 in 60% of talks (stars 4.2-4.3
+                 # against 4.6-4.8 at 0.7/0.8, our stars rank 31 of 41); at 0.2 the best arm per talk is 0.7 for food
+                 # and goods, the pair a replay of the shop score ranks first (0.938 against 0.838 for 0.9/0.9)
+NO_STARS = 4     # a paid deal whose review has not arrived counts as this many stars
 PAY_WAIT = 900   # seconds a deal may wait for the buyer's result before it counts as unpaid
 
 
@@ -470,13 +475,28 @@ def paid_tasks(db_path=DB):
     return out
 
 
-def bandit_stats(path=NEGOTIATIONS, since=0, now=None, paid=...):
+def task_stars(db_path=DB):
+    """{task: stars} the buyers gave us on the ledger (their results); {} when market.db cannot be read."""
+    try:
+        db = connect(db_path)
+        rows = db.execute("SELECT json_extract(data, '$.receipt.task'), json_extract(data, '$.stars') "
+                          "FROM ledger WHERE round >= 3 AND kind = 'result' AND data LIKE '%\"task\"%'").fetchall()
+        db.close()
+    except sqlite3.Error:
+        return {}
+    return {t: s for t, s in rows if t and s is not None}
+
+
+def bandit_stats(path=NEGOTIATIONS, since=0, now=None, paid=..., stars=...):
     """Beta counts per (kind, arm). A negotiation is its `open` line plus a `deal` line, or no deal when it was
     cancelled or has been open for 10 minutes (buyers often just stop answering). A deal is a sale only when the
-    buyer paid (paid_tasks); unknown for PAY_WAIT, then no sale. Without market.db every deal counts, as before."""
+    buyer paid (paid_tasks); unknown for PAY_WAIT, then no sale. A sale's reward mixes margin and revenue (reward)
+    with the buyer's stars (STAR_W). Without market.db every deal counts, as before."""
     now = now or time.time()
     if paid is ...:
         paid = paid_tasks()
+    if stars is ...:
+        stars = task_stars()
     stats = {(k, a): [1.0, 1.0] for k in ("food", "goods") for a in policy.ARMS}
     opened, closed = {}, {}
     try:
@@ -505,7 +525,8 @@ def bandit_stats(path=NEGOTIATIONS, since=0, now=None, paid=...):
         if end and end.get("outcome") == "deal":
             if paid is not None and task not in paid and now - end["ts"] < PAY_WAIT:
                 continue
-            r = reward(end) if paid is None or paid.get(task) else 0.0
+            if paid is None or paid.get(task):
+                r = (1 - STAR_W) * reward(end) + STAR_W * (stars.get(task, NO_STARS) - 1) / 4
         stats[key][0] += r
         stats[key][1] += 1 - r
     return stats
