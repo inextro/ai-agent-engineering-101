@@ -63,6 +63,7 @@ FOOD_MARGIN_H = 0.5         # hours of shelf life asked on top of use_within_hou
 REFUSED = ("TASK_STATE_REJECTED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED")
 AVOID_H, AVOID_AFTER = 6, 3  # shops that turned us down this often in this many hours are skipped ...
 AVOID_RATE = 0.10           # ... unless at least this share of the orders we asked them about was paid
+STOCK_FAILS = 2             # checkouts a shop refused for one SKU ("not in stock for this order", 409) in AVOID_H
 HOURS_SAID = re.compile(r"(\d+(?:\.\d+)?)\s*(?:h\b|hrs?\b|hours?\b|시간)", re.I)
 REPLY_MODEL, REPLY_EFFORT, REPLY_TIMEOUT = "haiku", "medium", 20
 buyer.RPC_TIMEOUT = 60      # one slow shop must not eat the order: the opening waits for the slowest of QUOTES
@@ -132,6 +133,30 @@ def turned_down(r, shop):
         return True
     return (r.get("shop") == shop and str(r.get("end", "")).startswith("no price")
             and (r.get("quotes") or {}).get(shop) is None)
+
+
+def stock_fails(now=None):
+    """(shop, SKU) pairs whose checkout the shop refused STOCK_FAILS or more times in the last AVOID_H hours with
+    409 "unit ... is not in stock for this order". 11-04: dae-yangkim agreed on mattress G6b9db161 and then refused
+    the checkout 69 times (about 10 orders an hour lost), while its other SKU G1515d951 paid 17 of 18, so the pair
+    goes last, not the whole shop (owner, 11-04: like the avoid list, asked last)."""
+    now = now or time.time()
+    failed = set()
+    try:
+        for line in (MARKET_DIR / "payments.jsonl").read_text(encoding="utf-8").splitlines():
+            try:
+                x = json.loads(line)
+            except ValueError:
+                continue
+            if not x.get("paid") and "409" in str(x.get("reason", "")):
+                failed.add(x.get("order"))
+    except OSError:
+        pass
+    n = {}
+    for r in past_orders():
+        if r.get("ts", 0) >= now - AVOID_H * 3600 and r.get("order") in failed and r.get("shop") and r.get("sku"):
+            n[(r["shop"], r["sku"])] = n.get((r["shop"], r["sku"]), 0) + 1
+    return {k for k, v in n.items() if v >= STOCK_FAILS}
 
 
 def avoid_list(now=None):
@@ -483,10 +508,13 @@ def main():
     avoid = avoid_list(started)
     # avoided shops go last, not out (owner, 11-04 01:25): they are asked only when every other shop has turned us
     # down and time is left, so a shop that holds the only units of a SKU can still sell them to us
-    later = {c["shop"] for c in cands if c["shop"] in avoid}
+    bad = stock_fails(started)
+    later = {c["shop"] for c in cands if c["shop"] in avoid or (c["shop"], c["sku"]) in bad}
     if later:
         cands = [c for c in cands if c["shop"] not in later] + [c for c in cands if c["shop"] in later]
         rec["avoided"] = sorted(later)
+        if any((c["shop"], c["sku"]) in bad for c in cands):
+            rec["stock_fails"] = sorted(f"{a} {b}" for a, b in bad if a in later)
     need_h = order.get("use_within_hours") if order.get("kind") == "food" else None
     if not cands:
         rec["why_none"] = why_none(order, shops, cat, m)
