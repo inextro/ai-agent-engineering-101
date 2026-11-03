@@ -474,11 +474,12 @@ def main():
     timer.start()
     cands = [c for c in candidates(order, shops, cat, m) if c["es"] > 0]
     avoid = avoid_list(started)
-    if any(c["shop"] not in avoid for c in cands):      # every candidate avoided: try them anyway
-        skipped = {c["shop"] for c in cands if c["shop"] in avoid}
-        cands = [c for c in cands if c["shop"] not in avoid]
-        if skipped:
-            rec["avoided"] = sorted(skipped)
+    # avoided shops go last, not out (owner, 11-04 01:25): they are asked only when every other shop has turned us
+    # down and time is left, so a shop that holds the only units of a SKU can still sell them to us
+    later = {c["shop"] for c in cands if c["shop"] in avoid}
+    if later:
+        cands = [c for c in cands if c["shop"] not in later] + [c for c in cands if c["shop"] in later]
+        rec["avoided"] = sorted(later)
     need_h = order.get("use_within_hours") if order.get("kind") == "food" else None
     if not cands:
         rec["why_none"] = why_none(order, shops, cat, m)
@@ -492,6 +493,8 @@ def main():
     while not any(t[2]["status"]["state"] in ("TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED") for t in live):
         picks = []
         for c in cands:
+            if c["shop"] in later and any(p["shop"] not in later for p in picks):
+                break                               # an avoided shop waits for a round of its own
             if c["shop"] not in seen:
                 seen.add(c["shop"])
                 c["ratio"] = m.ratio(c["shop"])
