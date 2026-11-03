@@ -22,8 +22,11 @@ repeating the allocation a few times.
 Every unit with a positive value, in all categories, is ranked by value / cost, and units are taken from the top
 while the money lasts: the cash above the reserve (the bankruptcy line plus the warranty refunds we may still owe,
 model.refund_exposure), each unit counted at the top of its cost range, no unit above unit_cap_frac of the balance.
-A category whose first unit does not make the cut is not held; a busy one gets several units on one line, and a
-second and third SKU (orders accept SKUs priced 0.5-1.5 x a reference, so one SKU does not fit every order). This
+A category whose first unit does not make the cut is not held. Within a category the units go to the SKUs the market
+buys most (model.sku_rate), each SKU at most its sales to us in CAP_HOURS (its rate x our share of the SKUs we
+stocked, model.sku_share), and a SKU nobody bought gets none unless a buyer asked us for it (11-04: buyers settle on
+few SKUs, 255 of 415 fresh fruit sales one apple box, and the median-priced box we bought sold none). Units of SKUs
+nobody buys do not count as stock of their category. This
 run buys the best of those within the kit's 10 lines. A category a forum post asked for in the last two hours
 (wanted.py) gets one unit when we hold none and a line is left. Categories the manager's playbook skips (at most
 24 h each) are not bought; their stock stays on sale. Bankruptcy only when the balance is under the line and nothing
@@ -57,6 +60,7 @@ RUN_GAP = 300                                   # runs further apart than this a
 WINDOW_MIN, RUNS_PER_WINDOW = 20, 2             # until three windows are measured (agent.md; 11-03 logs)
 WANTED_H = 2                                    # wanted posts this recent are worth one unit (wanted.py)
 WINDOW_LEAD = 45                                # print the plan when a window opens within this many seconds
+CAP_HOURS = 1.0                                 # a SKU's units: at most its sales to us in this long (owner, 11-04)
 
 
 def window_shut(inv, now):
@@ -156,17 +160,30 @@ def categories(inv, cat, demand, est, p, now):
         by_cat.setdefault(x["category"], []).append((sku, x))
     skip = policy.skipped(policy.load_playbook(), now)   # the manager's playbook: leave these alone for now
     unit_cap = p["unit_cap_frac"] * balance
+    sold = {k for k in have_sku if est.sku_rate(k) > 0 or est.asked_sku.get(k, 0.0) > 0}
     out = {}
     for c, skus in by_cat.items():
         if c in skip:
             continue
         kind = skus[0][1]["kind"]
         m = median.get(c) or sorted(x["list_price"] for _, x in skus)[len(skus) // 2]
-        fit = sorted((s for s in skus if WORST_COST * s[1]["list_price"] <= unit_cap),   # the SKU buyers asked us
-                     key=lambda s: (-est.asked_sku.get(s[0], 0.0),                    # for most, then the one
-                                    abs(math.log(s[1]["list_price"] / m))))          # nearest the median price
+        share = est.sku_share(c)
+        room = {}                                       # SKU -> units we may still add: its sales in CAP_HOURS
+        for s, x in skus:
+            if WORST_COST * x["list_price"] > unit_cap:
+                continue
+            cap = math.ceil(est.sku_rate(s) * share * CAP_HOURS - 1e-9)
+            if est.asked_sku.get(s, 0.0) > 0:
+                cap = max(cap, 1)                       # a buyer asked us for it
+            if cap > have_sku.get(s, 0):
+                room[s] = cap - have_sku.get(s, 0)
+        fit = sorted((s for s in skus if s[0] in room),
+                     key=lambda s: (-est.sku_rate(s[0]),                    # the SKU the market buys most,
+                                    -est.asked_sku.get(s[0], 0.0),          # then the one buyers asked us for,
+                                    abs(math.log(s[1]["list_price"] / m)))) # then the one nearest the median price
         if not fit:
             continue
+        live = sum(n for k, n in have_sku.items() if k in sold and cat.get(k, {}).get("category") == c)
         lp = fit[0][1]["list_price"]
         price, cost = est.price_ratio(c) * lp, COST_SHARE[kind] * lp
         premium = 0.0
@@ -178,7 +195,7 @@ def categories(inv, cat, demand, est, p, now):
             continue
         life = FOOD_LIFE * (fit[0][1].get("shelf_hours") or 24) if kind == "food" else None
         out[c] = {"kind": kind, "skus": fit, "lp": lp, "cost": cost, "worst": WORST_COST * lp, "cu": cu,
-                  "life": life, "have": have_cat.get(c, 0)}
+                  "life": life, "have": live, "room": {k: room[k] for k, _ in fit}}
     return out, units, have_sku, by_cat, median, skip
 
 
@@ -193,7 +210,7 @@ def ranked(cands, est, p, hours, left):
             co = x["cost"] * min(1.0, h / max(x["life"], 0.1))   # it ages; past its usable life it is lost
         else:
             co = 0.01 * x["cost"] * h / 24                       # storage
-        tail = est.tail(c, h, kmax=x["have"] + UNITS_MAX)
+        tail = est.tail(c, h, kmax=x["have"] + min(UNITS_MAX, sum(x["room"].values())))
         for k in range(x["have"] + 1, len(tail) + 1):
             pk = tail[k - 1]
             value = pk * x["cu"] - (1 - pk) * co
@@ -245,15 +262,14 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
     lines = {}
     for c, n in target.items():
         x = cands[c]
-        n_sku = min(len(x["skus"]), 1 + (n >= 3) + (n >= 10))
-        for i in range(n):
+        slots = [s for s, _ in x["skus"] for _ in range(min(x["room"][s], MAX_QTY))]   # best-selling SKU first
+        for i in range(min(n, len(slots))):
             k = x["have"] + i + 1
-            sku = x["skus"][i % n_sku][0]
+            sku = slots[i]
             line = lines.setdefault(sku, {"sku": sku, "qty": 0, "kind": x["kind"], "category": c,
                                           "worst_cost": x["worst"], "k_first": k, "value": 0.0})
-            if line["qty"] < MAX_QTY:
-                line["qty"] += 1
-                line["value"] += value[(c, k)]
+            line["qty"] += 1
+            line["value"] += value[(c, k)]
     buy, spent = {}, 0.0
     for line in sorted(lines.values(), key=lambda l: -l["value"]):
         if len(buy) >= MAX_LINES:

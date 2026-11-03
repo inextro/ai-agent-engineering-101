@@ -73,6 +73,8 @@ SHARE_WEIGHT = 5
 MISSED = policy.DATA / "missed.jsonl"   # requests to our shop that found nothing (seller.py)
 SKU_IN_TEXT = re.compile(r"\bG[0-9a-f]{8}\b")
 P_CLOSE_DEFAULT = 0.5           # share of our talks that end in a deal, until 20 talks in 6 h measure it
+SKU_SHARE_DEFAULT = 0.3         # our share of a SKU's sales until we sold 2 (discounted) of the SKUs we held
+SKU_SHARE_MIN_W = 2.0
 
 
 def read_jsonl(path, since):
@@ -152,6 +154,8 @@ class Estimates:
         mine = self.mine = our_urls(self.db)
         self.w = defaultdict(float)                           # category -> discounted deals (everyone)
         self.w_ours = defaultdict(float)
+        self.w_sku, self.w_sku_ours = defaultdict(float), defaultdict(float)   # the same per SKU (restock's caps)
+        self.watched = watched
         self.sales = []                                       # (ts, data) for the manager's summary
         for ts, d in entries(self.db, "settle", self.now - horizon):
             if not settled(d):
@@ -161,8 +165,10 @@ class Estimates:
                 continue
             wt = 0.5 ** ((self.now - ts) / hl)
             self.w[c] += wt
+            self.w_sku[sku_of(d)] += wt
             if d.get("shop") in mine:
                 self.w_ours[c] += wt
+                self.w_sku_ours[sku_of(d)] += wt
             self.sales.append((ts, d))
         # the prior from the market itself: the spread of the categories' observed rates (empirical Bayes).
         # A gamma with that mean and variance is worth mean / variance hours; demand is skewed (mattresses near
@@ -205,6 +211,21 @@ class Estimates:
         opened = sum(1 for r in negs if r.get("outcome") == "open")
         if opened >= 20:                                       # our close rate once there are enough talks
             self.p_close = sum(1 for r in negs if r.get("outcome") == "deal") / opened
+
+    def sku_rate(self, sku):
+        """The market's discounted sales of one SKU per hour (all shops). Buyers settle on few SKUs of a category
+        (11-04: 255 of 415 fresh fruit sales one 10 kg apple box, none for the 3.5 kg box we bought at the median
+        price), so restock picks SKUs by this and caps each by it."""
+        return self.w_sku.get(sku, 0.0) / self.watched if self.watched > 0 else 0.0
+
+    def sku_share(self, c):
+        """Our share of the sales of the SKUs of c that we sold: where we stocked a SKU, what part of its sales we
+        got. SKU_SHARE_DEFAULT until those come to SKU_SHARE_MIN_W discounted sales of ours."""
+        skus = [k for k, w in self.w_sku_ours.items() if w > 0 and self.cat.get(k, {}).get("category") == c]
+        ours = sum(self.w_sku_ours[k] for k in skus)
+        if ours < SKU_SHARE_MIN_W:
+            return SKU_SHARE_DEFAULT
+        return ours / sum(self.w_sku[k] for k in skus)
 
     def rate(self, c):
         """Posterior mean deals per hour in category c, whole market."""
