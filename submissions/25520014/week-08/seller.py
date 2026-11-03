@@ -24,7 +24,7 @@ Price:
   floor        = cost x (1 + min_margin) + warranty premium (break rate of the grade x price), then lower in the
                  last `liquidate_hours` (down to the cost) and in the last 6 hours (down to half the cost), and for
                  food close to its date (half the cost: it is thrown away at cost otherwise)
-  clearance    = stock bought before the 11-03 23:55 demand fix, in a category other shops sell 1+/h (clearance.py):
+  clearance    = stock bought before the 11-03 23:55 demand fix, in a category other shops sell 1-10/h (clearance.py):
                  ask at most the market's median share of list less 0.05, floor at most 0.9 x cost; logged with
                  arm "clearance" so the bandit does not learn from it
   an offer at or above the current ask closes at the ask (more is a misreading: "2 for 50000"). Below it the shop counters: each counter moves a

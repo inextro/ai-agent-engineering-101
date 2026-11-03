@@ -2,8 +2,8 @@
 
 Restock bought on a flat demand prior until 11-03 23:55 KST (5b66120) and filled the shelf with categories that hardly
 sell. Unsold stock counts as a total loss at the end and costs 1% of its cost a day in storage, so (owner, 11-04):
-  - a unit supplied before FIX_TS whose category other shops sell at least MIN_RATE times an hour (real demand, and
-    competitors to win it from) opens at the market's median share of the list price for that category less
+  - a unit supplied before FIX_TS whose category other shops sell MIN_RATE to MAX_RATE times an hour (real demand,
+    competitors to win it from, but not so much that it sells anyway at the usual price) opens at the market's median share of the list price for that category less
     ASK_UNDER, and its floor drops to FLOOR_COST x cost: the next order of that category should find us cheapest;
   - in a category with no such demand nothing changes: no order came yet, a lower price would not bring one.
 Stock bought after the fix is judged later from its own record, not here. Negotiations that offer a clearance unit
@@ -20,6 +20,7 @@ import policy
 
 FIX_TS = 1793717700       # 11-03 23:55 KST, the demand prior fix went live
 MIN_RATE = 1.0            # other shops' settles per hour in the category: below this, no clearance
+MAX_RATE = 10.0           # above this the category sells anyway at the usual price: no clearance (owner, 11-04)
 ASK_UNDER = 0.05          # open this far under the market's median share of the list price
 FLOOR_COST = 0.90         # floor as a share of the unit's cost
 REFRESH = 600
@@ -30,7 +31,7 @@ _table, _built = {}, 0.0
 
 
 def build(now=None):
-    """{category: {"rate": other shops' settles/h, "median": median paid / list}} for categories at MIN_RATE or more."""
+    """{category: {"rate": other shops' settles/h, "median": median paid / list}} for categories between MIN_RATE and MAX_RATE."""
     now = now or time.time()
     db = model.connect()
     cat = model.catalog(db)
@@ -48,7 +49,7 @@ def build(now=None):
         pct.setdefault(c, []).append(price / x["list_price"])
     out = {}
     for c, k in n.items():
-        if k / hours >= MIN_RATE:
+        if MIN_RATE <= k / hours <= MAX_RATE:
             p = sorted(pct[c])
             out[c] = {"rate": round(k / hours, 2), "median": round(p[len(p) // 2], 3)}
     return out
@@ -60,7 +61,7 @@ def table():
     if now - _built >= REFRESH:
         try:
             _table = build(now)
-            PATH.write_text(json.dumps({"ts": now, "fix_ts": FIX_TS, "min_rate": MIN_RATE, "ask_under": ASK_UNDER,
+            PATH.write_text(json.dumps({"ts": now, "fix_ts": FIX_TS, "min_rate": MIN_RATE, "max_rate": MAX_RATE, "ask_under": ASK_UNDER,
                                         "floor_cost": FLOOR_COST, "categories": _table}, ensure_ascii=False),
                             encoding="utf-8")
         except Exception as e:             # a failed rebuild keeps the last table; the seller must never stop on it
