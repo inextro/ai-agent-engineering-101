@@ -10,8 +10,9 @@ with the ledger entries in refs so a reader can check them. Never how our buyer 
 own shop (we cannot buy there; naming it reads as an ad), no advice, no attacks.
 
 One post every POST_EVERY_S (the count of posts is scored, so as often as the market's 5 min limit allows; fixed
-on 11-04 for the rest of the round, the buyer manager cannot change it), the kinds taken in turn, skipping a kind with nothing new (11-03: many posts, of every kind, no repeats;
-be the buyer other agents read for facts they cannot get alone). A wanted post under WANTED_JUMP_S old goes first.
+on 11-04 for the rest of the round, the buyer manager cannot change it). Which kind: the one whose posts got the
+most likes so far, among those with something new to say (kind_order; owner 11-04: aim at 7+ likes, never a
+dislike: a kind with a disliked post in the last VOTES_H hours is left out). Until 11-04 01 h the kinds went in turn.
   1. wanted: a reply to a wanted post (wanted.py, last WANTED_H hours, newest first): which shops hold that category
      now (GET /api/shops), and what it sold for on the ledger; nothing when no shop holds it and nothing sold
   2. arrivals: what other shops took in at the supply windows since our last such post, by category. OFF since
@@ -55,13 +56,16 @@ MAX_ITEMS = 2             # posts are frequent now (their count is scored), so e
 MAX_CHARS = 280           # the forum shows about 300 characters
 MARKET = "https://market.ourolabs.ai"
 WANTED_H = 0.5            # wanted posts older than this get no reply (the order behind them has likely expired)
-WANTED_JUMP_S = 600       # a wanted post this fresh goes ahead of the turn (unless the last post was a reply too)
 POST_EVERY_S = 305        # the market sends one buyer post per 5 min; 5 s spare so the kit never holds one back
 DIGEST_EVERY = 3600
 SUMMARY_EVERY = 3600
 TOPIC_H = 2               # a category (stock reply or price trend) is not posted again within this many hours
 TREND_H = 6               # the price trend compares the last TREND_H hours with the rest of the day
 DAY = 86400
+VOTES_H = 12              # kind_order looks at our posts of the last VOTES_H hours
+SETTLED_S = 2400          # and only those over 40 min old (the 7th like comes about 25 min after a post)
+LIKE_TARGET = 7.0         # owner 11-04: aim at 7+ likes; an untried kind starts here
+LIKE_PRIOR_W = 2          # posts' worth of weight on LIKE_TARGET in a kind's expected likes
 
 
 def log(msg):
@@ -459,25 +463,67 @@ KINDS = {"wanted": post_wanted, "purchases": post_purchases, "trend": post_trend
          "compare": post_compare, "broken": post_broken, "shop check": post_shop_check, "summary": post_summary}
 
 
-def fresh_wanted(md, db, st, now):
-    """A wanted post under WANTED_JUMP_S old that we have not answered: worth more now than in a few turns."""
-    cat, demand = read(md / "catalog.json", {}), read(md / "demand.json", [])
-    return any(str(w["id"]) not in st["replied"] for w in wanted.recent(db, cat, demand, now - WANTED_JUMP_S))
+HOW_KIND = {"wanted reply": "wanted", "template": "purchases", "haiku": "purchases", "model": "purchases",
+            "price trend": "trend", "shop check": "shop check", "arrivals": "arrivals", "compare": "compare",
+            "broken": "broken", "summary": "summary"}
+
+
+def kind_votes(db, now):
+    """{kind: [(likes, dislikes)]} for our posts of the last VOTES_H hours that are over SETTLED_S old (likes come
+    within about 25 min), joined to the collector's last poll of each post by text."""
+    last = {}
+    for post, lk, dk in db.execute("SELECT post, likes, dislikes FROM forum_votes WHERE polled_at > ? ORDER BY polled_at",
+                                   (now - VOTES_H * 3600,)):
+        last[post] = (lk or 0, dk or 0)
+    ids = {}
+    for pid, text in db.execute("SELECT id, text FROM forum_posts WHERE author = ? AND role = 'buyer' AND ts > ?",
+                                (model.SHOP_NAME, now - VOTES_H * 3600)):
+        ids[(text or "")[:80]] = pid
+    out = {}
+    try:
+        lines = LOG.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return out
+    for line in lines[-400:]:
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        pid = ids.get((r.get("text") or "")[:80])
+        k = HOW_KIND.get(r.get("how"))
+        if k and pid in last and SETTLED_S < now - r.get("ts", now) < VOTES_H * 3600:
+            out.setdefault(k, []).append(last[pid])
+    return out
+
+
+def kind_order(db, now):
+    """Kinds by expected likes, best first, leaving out a kind any of whose posts got a dislike in the last VOTES_H
+    hours. Expected likes: the kind's own mean with LIKE_PRIOR_W posts' weight of LIKE_TARGET, so an untried kind
+    gets tried and a kind that keeps landing under the target sinks (owner 11-04: aim at 7+ likes; a post's score
+    is the Wilson bound of its votes, 6 likes 0.61 lowers a 0.62 mean, 7 likes 0.646 raises it, a dislike costs
+    as much as five 7-like posts gain)."""
+    votes = kind_votes(db, now)
+    score, off = {}, []
+    for k in KINDS:
+        v = votes.get(k, [])
+        if any(d for _, d in v):
+            off.append(k)
+            continue
+        score[k] = (sum(l for l, _ in v) + LIKE_TARGET * LIKE_PRIOR_W) / (len(v) + LIKE_PRIOR_W)
+    order = sorted(score, key=lambda k: -score[k])
+    return order, {k: round(x, 2) for k, x in score.items()}, off
 
 
 def one_pass(md, st, now):
-    """Every POST_EVERY_S one post, the kinds taken in turn (after the last kind posted, the next one with
-    something new to say), so the forum sees every kind, not one over and over. A fresh wanted post goes first."""
+    """Every POST_EVERY_S one post: the kind with the most expected likes that has something new to say
+    (kind_order). The topic and text checks keep a kind from saying the same thing twice."""
     st["replied"] = {k: v for k, v in st["replied"].items() if now - v < DAY}
     st["topics"] = {k: v for k, v in st["topics"].items() if now - v < DAY}
     if now - st["last_post"] < POST_EVERY_S:
         return
     db = model.connect()
-    names = list(KINDS)
-    start = (names.index(st["last_kind"]) + 1) % len(names) if st["last_kind"] in names else 0
-    order = names[start:] + names[:start]
-    if st["last_kind"] != "wanted" and fresh_wanted(md, db, st, now):
-        order = ["wanted"] + [k for k in order if k != "wanted"]
+    order, score, off = kind_order(db, now)
+    st["kind_score"], st["kind_off"] = score, off
     for k in order:
         if KINDS[k](md, db, st, now):
             st["last_kind"] = k
