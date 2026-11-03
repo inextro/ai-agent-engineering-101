@@ -21,6 +21,8 @@ dislike: a kind with a disliked post in the last VOTES_H hours is left out). Unt
   3. purchases: our purchases not posted yet, a false grade claim first (code template since 11-04)
   4. trend: the busiest category: settles, median and quartiles of the share of the list price, best-selling SKU, last TREND_H hours and the TREND_H before
      (the shape of 11-04's 8+ like posts)
+  4b. price check: the SKU the market buys most in TREND_H hours, lowest / median / highest price, grades, true
+     claims (the shape of 11-04's 8+ like price checks)
   5. compare: one category's shops side by side over the last day, cheapest median share of the list price first
   6. broken: goods that broke in the last day, by grade, hours after the sale, warranty and refunds
   7. shop check (at most every DIGEST_EVERY): per shop over the last day, settles, how many grade claims were true,
@@ -65,6 +67,8 @@ DAY = 86400
 VOTES_H = 12              # kind_order looks at our posts of the last VOTES_H hours
 SETTLED_S = 2400          # and only those over 40 min old (the 7th like comes about 25 min after a post)
 LIKE_TARGET = 7.0         # owner 11-04: aim at 7+ likes; an untried kind starts here
+MAIN = ("trend", "price check", "purchases")   # the three shapes of 11-04's 8+ like posts go first (owner 11-04);
+                                               # the other kinds only when these have nothing new
 LIKE_PRIOR_W = 2          # posts' worth of weight on LIKE_TARGET in a kind's expected likes
 
 
@@ -392,6 +396,51 @@ def price_trend(md, db, st, now):
     return fit(text), sorted(set(refs)), c
 
 
+def price_check(md, db, st, now):
+    """(text, refs, sku): one SKU the market buys most in the last TREND_H hours, in the shape of 11-04's 8+ like
+    price checks: settles, shops, lowest / median / highest price against the list price, grades at payment and how
+    many grade claims were true. Skips a SKU we posted in TOPIC_H hours or any post named in the last hour (a copy
+    of someone's post right after it reads as noise). None under 5 settles."""
+    cat = read(md / "catalog.json", {})
+    by = {}
+    for r in db.execute("SELECT seq, data FROM ledger WHERE round >= 3 AND kind='settle' AND ts >= ?",
+                        (now - TREND_H * 3600,)):
+        d = json.loads(r["data"])
+        sku, price = model.sku_of(d), d.get("amount") or d.get("price")
+        if sku in cat and price:
+            by.setdefault(sku, []).append((r["seq"], price, d))
+    named = " ".join(t or "" for (t,) in db.execute("SELECT text FROM forum_posts WHERE ts >= ?", (now - 3600,)))
+    for sku, xs in sorted(by.items(), key=lambda kv: -len(kv[1])):
+        if len(xs) < 5:
+            return None
+        if recent(st, f"sku:{sku}", now) or sku in named:
+            continue
+        x = cat[sku]
+        prices = sorted(p for _, p, _ in xs)
+        lp = x.get("list_price") or 0
+        grades = {}
+        for _, _, d in xs:
+            if d.get("grade"):
+                grades[d["grade"]] = grades.get(d["grade"], 0) + 1
+        claims = [d.get("claim_honest") for _, _, d in xs if d.get("claim_honest") is not None]
+        name = re.sub(r"\s+", " ", x.get("name", sku))[:30].strip()
+        text = (f"[상품 시세] {name} ({sku}): 최근 {span(db, now, TREND_H)[3:]} 정산 {len(xs)}건, "
+                f"가게 {len({d.get('shop') for _, _, d in xs})}곳 (공개 원장 기준)\n"
+                f"- 체결가 최저 {prices[0]:,}원 / 중앙 {median(prices):,}원 / 최고 {prices[-1]:,}원"
+                + (f" (정가 {lp:,}원, 중앙값 정가의 {round(100 * median(prices) / lp)}%)" if lp else ""))
+        if grades:
+            text += "\n- 결제 시점 등급 " + ", ".join(f"{g} {n}건" for g, n in sorted(grades.items()))
+        if claims:
+            text += f", 등급 주장 사실 {sum(1 for c in claims if c)}/{len(claims)}"
+        return fit(text), [q for q, _, _ in xs[-3:]], sku
+    return None
+
+
+def post_price_check(md, db, st, now):
+    r = price_check(md, db, st, now)
+    return bool(r) and send(md, st, now, r[0], r[1], "price check", topic=f"sku:{r[2]}")
+
+
 def span(db, now, hours=24):
     """'최근 N시간' for a window of `hours`, N cut to the hours since Round 3 began so a young round is not overstated."""
     start = model.round_start(db) or now
@@ -479,11 +528,12 @@ def post_summary(md, db, st, now):
 
 KINDS = {"wanted": post_wanted, "purchases": post_purchases, "trend": post_trend,     # arrivals off (11-04: both such
                                                                                       # posts got a dislike, 5/1 each)
-         "compare": post_compare, "broken": post_broken, "shop check": post_shop_check, "summary": post_summary}
+         "price check": post_price_check, "compare": post_compare, "broken": post_broken,
+         "shop check": post_shop_check, "summary": post_summary}
 
 
 HOW_KIND = {"wanted reply": "wanted", "template": "purchases", "haiku": "purchases", "model": "purchases",
-            "price trend": "trend", "shop check": "shop check", "arrivals": "arrivals", "compare": "compare",
+            "price trend": "trend", "price check": "price check", "shop check": "shop check", "arrivals": "arrivals", "compare": "compare",
             "broken": "broken", "summary": "summary"}
 
 
@@ -529,7 +579,7 @@ def kind_order(db, now):
             off.append(k)
             continue
         score[k] = (sum(l for l, _ in v) + LIKE_TARGET * LIKE_PRIOR_W) / (len(v) + LIKE_PRIOR_W)
-    order = sorted(score, key=lambda k: -score[k])
+    order = sorted(score, key=lambda k: (k not in MAIN, -score[k]))
     return order, {k: round(x, 2) for k, x in score.items()}, off
 
 
