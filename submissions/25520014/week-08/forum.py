@@ -13,11 +13,13 @@ now, and that the manager reads the complaint at its next hourly review. The man
 which manager.py puts in front of opus; when the policy changes afterwards, opus decides which complaints the change
 answers and the shop follows up in those threads.
 
+After each supply window, one arrival post names the categories that came in (at most ARRIVAL_ITEMS, the
+certificate and the warranty, no price): buyers that read the forum learn where to find them.
 Wanted posts (wanted.py) in a category the shop holds get a reply with the units we have: name, SKU, grade, hours
 left for food, the certificate and the warranty, never a price (11-03: speak first only to a buyer who asked).
 
 The market takes one shop post per 5 minutes (replies count), so this is the only writer of shop posts: replies
-first, follow-ups next, wanted replies, the hourly status post (and one after each policy change) when nothing else
+first, follow-ups next, wanted replies, the arrival post, the hourly status post (and one after each policy change) when nothing else
 is waiting.
 """
 import argparse
@@ -39,6 +41,8 @@ MODELS = (("opus", "medium"), ("sonnet", "medium"))
 GAP = 310                 # seconds between our shop posts (the market's limit is 300)
 STATUS_EVERY = 3600
 WANTED_H = 2              # wanted posts older than this get no reply
+ARRIVAL_EVERY = 900       # at most one arrival post per supply window (they open every 20 minutes)
+ARRIVAL_ITEMS = 6
 FOLLOW_UP_DAYS = 2
 SHOP = os.environ.get("SHOP_TITLE", "Inextro Market")   # as in seller.py
 NAMES = ("inextro", SHOP.lower())
@@ -232,6 +236,31 @@ def wanted_reply(md, db, st, now, p):
     return None
 
 
+def arrival(md, st, now, p):
+    """The arrival post for units supplied since the last one, or None."""
+    if now - st["last_arrival"] < ARRIVAL_EVERY:
+        return None
+    demand = read(md / "demand.json", [])
+    units = [u for u in read(md / "inventory.json", {}).get("units", [])
+             if u.get("grade") != "expired" and (u.get("supplied_at") or 0) > st["arrived_upto"]]
+    if not units:
+        return None
+    st["arrived_upto"] = max(u["supplied_at"] for u in units)
+    st["last_arrival"] = now
+    names = []
+    for u in sorted(units, key=lambda u: -u.get("list_price", 0)):
+        n = wanted.item_name(demand, u.get("category", ""))
+        if n not in names:
+            names.append(n)
+    shown = names[:ARRIVAL_ITEMS]
+    more = f" 외 {len(names) - len(shown)}개 품목" if len(names) > len(shown) else ""
+    grades = [g for g in "ABC" if p[f"warranty_{g}"]]
+    warranty = (f", 비식품 {int(p['warranty_hours'])}시간 보증" if grades and p["warranty_hours"] and
+                any(u.get("kind") == "goods" for u in units) else "")
+    return (f"[입고] {SHOP}: " + ", ".join(shown) + more +
+            f" 새로 들어왔습니다. 증명서 공개, 등급은 사실대로{warranty}. 품목명이나 SKU로 문의해 주세요.")
+
+
 def queue_post(md, line):
     with open(md / "outbox.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
@@ -291,6 +320,11 @@ def one_pass(md, st, now):
         st["last_post"] = now
         record({"ts": now, "kind": "wanted", "post": w[1], "reply": w[0]})
         log(f"answered wanted post {w[1]}: {w[0][:120]}")
+    elif (text := arrival(md, st, now, p)):
+        queue_post(md, {"post": text, "refs": [], "as": "shop"})
+        st["last_post"] = now
+        record({"ts": now, "kind": "arrival", "text": text})
+        log(f"arrival post: {text[:120]}")
     elif now - st["last_status"] >= STATUS_EVERY or p["version"] != st["status_version"]:
         manager.shop_post(md, p, db)
         st["last_status"] = st["last_post"] = now
@@ -330,7 +364,7 @@ def main():
     while True:
         now = time.time()
         st = {"answered": {}, "complaints": {}, "follow_ups": [], "mine": [], "last_post": 0, "last_status": 0,
-              "policy_version": None, "status_version": None, "wanted": {}, **read(STATE, {})}
+              "policy_version": None, "status_version": None, "wanted": {}, "last_arrival": 0, "arrived_upto": 0, **read(STATE, {})}
         try:
             if read(md / "inventory.json", {}).get("round", 0) >= 3:
                 one_pass(md, st, now)
