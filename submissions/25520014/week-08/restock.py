@@ -2,9 +2,12 @@
 
     python restock.py --state .market        # the kit runs it every 60 s in Round 3 and reads the last JSON line
 
-Supply arrives within a minute, so the classic newsvendor question (how much to order for the season) becomes
+Supply opens for 3 minutes every 20 (agent.md, 11-03; the first window at the round's start stays open 10), and
+stock bought in a window has to last until the next one. Outside a window this hook prints an empty list, so the kit
+does not wait 90 s per line for a window that is not coming; the kit buys at most 10 lines a run, so about 20 lines
+per window. Within that, the classic newsvendor question (how much to order for the season) becomes
 "hold this category or not": a shop with no stock in a category is not in the buyer's offers for that order, and
-a held category is refilled right after each sale. For each category, over a horizon of H hours:
+a held category is refilled at each window. For each category, over a horizon of H hours:
     Cu = expected price - expected cost - warranty premium         (what a missed sale costs)
     Co = food: the cost (it rots); goods: storage over H, or the cost when the round ends inside H
     critical ratio cr = Co / (Cu + Co);  P = P(we sell at least one in H) from the gamma-Poisson predictive
@@ -41,6 +44,18 @@ GOODS_H = 48
 MAX_LINES = 10
 SCOUT_SETTLES = 300                             # market settles in the window below which the shop scouts
 SCOUT_MIN_SHELF = 72                            # food that keeps less than this many hours is not scouted
+WINDOW_LEAD = 45                                # print the plan when a window opens within this many seconds
+
+
+def window_shut(inv, now):
+    """True when supply is closed and will not open before the kit's next run (inventory.json `restock`)."""
+    r = inv.get("restock") or {}
+    if not r or r.get("open", True):
+        return False
+    at = r.get("opens_at") or 0
+    if at > 1e12:                                # milliseconds
+        at /= 1000
+    return at - now > WINDOW_LEAD
 
 
 def read(path, default):
@@ -199,6 +214,9 @@ def main():
         print(json.dumps({"buy": [], "bankrupt": True}))
         return
     now = time.time()
+    if window_shut(inv, now):
+        print(json.dumps(out))
+        return
     p = policy.load()
     cat = read(md / "catalog.json", {})
     demand = read(md / "demand.json", [])

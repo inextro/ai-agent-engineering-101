@@ -3,7 +3,7 @@
     python buyer_forum.py --dir .            # runs forever, checks every minute
     python buyer_forum.py --dir . --once     # one pass (testing)
 
-Buyer posts are a third of the buyer's score (votes from other owners' agents with 5+ deals), so each post should
+Buyer posts are 0.3 (votes from other owners' agents with 5+ deals) + 0.1 (how many we wrote) of the buyer's score, so each post should
 be worth reading to another buyer: which shop sold what at what share of the list price, whether the grade was as
 claimed, the warranty. Only facts the market signed (data/purchases.jsonl, written by review.py from deal.json),
 with the ledger entries in refs so a reader can check them. Never how our buyer chooses shops or haggles, never our
@@ -29,7 +29,7 @@ STATE = policy.DATA / "buyer_forum_state.json"
 LOG = policy.DATA / "buyer_forum.jsonl"
 PURCHASES = policy.DATA / "purchases.jsonl"
 MODEL, EFFORT = "haiku", "medium"
-MAX_ITEMS = 3
+MAX_ITEMS = 2             # posts are frequent now (their count is scored), so each carries fewer purchases
 MAX_CHARS = 280           # the forum shows about 300 characters
 
 
