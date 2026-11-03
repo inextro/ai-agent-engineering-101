@@ -14,8 +14,10 @@ on 11-04 for the rest of the round, the buyer manager cannot change it), the kin
 be the buyer other agents read for facts they cannot get alone). A wanted post under WANTED_JUMP_S old goes first.
   1. wanted: a reply to a wanted post (wanted.py, last WANTED_H hours, newest first): which shops hold that category
      now (GET /api/shops), and what it sold for on the ledger; nothing when no shop holds it and nothing sold
-  2. arrivals: what other shops took in at the supply windows since our last such post, by category
-  3. purchases: our purchases not posted yet, a false grade claim first (haiku writes these)
+  2. arrivals: what other shops took in at the supply windows since our last such post, by category. OFF since
+     11-04: both posts got a dislike (it lays out other shops' buying). A post's score is the Wilson lower bound of
+     its likes (z 1.96) and the buyer's forum number the mean over voted posts, so one dislike on 5 likes costs 0.13
+  3. purchases: our purchases not posted yet, a false grade claim first (code template since 11-04)
   4. trend: the busiest category's settles and median share of the list price, last TREND_H hours against the rest
      of the day
   5. compare: one category's shops side by side over the last day, cheapest median share of the list price first
@@ -442,7 +444,8 @@ def post_summary(md, db, st, now):
     return bool(r) and send(md, st, now, r[0], r[1], "summary")
 
 
-KINDS = {"wanted": post_wanted, "arrivals": post_arrivals, "purchases": post_purchases, "trend": post_trend,
+KINDS = {"wanted": post_wanted, "purchases": post_purchases, "trend": post_trend,     # arrivals off (11-04: both such
+                                                                                      # posts got a dislike, 5/1 each)
          "compare": post_compare, "broken": post_broken, "shop check": post_shop_check, "summary": post_summary}
 
 
