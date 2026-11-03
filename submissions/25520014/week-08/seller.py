@@ -6,7 +6,7 @@ The model speaks, the code decides. haiku (medium effort) writes every reply to 
 unit (grade, shelf life, certificate, warranty) and the price the code chose; the code picks the unit, the price,
 when to close and what goes on the receipt. Week 06 is why: with the reserve only in the prompt, haiku sold a 260
 bookshelf at 230 in 2 of 3 runs. A reply without the price as its last number, or with a number other than the
-price (numbers in the product's own name and the buyer's aside), goes back to haiku once with the reason; a second
+price (numbers in the product's own name, the buyer's aside and a food's hours left), goes back to haiku once with the reason; a second
 failure, or a call that fails or times out, is replaced by a template built from the same facts. haiku never sees the cost, the floor or the policy, so no reply
 can give them away (the final price is the floor, and it is said only as the final price).
 
@@ -196,15 +196,27 @@ def find_units(text, taken):
     return by_grade, inv
 
 
+SAY_MARGIN_H = 0.5   # hours kept back from what the shop says is left: the talk and the checkout come after it
+
+
+def hours_said(u, now=None):
+    """The whole hours of shelf life the shop says a food unit has left ("at least N hours"), counted down from its
+    expires_at less SAY_MARGIN_H; None for goods. Until 11-04 the shop said it only in words ("more than a week",
+    "several days": digits other than the price failed the reply check), and buyers who need the food to last a
+    stated number of hours could not tell; haiku guessed instead."""
+    if u.get("kind") != "food" or not u.get("expires_at"):
+        return None
+    return max(0, int((u["expires_at"] - (now or time.time())) / 3600 - SAY_MARGIN_H))
+
+
 def facts(u, warranty):
-    """What the shop may say about the unit, in words (the price is the only digits the buyer should parse)."""
+    """What the shop may say about the unit. The only digits are the price and, for food, its hours left."""
     kind = u.get("kind", "goods")
     parts = [GRADE_WORDS[kind].get(u.get("grade"), f"grade {u.get('grade')}"),
              "the market's certificate of its grade is shown at checkout"]
-    if kind == "food" and u.get("expires_at"):
-        hours = (u["expires_at"] - time.time()) / 3600
-        parts.append("it keeps for more than a week" if hours > 168 else "it keeps for several days" if hours > 48
-                     else "it keeps for about a day or two" if hours > 18 else "it must be used within hours")
+    h = hours_said(u)
+    if h is not None:
+        parts.append(f"at least {h} hours of shelf life left" if h >= 1 else "it must be used within the hour")
     if warranty:
         parts.append(f"a {NUMBER_WORDS.get(warranty, warranty)}-hour warranty: if it breaks in that time the market "
                      "refunds the full price")
@@ -215,9 +227,13 @@ def facts(u, warranty):
 
 def check_reply(reply, u, price, buyer_text):
     """The code's check on a reply, None when it passes, else what is wrong (haiku hears it on its one retry): the
-    price as digits, last, and no digits but the price, the product name's and the buyer's own (made-up numbers).
+    price as digits, last, and no digits but the price, the product name's, the buyer's own and the food's hours left
+    from facts() (one either side: the hour can turn between the prompt and the check) (made-up numbers).
     Calling a price final is left to the prompt: a word check rejected good replies ("it should last", "not final")."""
     allowed = {n.replace(",", "") for n in re.findall(r"\d[\d,]*", (u.get("name") or "") + " " + buyer_text)}
+    h = hours_said(u)
+    if h is not None:
+        allowed |= {str(max(0, h + d)) for d in (-1, 0, 1)}
     nums = [n.replace(",", "") for n in re.findall(r"\d[\d,]*", reply)]
     others = [n for n in nums if n != str(price) and n not in allowed]
     if not reply:
@@ -279,7 +295,9 @@ def write_reply(u, price, situation, history, buyer_text, template, how=None, cl
         "facts (delivery dates, returns, freebies, a manufacture date), say plainly that the shop cannot promise it. "
         "Never invent facts. Unless the shop's move says the price is final, do not call it final, best or lowest. "
         f"The price is {price}: write it exactly once, as digits, as the last thing in the message. Write no "
-        "other digits and no other amounts, not even in words. Reply with the message text only.")
+        "other digits (except the hours of shelf life left, exactly as the facts give them, when the buyer asks "
+        "how long it keeps or says how long it must last) and no other amounts, not even in words. "
+        "Reply with the message text only.")
     reply = ask_checked(prompt, lambda a: (a, check_reply(a, u, price, buyer_text)), "reply", how)
     return template if reply is None else reply
 
@@ -306,7 +324,9 @@ Buyer's last message: {buyer!r}
 Answer with one JSON object only: {{"unit": one of {keys}, "reply": "<at most three short sentences in the buyer's
 language (English when it is unclear), stating only facts of that unit; if they ask for something not in the
 facts, say the shop cannot promise it; unless that unit's move says the price is final, do not call it final, best
-or lowest; the price of that unit exactly once, as digits, as the last thing; no other digits>"}}"""
+or lowest; the price of that unit exactly once, as digits, as the last thing; no other digits except that unit's
+hours of shelf life left exactly as its facts give them, when the buyer asks how long it keeps or says how long it
+must last>"}}"""
 
 
 def choose_reply(deal, moves, history, buyer_text, how=None):
