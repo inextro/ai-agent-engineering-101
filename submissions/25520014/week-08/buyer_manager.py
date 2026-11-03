@@ -117,6 +117,61 @@ def window(since, until):
             "messages_by_model": msgs.get("model", 0), "messages_by_template": msgs.get("template", 0)}
 
 
+def wilson(likes, dislikes, z=1.96):
+    """Lower bound of the share of likes: a post's worth in the forum score (average over voted posts)."""
+    n = likes + dislikes
+    if n == 0:
+        return None
+    p = likes / n
+    return (p + z * z / (2 * n) - z * ((p * (1 - p) + z * z / (4 * n)) / n) ** 0.5) / (1 + z * z / n)
+
+
+def our_forum(board, us):
+    """Our buyer's forum score and its percentile among ranked buyers in one /api/board snapshot."""
+    ranked = [b for b in board.get("buyers", []) if b.get("all") is not None]
+    me = next((b for b in ranked if ((b.get("owner") or {}).get("login") or "").lower() == us.lower()), None)
+    if me is None or len(ranked) < 2:
+        return None, None
+    f = me.get("forum") or 0
+    return f, sum(1 for b in ranked if (b.get("forum") or 0) < f) / (len(ranked) - 1)
+
+
+def forum_alerts(db, now, us):
+    """Code checks that the forum strategy's premises broke (owner 11-04: tell me when the forum policy needs a
+    change). Each alert is one Korean line with its numbers; the manager explains them, the owner decides."""
+    out = []
+    votes = {r[0]: (r[1] or 0, r[2] or 0) for r in db.execute(
+        "SELECT post, likes, dislikes FROM forum_votes v WHERE polled_at = "
+        "(SELECT MAX(polled_at) FROM forum_votes WHERE post = v.post)")}
+    mine = db.execute("SELECT id, ts FROM forum_posts WHERE role='buyer' AND lower(author) = ? AND ts > ? ORDER BY ts",
+                      (us.lower(), now - 6 * 3600)).fetchall()
+    snaps = [json.loads(r[0]) for r in db.execute("SELECT raw FROM board WHERE ts > ? ORDER BY ts", (now - 6 * 3600,))]
+    score, pct = our_forum(snaps[-1], us) if snaps else (None, None)
+    # 1. a dislike: our three shapes have had none since 11-04 02:05; votes land within 5 min, so one hour's posts
+    hit = [(i, votes[i][1]) for i, t in mine if t > now - 3900 and votes.get(i, (0, 0))[1] > 0]
+    if hit:
+        out.append("싫어요: 우리 글 " + ", ".join(f"#{i}({d}개)" for i, d in hit) + "이 싫어요를 받았습니다")
+    # 2. new posts pull the average down: posts older than 10 min of the last 2 h, against the score now
+    aged = [i for i, t in mine if now - 7200 < t < now - 600]
+    worth = [w for w in (wilson(*votes[i]) for i in aged if i in votes) if w is not None]
+    if score is not None and len(worth) >= 6 and sum(worth) / len(worth) < score:
+        out.append(f"평균 하락: 최근 2시간 글 {len(worth)}편의 Wilson 하한 평균 {sum(worth) / len(worth):.3f}이 "
+                   f"지금 forum 점수 {score:.3f}보다 낮아, 새 글이 평균을 깎고 있습니다")
+    # 3. votes stopped: the last six posts older than 10 min have no likes at all
+    last6 = [i for i, t in mine if t < now - 600][-6:]
+    if len(last6) == 6 and all(votes.get(i, (0, 0))[0] == 0 for i in last6):
+        out.append(f"투표 끊김: 최근 글 6편(#{last6[0]}~#{last6[-1]})이 10분이 지나도 좋아요 0입니다")
+    # 4. percentile fell: more than 0.15 under its best in the last 6 h of board snapshots
+    seen = [p for p in (our_forum(b, us)[1] for b in snaps) if p is not None]
+    if pct is not None and seen and max(seen) - pct > 0.15:
+        out.append(f"순위 하락: forum 백분위 {pct:.2f}, 최근 6시간 최고 {max(seen):.2f}에서 {max(seen) - pct:.2f} 떨어졌습니다")
+    # 5. posting stopped: no buyer post for 30 min (the three shapes ran out of material, or buyer_forum is down)
+    last = max((r.get("ts", 0) for r in jsonl(POSTS, now - 6 * 3600)), default=0)
+    if now - last > 1800:
+        out.append("글 멈춤: 마지막 buyer 글이 " + (f"{(now - last) / 60:.0f}분 전" if last else "6시간 넘게 전") + "입니다")
+    return {"alerts": out, "forum_score": score, "forum_percentile": None if pct is None else round(pct, 2)}
+
+
 def recent_decisions(now, n=6):
     out = []
     for r in jsonl(LOG, 0)[-n:]:
@@ -146,7 +201,11 @@ def summary(md, now):
                             "ORDER BY id DESC LIMIT 30", (f"%{us.lower()}%",)).fetchall()
     except Exception:
         mine, others = [], []
-    last = [r for r in jsonl(ORDERS, now - 3600) if r.get("kind")][-ORDERS_SHOWN:]
+    try:
+        checks = forum_alerts(db, now, us)
+    except Exception as e:
+        checks = {"alerts": [f"forum 점검 실패: {type(e).__name__}: {str(e)[:120]}"]}
+    last =[r for r in jsonl(ORDERS, now - 3600) if r.get("kind")][-ORDERS_SHOWN:]
     s = {
         "time": time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(now)),
         "hours_left_in_round": round(policy.hours_left(now), 1),
@@ -169,7 +228,8 @@ def summary(md, now):
                                               for r in posts[-6:]],
         "our_buyer_posts_on_the_forum_with_votes(likes, dislikes)": [
             {"id": r[0], "text": (r[1] or "")[:200], "votes": votes.get(r[0])} for r in mine],
-        "forum_newest_by_others": [{"id": r[0], "author": r[1], "role": r[2], "text": (r[3] or "")[:300]}
+        "forum_strategy_checks": checks,
+        "forum_newest_by_others":[{"id": r[0], "author": r[1], "role": r[2], "text": (r[3] or "")[:300]}
                                    for r in others],
         "your_last_decisions_and_what_followed": recent_decisions(now),
         "your_notes_from_last_hour": (jsonl(LOG, 0)[-1:] or [{}])[0].get("notes"),
@@ -216,6 +276,10 @@ Review, in this order:
 1. Your last decisions: what followed? Undo or adjust what did not work.
 2. Anything wrong: deals far under the orders, many orders ending the same way, template messages, posts without
    votes or with dislikes, too few deals for the 20 needed.
+   "forum_strategy_checks" holds code checks that the forum strategy's premises broke (a dislike, new posts under
+   the average, votes stopped, the percentile fell, posting stopped). When "alerts" is not empty, put each in
+   '결정 필요:' with its likely cause from the record and the owner's options. Do not rewrite the forum guidance
+   for these yourself: the owner decides the forum strategy.
 3. What to change: numbers, playbook, or nothing. Change only for a reason in the record; no change is a fine answer.
    Mind the trade: lower offers raise surplus per deal but lose deals.
 Answer with one JSON object only:
@@ -242,10 +306,12 @@ def decide(md, now):
                            forum=json.dumps(b["forum"] or "(none)"), chars=policy.GUIDE_CHARS,
                            summary=json.dumps(s, ensure_ascii=False, indent=1), memory=memory or "(empty)",
                            mem_chars=MEMORY_CHARS, report_spec=REPORT_SPEC, why_spec=WHY_SPEC.format(skip="")) + "\n\n" + UPVOTE_RULE + rules.section("buyer")
+    alerts = s["forum_strategy_checks"].get("alerts") or []
     answer, used = ask_model(prompt)
     if answer is None or "review" not in answer:
         log("no decision this hour; the policy stays")
-        report(now, used, {}, {}, [], "모델 호출이 실패해 이번 시간은 판단하지 못했습니다. buyer 정책과 playbook은 그대로입니다.")
+        report(now, used, {}, {}, [], "모델 호출이 실패해 이번 시간은 판단하지 못했습니다. buyer 정책과 playbook은 그대로입니다.",
+               alerts=alerts)
         return
     for k in ("changes", "playbook"):
         if not isinstance(answer.get(k), dict):
@@ -273,15 +339,17 @@ def decide(md, now):
                             "reason": reason, "notes": str(answer.get("notes", ""))[:1000],
                             "prompt_chars": len(prompt)}, ensure_ascii=False) + "\n")
     report(now, used, changed, pb_changed, refused, str(answer.get("report_ko", ""))[:REPORT_CHARS], liked,
-           answer.get("why_ko"))
+           answer.get("why_ko"), alerts)
     log(f"{used}: {'changed ' + json.dumps(changed, ensure_ascii=False) if changed else 'no change'}"
         f"{' | playbook ' + ', '.join(pb_changed) if pb_changed else ''}"
         f"{' | refused ' + '; '.join(refused) if refused else ''} | {reason}")
 
 
-def report(now, used, changed, pb_changed, refused, text, liked=(), why=None):
-    lines = [f"## {time.strftime('%m-%d %H:%M', time.localtime(now))} ({used or '판단 없음'})", "",
-             text.strip() or "(보고 없음)", ""] + change_lines(changed, pb_changed, why)
+def report(now, used, changed, pb_changed, refused, text, liked=(), why=None, alerts=()):
+    lines = [f"## {time.strftime('%m-%d %H:%M', time.localtime(now))} ({used or '판단 없음'})", ""]
+    if alerts:      # the code's checks, word for word, so they stand out of the hourly report whatever opus wrote
+        lines += ["[forum 점검 필요]"] + [f"- {a}" for a in alerts] + [""]
+    lines += [text.strip() or "(보고 없음)", ""] + change_lines(changed, pb_changed, why)
     if refused:
         lines += ["- 적용 거부: " + "; ".join(refused)]
     if liked:
