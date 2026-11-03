@@ -31,7 +31,7 @@ NUMBERS = {
     "half_life_h":       (24, 6, 72),          # demand memory: weight of a sale halves every this many hours
     "prior_hours":       (2.0, 0.5, 8),          # gamma prior worth this many hours of observation (beta)
     "hysteresis":        (0.05, 0.02, 0.10),   # hold a category from cr + h, drop it below cr - h
-    "review_minutes":    (2, 1, 10),           # base stock covers demand over this many minutes
+    "review_minutes":    (20, 10, 60),         # base stock covers demand over this many minutes (supply every 20 min from 11-03)
     "warranty_hours":    (6, 0, 6),            # goods break within 6 h of the sale, so 6 covers all of it
     "scout_frac":        (0.40, 0.20, 0.50),   # while the ledger is thin: one unit per category, up to this share
 }

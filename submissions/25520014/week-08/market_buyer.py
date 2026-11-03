@@ -119,7 +119,7 @@ class Models:
     """The shop's models, read once per order; any failure falls back to priors (the buyer must still buy)."""
 
     def __init__(self, cat):
-        self.prices, self.breaks = None, {g: 0.1 for g in "ABC"}
+        self.prices, self.breaks = None, dict(model.BREAK_PRIOR)
         try:
             db = model.connect()
             p = policy.load()

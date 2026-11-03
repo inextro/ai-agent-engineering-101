@@ -16,7 +16,8 @@ Then for a horizon of H hours, with our rate s * lambda, the gamma-Poisson predi
     P(we sell none in H) = (beta / (beta + s H)) ** alpha
 which is what the newsvendor rule in restock.py compares with its critical ratio.
 
-Breaks, per goods grade: Beta(1, 9) prior (10%), updated with the `broken` entries matched to settled goods by
+Breaks, per goods grade: a Beta prior worth BREAK_PRIOR_W sales at the rates said in class on 11-03 (A 3%, B 15%,
+C 35%: normal, damaged box, refurbished; said in passing, so the ledger corrects it), updated with the `broken` entries matched to settled goods by
 buyer and SKU, over the exposure of those sales: goods break within 6 h, so a sale counts by the share of its 6 h
 already passed (a sale 3 h ago counts one half).
 
@@ -46,6 +47,8 @@ DB = policy.DATA / "market.db"
 NEGOTIATIONS = policy.DATA / "negotiations.jsonl"
 SHOP_NAME = "inextro"           # our join name; settle entries name the shop by URL, the shops table maps it
 BREAK_WINDOW = 6 * 3600
+BREAK_PRIOR = {"A": 0.03, "B": 0.15, "C": 0.35}
+BREAK_PRIOR_W = 10
 LAMBDA_FLOOR = 0.01             # deals per hour per category before any data
 SHARE_WEIGHT = 5
 
@@ -188,7 +191,8 @@ class Estimates:
             if cands:
                 k[cands[-1]] += 1
         self.break_counts = {g: (k[g], round(n[g], 1)) for g in "ABC"}
-        self.break_rate = {g: (1 + k[g]) / (10 + max(n[g], k[g])) for g in "ABC"}
+        self.break_rate = {g: (BREAK_PRIOR_W * BREAK_PRIOR[g] + k[g]) / (BREAK_PRIOR_W + max(n[g], k[g]))
+                           for g in "ABC"}
 
 
 # --- prices per shop, from everyone's settled deals (the buyer's model)

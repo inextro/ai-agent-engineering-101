@@ -404,7 +404,7 @@ def bare(text):
 
 def floor_price(u, p, warranty, est_price):
     cost = u["cost"]
-    premium = BREAK.get(u.get("grade"), 0.1) * est_price if warranty else 0
+    premium = BREAK.get(u.get("grade"), max(BREAK.values())) * est_price if warranty else 0
     floor = cost * (1 + p["min_margin"]) + premium
     left = policy.hours_left()
     if left < policy.LAST_HOURS_BELOW_COST:
@@ -418,7 +418,7 @@ def floor_price(u, p, warranty, est_price):
     return max(1, round(floor))
 
 
-BREAK = {"A": 0.1, "B": 0.1, "C": 0.1}   # refreshed from model.py at most every 10 minutes
+BREAK = dict(model.BREAK_PRIOR)   # refreshed from model.py at most every 10 minutes
 _break_at = 0
 
 
