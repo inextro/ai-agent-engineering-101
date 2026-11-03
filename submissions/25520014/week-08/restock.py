@@ -23,8 +23,8 @@ Every unit with a positive value, in all categories, is ranked by value / cost, 
 while the money lasts: the cash above the reserve (the bankruptcy line plus the warranty refunds we may still owe,
 model.refund_exposure), each unit counted at the top of its cost range, no unit above unit_cap_frac of the balance.
 A category whose first unit does not make the cut is not held. Within a category the units go to the SKUs the market
-buys most (model.sku_rate), each SKU at most its sales to us in CAP_HOURS (its rate x our share of the SKUs we
-stocked, model.sku_share), and a SKU nobody bought gets none unless a buyer asked us for it (11-04: buyers settle on
+buys most (model.sku_rate), each SKU at most its demand to us over the refill cycle (sku_demand: our paid sales of
+it plus the requests for it we missed times our close rate, over the last plan's cycle within CAP_HOURS), and a SKU nobody bought gets none unless a buyer asked us for it (11-04: buyers settle on
 few SKUs, 255 of 415 fresh fruit sales one apple box, and the median-priced box we bought sold none). Units of SKUs
 nobody buys do not count as stock of their category. This
 run buys the best of those within the kit's 10 lines. A category a forum post asked for in the last two hours
@@ -60,7 +60,8 @@ RUN_GAP = 300                                   # runs further apart than this a
 WINDOW_MIN, RUNS_PER_WINDOW = 20, 2             # until three windows are measured (agent.md; 11-03 logs)
 WANTED_H = 2                                    # wanted posts this recent are worth one unit (wanted.py)
 WINDOW_LEAD = 45                                # print the plan when a window opens within this many seconds
-CAP_HOURS = 1.0                                 # a SKU's units: at most its sales to us in this long (owner, 11-04)
+CAP_HOURS = (1.0, 2.0)                          # a SKU's units: its demand to us over the last plan's refill cycle,
+                                                # within these hours (owner, 11-04 07:20; before, 1 h of our sales)
 
 
 def window_shut(inv, now):
@@ -149,6 +150,22 @@ def asked(units, by_cat, median, skip, p, balance, cat, demand, now):
     return out
 
 
+def sku_demand(est, sku):
+    """Units of one SKU an hour that buyers would pay us for: our paid sales of it (model.own_sku_rate) plus the
+    requests for it that found nothing at our shop (data/missed.jsonl) times our close rate. Paid sales alone stop
+    when the SKU runs out, so a cap built on them stayed low: 300 of 311 requests we missed in 3 h (11-04 04-07 h)
+    were SKUs we stock, mattress G1515d951 54 of them."""
+    asked = est.asked_sku.get(sku, 0.0) / est.watched if est.watched > 0 else 0.0
+    return est.own_sku_rate(sku) + asked * est.p_close
+
+
+def cap_hours():
+    """The refill cycle of the last plan in hours, within CAP_HOURS: stock bought now has to last until the
+    category gets a line again (98 min on 11-04 07 h, when a 1 h cap ran the best sellers out between refills)."""
+    cyc = read(STATE, {}).get("cycle_minutes")
+    return min(max((cyc or 60) / 60, CAP_HOURS[0]), CAP_HOURS[1])
+
+
 def categories(inv, cat, demand, est, p, now):
     """What each category's units are worth, before the horizon: {category: facts}, and the stock per SKU."""
     balance = inv.get("balance") or 0
@@ -161,6 +178,7 @@ def categories(inv, cat, demand, est, p, now):
     skip = policy.skipped(policy.load_playbook(), now)   # the manager's playbook: leave these alone for now
     unit_cap = p["unit_cap_frac"] * balance
     sold = {k for k in have_sku if est.sku_rate(k) > 0 or est.asked_sku.get(k, 0.0) > 0}
+    cap_h = cap_hours()
     out = {}
     for c, skus in by_cat.items():
         if c in skip:
@@ -168,17 +186,17 @@ def categories(inv, cat, demand, est, p, now):
         kind = skus[0][1]["kind"]
         m = median.get(c) or sorted(x["list_price"] for _, x in skus)[len(skus) // 2]
         share = est.sku_share(c)
-        room = {}                                       # SKU -> units we may still add: its sales in CAP_HOURS
+        room = {}                                       # SKU -> units we may still add: its demand over a cycle
         for s, x in skus:
             if WORST_COST * x["list_price"] > unit_cap:
                 continue
-            cap = math.ceil(est.own_sku_rate(s) * CAP_HOURS - 1e-9)    # our own paid sales of it (owner, 11-04)
+            cap = math.ceil(sku_demand(est, s) * cap_h - 1e-9)
             if est.asked_sku.get(s, 0.0) > 0:
                 cap = max(cap, 1)                       # a buyer asked us for it
             if cap > have_sku.get(s, 0):
                 room[s] = cap - have_sku.get(s, 0)
         fit = sorted((s for s in skus if s[0] in room),
-                     key=lambda s: (-est.own_sku_rate(s[0]),                # the SKU we sell most,
+                     key=lambda s: (-sku_demand(est, s[0]),                 # the SKU buyers want most from us,
                                     -est.sku_rate(s[0]),                    # then the one the market buys most,
                                     -est.asked_sku.get(s[0], 0.0),          # then the one buyers asked us for,
                                     abs(math.log(s[1]["list_price"] / m)))) # then the one nearest the median price
@@ -290,7 +308,10 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
                 stocked_categories=sum(1 for x in cands.values() if x["have"]),
                 price_ours_factor=round(est.price_ours, 3), price_market_ratio=round(est.price_market, 3),
                 asked_of_us_per_h={c.split(">")[-1]: round(r, 2) for c, r in sorted(
-                    est.asked_rate.items(), key=lambda t: -t[1])[:10]}, close_rate=round(est.p_close, 3))
+                    est.asked_rate.items(), key=lambda t: -t[1])[:10]}, close_rate=round(est.p_close, 3),
+                cap_hours=round(cap_hours(), 2),
+                sku_demand_per_h={k: round(v, 2) for k, v in sorted(
+                    ((k, sku_demand(est, k)) for k in have_sku), key=lambda t: -t[1])[:10]})
     return list(buy.values()), plan
 
 
