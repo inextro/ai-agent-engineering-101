@@ -21,6 +21,7 @@ Model: opus at medium effort; when it fails, sonnet at medium. Each decision is 
 import argparse
 import json
 import os
+import re
 import time
 from collections import Counter
 from pathlib import Path
@@ -49,6 +50,12 @@ OFFSET = 300               # five minutes after the seller's manager, so the two
 
 def log(msg):
     print(f"{time.strftime('%m-%d %H:%M:%S')} [buyer-manager] {msg}", flush=True)
+
+
+def post_kind(text):
+    """A buyer post's kind, its leading "[...]" tag ("[구매 후기]"), else "other"."""
+    m = re.match(r"\s*\[([^\]]{1,20})\]", text or "")
+    return m.group(1) if m else "other"
 
 
 def read_avoid():
@@ -153,7 +160,13 @@ def summary(md, now):
                              for r in last],
         "our_reviews_6h": {"stars": dict(Counter(r.get("stars") for r in bought)),
                            "false_grade_claims": sum(1 for r in bought if r.get("claim_honest") is False)},
-        "our_buyer_posts_24h": [{"text": r.get("text", "")[:280], "how": r.get("how")} for r in posts[-6:]],
+        # counts apart from the examples: 6 examples under a "24h" key read as "6 posts in 24 h" (11-04 00:39)
+        "our_buyer_posts_count": {"last_hour": sum(1 for r in posts if r.get("ts", 0) >= now - 3600),
+                                  "last_24h": len(posts),
+                                  "by_kind_24h": dict(Counter(post_kind(r.get("text", "")) for r in posts)),
+                                  "interval": "fixed by code at about 5 minutes to the end of the round"},
+        "our_buyer_posts_newest_6_examples": [{"text": r.get("text", "")[:280], "how": r.get("how")}
+                                              for r in posts[-6:]],
         "our_buyer_posts_on_the_forum_with_votes(likes, dislikes)": [
             {"id": r[0], "text": (r[1] or "")[:200], "votes": votes.get(r[0])} for r in mine],
         "forum_newest_by_others": [{"id": r[0], "author": r[1], "role": r[2], "text": (r[3] or "")[:300]}
