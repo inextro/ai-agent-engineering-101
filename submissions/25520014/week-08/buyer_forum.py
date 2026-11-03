@@ -19,8 +19,8 @@ dislike: a kind with a disliked post in the last VOTES_H hours is left out). Unt
      11-04: both posts got a dislike (it lays out other shops' buying). A post's score is the Wilson lower bound of
      its likes (z 1.96) and the buyer's forum number the mean over voted posts, so one dislike on 5 likes costs 0.13
   3. purchases: our purchases not posted yet, a false grade claim first (code template since 11-04)
-  4. trend: the busiest category's settles and median share of the list price, last TREND_H hours against the rest
-     of the day
+  4. trend: the busiest category: settles, median and quartiles of the share of the list price, best-selling SKU, last TREND_H hours and the TREND_H before
+     (the shape of 11-04's 8+ like posts)
   5. compare: one category's shops side by side over the last day, cheapest median share of the list price first
   6. broken: goods that broke in the last day, by grade, hours after the sale, warranty and refunds
   7. shop check (at most every DIGEST_EVERY): per shop over the last day, settles, how many grade claims were true,
@@ -60,7 +60,7 @@ POST_EVERY_S = 305        # the market sends one buyer post per 5 min; 5 s spare
 DIGEST_EVERY = 3600
 SUMMARY_EVERY = 3600
 TOPIC_H = 2               # a category (stock reply or price trend) is not posted again within this many hours
-TREND_H = 6               # the price trend compares the last TREND_H hours with the rest of the day
+TREND_H = 3               # the price trend: the last TREND_H hours, and the TREND_H before for comparison
 DAY = 86400
 VOTES_H = 12              # kind_order looks at our posts of the last VOTES_H hours
 SETTLED_S = 2400          # and only those over 40 min old (the 7th like comes about 25 min after a post)
@@ -345,32 +345,51 @@ def summary(md, db, st, now):
     return fit(text), [s["seq"] for s in ss[-3:]]
 
 
+def quartile(xs, q):
+    xs = sorted(xs)
+    return xs[min(len(xs) - 1, int(q * len(xs)))]
+
+
 def price_trend(md, db, st, now):
-    """(text, refs, category) of the busiest category not posted lately: settles and median share of the list price
-    in the last TREND_H hours against the hours before, from the public ledger; None with too few settles."""
+    """(text, refs, category) of the busiest category not posted lately, in the shape of the buyer posts that got 8+
+    likes on 11-04 (a category's last TREND_H hours of settles: count, median and quartiles of the share of the list
+    price, the best-selling SKU with its count and median price, and the TREND_H hours before for comparison), from
+    the public ledger; None with too few settles."""
     cat, demand = read(md / "catalog.json", {}), read(md / "demand.json", [])
+    start = model.round_start(db) or now
+    cut = max(now - TREND_H * 3600, start)
     by = {}
-    for r in db.execute("SELECT seq, ts, data FROM ledger WHERE round >= 3 AND kind='settle' AND ts >= ?", (now - DAY,)):
+    for r in db.execute("SELECT seq, ts, data FROM ledger WHERE round >= 3 AND kind='settle' AND ts >= ?",
+                        (cut - TREND_H * 3600,)):
         d = json.loads(r["data"])
-        x, price = cat.get(model.sku_of(d)) or {}, d.get("amount") or d.get("price")
+        sku = model.sku_of(d)
+        x, price = cat.get(sku) or {}, d.get("amount") or d.get("price")
         if x.get("category") and price and x.get("list_price"):
-            by.setdefault(x["category"], []).append((r["seq"], r["ts"], round(100 * price / x["list_price"])))
-    start = max(now - DAY, model.round_start(db) or now)
-    cut = max(now - TREND_H * 3600, start + (now - start) / 2)      # a young round: its first half against the second
-    old_h = round((cut - start) / 3600)
+            by.setdefault(x["category"], []).append((r["seq"], r["ts"], round(100 * price / x["list_price"]), sku, price))
     rows = []
     for c, xs in by.items():
-        new = sorted(p for _, t, p in xs if t >= cut)
-        old = sorted(p for _, t, p in xs if t < cut)
-        if len(new) >= 3 and len(old) >= 3 and old_h >= 1 and not recent(st, f"cat:{c}", now):
-            rows.append((len(new), c, new, old, [s for s, t, _ in xs if t >= cut][-3:]))
+        new = [x for x in xs if x[1] >= cut]
+        if len(new) >= 10 and not recent(st, f"cat:{c}", now):
+            rows.append((len(new), c, new, [x for x in xs if x[1] < cut]))
     if not rows:
         return None
-    _, c, new, old, refs = max(rows)
-    text = (f"[가격 동향] {wanted.item_name(demand, c)}: 최근 {round((now - cut) / 3600)}시간 정산 {len(new)}건, "
-            f"정가 대비 중앙값 {median(new)}% (범위 {new[0]}~{new[-1]}%), 그 전 {old_h}시간은 {len(old)}건 "
-            f"{median(old)}%")
-    return fit(text + ". 공개 원장 기준."), refs, c
+    _, c, new, old = max(rows, key=lambda r: r[0])
+    pct = [x[2] for x in new]
+    count = {}
+    for x in new:
+        count[x[3]] = count.get(x[3], 0) + 1
+    top = max(count, key=count.get)
+    name = re.sub(r"\s+", " ", (cat.get(top) or {}).get("name", top))[:30].strip()
+    paid = median([x[4] for x in new if x[3] == top])
+    h = max(1, round((now - cut) / 3600))
+    text = (f"[가격 동향] {wanted.item_name(demand, c)}: 최근 {h}시간 시장 정산 {len(new)}건 (공개 원장 기준)\n"
+            f"- 체결가/정가 중앙값 {median(pct)}% (하위 25% {quartile(pct, 0.25)}%, 상위 25% {quartile(pct, 0.75)}%)\n"
+            f"- 가장 많이 팔린 상품: {name} ({top}) {count[top]}건, 체결가 중앙 {paid:,}원 / 정가 {(cat.get(top) or {}).get('list_price', 0):,}원")
+    old_h = round((cut - max(cut - TREND_H * 3600, start)) / 3600, 1)   # the round may be younger than 2 x TREND_H
+    if len(old) >= 10 and old_h >= 1:
+        text += f"\n- 그 전 {old_h:g}시간: {len(old)}건, 중앙값 {median([x[2] for x in old])}%"
+    refs = [x[0] for x in new if x[3] == top][-2:] + [new[-1][0]]
+    return fit(text), sorted(set(refs)), c
 
 
 def span(db, now, hours=24):
