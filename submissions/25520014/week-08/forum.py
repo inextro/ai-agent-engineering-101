@@ -13,8 +13,12 @@ now, and that the manager reads the complaint at its next hourly review. The man
 which manager.py puts in front of opus; when the policy changes afterwards, opus decides which complaints the change
 answers and the shop follows up in those threads.
 
+Wanted posts (wanted.py) in a category the shop holds get a reply with the units we have: name, SKU, grade, hours
+left for food, the certificate and the warranty, never a price (11-03: speak first only to a buyer who asked).
+
 The market takes one shop post per 5 minutes (replies count), so this is the only writer of shop posts: replies
-first, follow-ups next, the hourly status post (and one after each policy change) when nothing else is waiting.
+first, follow-ups next, wanted replies, the hourly status post (and one after each policy change) when nothing else
+is waiting.
 """
 import argparse
 import json
@@ -27,12 +31,14 @@ import harness
 import manager
 import model
 import policy
+import wanted
 
 STATE = policy.DATA / "forum_state.json"
 LOG = policy.DATA / "forum.jsonl"
 MODELS = (("opus", "medium"), ("sonnet", "medium"))
 GAP = 310                 # seconds between our shop posts (the market's limit is 300)
 STATUS_EVERY = 3600
+WANTED_H = 2              # wanted posts older than this get no reply
 FOLLOW_UP_DAYS = 2
 SHOP = os.environ.get("SHOP_TITLE", "Inextro Market")   # as in seller.py
 NAMES = ("inextro", SHOP.lower())
@@ -193,6 +199,39 @@ def guide():
     return f"Shop manager's guidance (follow it where it fits; the rules below come first): {g}\n" if g else ""
 
 
+def wanted_reply(md, db, st, now, p):
+    """(text, thread) for the oldest wanted post we hold stock for and have not answered, else None."""
+    cat, demand, inv = read(md / "catalog.json", {}), read(md / "demand.json", []), read(md / "inventory.json", {})
+    units = [u for u in inv.get("units", []) if u.get("grade") != "expired"]
+    for w in wanted.recent(db, cat, demand, now - WANTED_H * 3600):
+        if str(w["id"]) in st["wanted"]:
+            continue
+        have = [u for u in units if u.get("category") == w["category"]]
+        if not have:
+            continue
+        st["wanted"][str(w["id"])] = now
+        have.sort(key=lambda u: (u.get("sku") not in w["skus"], u.get("grade", "C")))   # asked SKUs, then best grade
+        lines = []
+        for u in have[:2]:
+            s = f"{u['name'][:40]} ({u['sku']}) {u.get('grade')}"
+            if u.get("kind") == "food" and u.get("expires_at"):
+                h = int((u["expires_at"] - now) / 3600)
+                s += f", {h}시간 남음" if w["korean"] else f", {h} h left"
+            lines.append(s)
+        grades = [g for g in "ABC" if p[f"warranty_{g}"]]
+        goods = any(u.get("kind") == "goods" for u in have[:2])
+        if w["korean"]:
+            warranty = f" 비식품은 {int(p['warranty_hours'])}시간 보증." if goods and grades and p["warranty_hours"] else ""
+            text = (f"{SHOP}에 있습니다: " + "; ".join(lines) + f". 증명서 공개, 등급은 사실대로.{warranty} "
+                    f"SKU로 문의해 주세요.")
+        else:
+            warranty = f" {int(p['warranty_hours'])}-hour warranty on goods." if goods and grades and p["warranty_hours"] else ""
+            text = (f"{SHOP} has it: " + "; ".join(lines) + f". Certificate shown, grade as claimed.{warranty} "
+                    f"Ask by SKU.")
+        return text[:600], w["id"]
+    return None
+
+
 def queue_post(md, line):
     with open(md / "outbox.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
@@ -214,6 +253,7 @@ def one_pass(md, st, now):
     if p["version"] != st["policy_version"] and st["complaints"]:
         plan_follow_ups(st, p, now)
     st["policy_version"] = p["version"]
+    st["wanted"] = {k: v for k, v in st["wanted"].items() if now - v < 86400}
     if now - st["last_post"] < GAP:
         return
     if todo:
@@ -246,6 +286,11 @@ def one_pass(md, st, now):
         st["last_post"] = now
         record({"ts": now, "kind": "follow_up", **f})
         log(f"followed up on complaint {f['post']}")
+    elif (w := wanted_reply(md, db, st, now, p)):
+        queue_post(md, {"post": w[0], "refs": [], "thread": w[1], "as": "shop"})
+        st["last_post"] = now
+        record({"ts": now, "kind": "wanted", "post": w[1], "reply": w[0]})
+        log(f"answered wanted post {w[1]}: {w[0][:120]}")
     elif now - st["last_status"] >= STATUS_EVERY or p["version"] != st["status_version"]:
         manager.shop_post(md, p, db)
         st["last_status"] = st["last_post"] = now
@@ -285,7 +330,7 @@ def main():
     while True:
         now = time.time()
         st = {"answered": {}, "complaints": {}, "follow_ups": [], "mine": [], "last_post": 0, "last_status": 0,
-              "policy_version": None, "status_version": None, **read(STATE, {})}
+              "policy_version": None, "status_version": None, "wanted": {}, **read(STATE, {})}
         try:
             if read(md / "inventory.json", {}).get("round", 0) >= 3:
                 one_pass(md, st, now)

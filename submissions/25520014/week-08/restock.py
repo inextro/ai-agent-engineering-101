@@ -15,7 +15,8 @@ Hold when P >= cr + hysteresis, keep holding while P >= cr - hysteresis (so a ca
 Units per held SKU: the base stock that covers the next `review_minutes` with probability cr. Busy categories get a
 second and third SKU. SKUs are the ones closest to the category's median price, where an order's 0.5-1.5 x price
 band most often falls. While the ledger holds fewer than SCOUT_SETTLES settles (the round's start), the shop also
-scouts: one unit in every category it has none of, up to scout_frac of the balance. Categories the manager's playbook skips (at most 24 h each) are not bought; their stock stays
+scouts: one unit in every category it has none of, up to scout_frac of the balance. A category a forum post asked for in the last two hours (wanted.py) gets one
+unit when we hold none, after the newsvendor's lines and before scouting. Categories the manager's playbook skips (at most 24 h each) are not bought; their stock stays
 on sale.
 
 Money rules (policy.py, the manager may move them): a reserve of max(20% of the balance, 1,000,000) is never
@@ -33,6 +34,7 @@ import httpx
 
 import model
 import policy
+import wanted
 
 MARKET = "https://market.ourolabs.ai"
 STATE = policy.DATA / "restock_state.json"   # held categories, for the hysteresis
@@ -44,6 +46,7 @@ GOODS_H = 48
 MAX_LINES = 10
 SCOUT_SETTLES = 300                             # market settles in the window below which the shop scouts
 SCOUT_MIN_SHELF = 72                            # food that keeps less than this many hours is not scouted
+WANTED_H = 2                                    # wanted posts this recent are worth one unit (wanted.py)
 WINDOW_LEAD = 45                                # print the plan when a window opens within this many seconds
 
 
@@ -79,6 +82,31 @@ def competitors(catalog):
         for c in {cat.get(k) for k, n in (s.get("stock") or {}).items() if n}:
             if c:
                 out[c] = out.get(c, 0) + 1
+    return out
+
+
+def asked(units, by_cat, median, skip, p, balance, cat, demand, now):
+    """One unit of each category a wanted post asked for in the last WANTED_H hours that we hold none of: the SKU
+    the post named, else the one nearest the median price. After the newsvendor's lines, before scouting."""
+    try:
+        posts = wanted.recent(model.connect(), cat, demand, now - WANTED_H * 3600)
+    except Exception:
+        return []
+    stocked = {u.get("category") for u in units}
+    out, seen = [], set()
+    for w in posts:
+        c = w["category"]
+        if c in stocked or c in skip or c in seen or c not in by_cat:
+            continue
+        seen.add(c)
+        skus = [s for s in by_cat[c] if WORST_COST * s[1]["list_price"] <= p["unit_cap_frac"] * balance]
+        named = [s for s in skus if s[0] in w["skus"]]
+        if not skus:
+            continue
+        m = median.get(c) or sorted(x["list_price"] for _, x in skus)[len(skus) // 2]
+        sku, x = named[0] if named else min(skus, key=lambda s: abs(math.log(s[1]["list_price"] / m)))
+        out.append({"value": -0.5, "sku": sku, "qty": 1, "kind": x["kind"], "category": c, "asked": w["id"],
+                    "unit_cost": COST_SHARE[x["kind"]] * x["list_price"], "worst_cost": WORST_COST * x["list_price"]})
     return out
 
 
@@ -176,6 +204,8 @@ def decide(inv, cat, demand, est, p, held, now):
 
     if thin and left >= p["liquidate_hours"]:
         plans += scout(units, by_cat, median, skip, p, balance)
+    if left >= p["liquidate_hours"]:
+        plans += asked(units, by_cat, median, skip, p, balance, cat, demand, now)
 
     spend = balance - policy.reserve(p, balance)
     goods_room = p["goods_cap_frac"] * balance - goods_at_cost
