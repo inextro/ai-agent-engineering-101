@@ -29,7 +29,7 @@ import buyer_policy
 import model
 import notify
 import policy
-from manager import REPORT_CHARS, REPORT_SPEC, UPVOTE_RULE, ask_model, jsonl, upvote
+from manager import REPORT_CHARS, REPORT_SPEC, UPVOTE_RULE, WHY_SPEC, ask_model, change_lines, jsonl, upvote
 
 os.environ["TZ"] = "Asia/Seoul"
 time.tzset()
@@ -177,6 +177,7 @@ Answer with one JSON object only:
  "changes": {{"<number name>": <value>, ...}},
  "playbook": {{"negotiation": "<the full new text, or null to keep>", "forum": "<the full new text, or null to keep>"}},
  "reason": "<two sentences: what in the record, what you changed>",
+ {why_spec}
  "notes": "<what to watch next hour, for yourself>",
  "upvote": [{{"id": <post id>, "why": "<in Korean, a few words: what in it you used>"}}, ...],
  "memory": "<the full new memory, at most {mem_chars} characters, each lesson with the hours it rests on>",
@@ -193,7 +194,7 @@ def decide(md, now):
     prompt = PROMPT.format(policy=describe(p), negotiation=json.dumps(b["negotiation"] or "(none)"),
                            forum=json.dumps(b["forum"] or "(none)"), chars=policy.GUIDE_CHARS,
                            summary=json.dumps(s, ensure_ascii=False, indent=1), memory=memory or "(empty)",
-                           mem_chars=MEMORY_CHARS, report_spec=REPORT_SPEC) + "\n\n" + UPVOTE_RULE
+                           mem_chars=MEMORY_CHARS, report_spec=REPORT_SPEC, why_spec=WHY_SPEC.format(skip="")) + "\n\n" + UPVOTE_RULE
     answer, used = ask_model(prompt)
     if answer is None or "review" not in answer:
         log("no decision this hour; the policy stays")
@@ -220,23 +221,20 @@ def decide(md, now):
     liked = upvote(md, answer.get("upvote"), model.connect(), "buyer")
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps({"ts": now, "model": used, "upvoted": liked, "asked": answer.get("changes"), "changed": changed,
-                            "playbook_asked": answer.get("playbook"), "playbook_changed": pb_changed,
+                            "playbook_asked": answer.get("playbook"), "playbook_changed": pb_changed, "why": answer.get("why_ko"),
                             "refused": refused, "review": answer.get("review"), "problems": answer.get("problems"),
                             "reason": reason, "notes": str(answer.get("notes", ""))[:1000],
                             "prompt_chars": len(prompt)}, ensure_ascii=False) + "\n")
-    report(now, used, changed, pb_changed, refused, str(answer.get("report_ko", ""))[:REPORT_CHARS], liked)
+    report(now, used, changed, pb_changed, refused, str(answer.get("report_ko", ""))[:REPORT_CHARS], liked,
+           answer.get("why_ko"))
     log(f"{used}: {'changed ' + json.dumps(changed, ensure_ascii=False) if changed else 'no change'}"
         f"{' | playbook ' + ', '.join(pb_changed) if pb_changed else ''}"
         f"{' | refused ' + '; '.join(refused) if refused else ''} | {reason}")
 
 
-def report(now, used, changed, pb_changed, refused, text, liked=()):
+def report(now, used, changed, pb_changed, refused, text, liked=(), why=None):
     lines = [f"## {time.strftime('%m-%d %H:%M', time.localtime(now))} ({used or '판단 없음'})", "",
-             text.strip() or "(보고 없음)", ""]
-    for k, (old, new) in changed.items():
-        lines += [f"- 정책 {k}: {old} → {new}"]
-    for k, (old, new) in pb_changed.items():
-        lines += [f"- playbook {k}: {json.dumps(old, ensure_ascii=False)} → {json.dumps(new, ensure_ascii=False)}"]
+             text.strip() or "(보고 없음)", ""] + change_lines(changed, pb_changed, why)
     if refused:
         lines += ["- 적용 거부: " + "; ".join(refused)]
     if liked:

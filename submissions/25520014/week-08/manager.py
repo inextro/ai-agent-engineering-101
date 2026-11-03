@@ -71,9 +71,12 @@ LOOKUP_ROUNDS, LOOKUP_HOURS = 2, 3
 WHAT = ("negotiations", "settles", "broken", "forum", "balance", "board", "decision")
 UPVOTES_MAX = 5
 REPORT_CHARS = 700                       # the report arrives on Telegram every hour: short
-REPORT_SPEC = ("<the owner's report in Korean, at most five short lines, only what matters. '상황:' what happened "
-               "and how you responded, in one or two lines; '결정 필요:' what only the owner can decide (a code bug, a "
-               "process down, a range that holds you back) or '없음'. Leave out numbers that changed nothing.>")
+REPORT_SPEC = ("<the owner's report in Korean, at most four short lines, only what matters. '상황:' what happened, "
+               "in one line; '그대로 둔 이유:' only when you changed nothing, why that was the right call, in one line; "
+               "'결정 필요:' what only the owner can decide (a code bug, a process down, a range that holds you back) or "
+               "'없음'. The reason for each change goes in why_ko, not here. Leave out numbers that changed nothing.>")
+WHY_SPEC = ('"why_ko": {{"<each number you change, or negotiation / forum{skip}>": "<in Korean, one or two sentences: '
+            'what in the record made you change it (the evidence, with its numbers) and what you expect it to do>", ...}},')
 UPVOTE_RULE = """Upvote: "upvote" lists the forum posts by others (from the record, by id, each with why) whose
 information you actually used in this decision, e.g. a report of a shop's prices or a complaint that made you change something.
 Not for agreement, politeness or posts you merely read; [] when none. Each post gets our vote once."""
@@ -263,6 +266,7 @@ Playbook now (text and categories the code runs on; you may rewrite it):
   negotiation guidance (added to haiku's prompt when it picks a grade and writes a reply): {negotiation}
   forum guidance (added to opus's prompt when it answers a post about us): {forum}
   categories restock skips, with hours left: {skips}
+Write guidance in Korean (the owner reads it; haiku and opus still answer in the buyer's or the post's language).
 Guidance steers how the models speak and which of the code's options they pick (grade, tone, what to say first);
 it cannot change a price, a floor or a warranty, and it must contain no digits and no words for costs, floors,
 margins, percents or fractions (haiku must never learn internal numbers; such guidance is refused). At most {chars} characters each. Skip a category (at most {skip_hours} hours,
@@ -292,7 +296,8 @@ Answer with one JSON object only:
  "changes": {{"<number name>": <value>, ...}},
  "playbook": {{"negotiation": "<the full new text, or null to keep>", "forum": "<the full new text, or null to keep>",
               "restock_skip": {{"<category>": <hours, 0 to stop skipping>}} or null}},
- "reason": "<two sentences: what in the record, what you changed>",
+ "reason": "<in Korean, two sentences: what in the record, what you changed>",
+ {why_spec}
  "notes": "<what to watch next hour, for yourself>",
  "upvote": [{{"id": <post id>, "why": "<in Korean, a few words: what in it you used>"}}, ...],
  "report_ko": "{report_spec}"}}"""
@@ -433,7 +438,7 @@ def decide(md, now):
     prompt = PROMPT.format(policy=describe(p), negotiation=json.dumps(b["negotiation"] or "(none)"),
                            forum=json.dumps(b["forum"] or "(none)"), skips=json.dumps(skips),
                            chars=policy.GUIDE_CHARS, skip_hours=policy.SKIP_HOURS, skip_max=policy.SKIP_MAX,
-                           report_spec=REPORT_SPEC, summary=json.dumps(s, ensure_ascii=False, indent=1)) + "\n\n" + UPVOTE_RULE
+                           report_spec=REPORT_SPEC, why_spec=WHY_SPEC.format(skip=" / restock_skip"), summary=json.dumps(s, ensure_ascii=False, indent=1)) + "\n\n" + UPVOTE_RULE
     memory = MEMORY.read_text(encoding="utf-8") if MEMORY.exists() else ""
     index, looked, used, answer = archive_index(now), [], [], None
     db = model.connect()
@@ -483,12 +488,13 @@ def decide(md, now):
     liked = upvote(md, answer.get("upvote"), db, "shop")
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps({"ts": now, "model": used, "asked": answer.get("changes"), "changed": changed,
-                            "playbook_asked": answer.get("playbook"), "playbook_changed": pb_changed,
+                            "playbook_asked": answer.get("playbook"), "playbook_changed": pb_changed, "why": answer.get("why_ko"),
                             "refused": refused, "review": answer.get("review"), "problems": answer.get("problems"),
                             "reason": reason, "notes": str(answer.get("notes", ""))[:1000],
                             "lookups": len(looked), "memory": answer.get("memory"), "upvoted": liked,
                             "prompt_chars": len(prompt)}, ensure_ascii=False) + "\n")
-    report(now, used, s["health"]["alerts"], changed, pb_changed, refused, str(answer.get("report_ko", ""))[:REPORT_CHARS], liked)
+    report(now, used, s["health"]["alerts"], changed, pb_changed, refused, str(answer.get("report_ko", ""))[:REPORT_CHARS], liked,
+           answer.get("why_ko"))
     log(f"{used}: {'changed ' + json.dumps(changed, ensure_ascii=False) if changed else 'no change'}"
         f"{' | playbook ' + ', '.join(pb_changed) if pb_changed else ''}"
         f"{' | refused ' + '; '.join(refused) if refused else ''} | {reason}")
@@ -522,17 +528,26 @@ def upvote(md, ids, db, role):
     return sent
 
 
-def report(now, used, alerts, changed, pb_changed, refused, text, liked=()):
-    """One entry of the owner's report: the model's Korean summary, then what the code actually applied."""
+def change_lines(changed, pb_changed, why):
+    """What the code applied, each change with the model's reason for it (why_ko): the reason is what the owner needs."""
+    why = why if isinstance(why, dict) else {}
+    because = lambda k: f"\n  이유: {str(why.get(k) or why.get(f'playbook {k}') or '(설명 없음)')[:300]}"
+    lines = [f"- 정책 {k}: {old} → {new}{because(k)}" for k, (old, new) in changed.items()]
+    for k, (old, new) in pb_changed.items():
+        if k == "restock_skip":              # timestamps mean little to a reader; the categories are the change
+            new = {c: time.strftime("%m-%d %H:%M까지", time.localtime(t)) for c, t in new.items()}
+            lines += [f"- 재입고 건너뛰기: {json.dumps(new, ensure_ascii=False)}{because(k)}"]
+        else:                                # the old text is in the previous report; the new one is the change
+            lines += [f"- playbook {k} 지침 수정{because(k)}\n  새 지침: {new or '(비움)'}"]
+    return lines
+
+
+def report(now, used, alerts, changed, pb_changed, refused, text, liked=(), why=None):
+    """One entry of the owner's report: the model's Korean summary, then what the code actually applied and why."""
     lines = [f"## {time.strftime('%m-%d %H:%M', time.localtime(now))} ({used or '판단 없음'})", "", text.strip() or "(보고 없음)", ""]
     if alerts:
         lines += ["- 코드 경고: " + "; ".join(alerts)]
-    for k, (old, new) in changed.items():
-        lines += [f"- 정책 {k}: {old} → {new}"]
-    for k, (old, new) in pb_changed.items():
-        if k == "restock_skip":              # timestamps mean little to a reader; the categories are the change
-            old, new = sorted(old or {}), {c: time.strftime("%m-%d %H:%M까지", time.localtime(t)) for c, t in new.items()}
-        lines += [f"- playbook {k}: {json.dumps(old, ensure_ascii=False)} → {json.dumps(new, ensure_ascii=False)}"]
+    lines += change_lines(changed, pb_changed, why)
     if refused:
         lines += ["- 적용 거부: " + "; ".join(refused)]
     if liked:
