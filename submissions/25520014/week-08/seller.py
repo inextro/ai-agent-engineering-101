@@ -156,14 +156,35 @@ SOLD_HOLD = 6 * 60    # a unit sold stays out of offers this long (inventory.jso
 ABANDONED = 10 * 60   # a talk this old is over (the kit stops a buyer at 300 s, often without a CancelTask)
 
 
+# How long the buyer needs the food to last, as buyers write it (seen in Round 3 on 11-03, 75 of 1,175 first
+# messages, every one of them matched): "Must last at least 84 hours", "it must last 37.0 hours", "I need it to
+# last 48 hours", "Need at least 12 h of shelf life", "at least 18h shelf life". A food unit that does not last
+# that long is worth 0 to the buyer (agent.md), so its kit does not pay at any price: of our food deals with such a
+# line, the 4 whose unit fell short were never paid and the 2 that met it were.
+NEED_HOURS = re.compile(r"(?:\blast\b|shelf[ -]?life|유통기한|남은)[^.;\n]{0,40}?(\d+(?:\.\d+)?)\s*(?:h\b|hrs?\b|hours?\b|시간)"
+                        r"|(\d+(?:\.\d+)?)\s*(?:h\b|hrs?\b|hours?\b|시간)\s*(?:of\s+)?(?:shelf[ -]?life|이상\s*남)", re.I)
+NEED_MARGIN_H = 1.0   # the checkout comes after the talk: the unit must still meet the need then
+
+
+def need_hours(text):
+    """Hours the buyer says the food must last, None when it says nothing."""
+    m = NEED_HOURS.search(text or "")
+    return float(m.group(1) or m.group(2)) if m else None
+
+
 def find_units(text, taken):
     """One unit per grade of what the buyer named, the one to clear first within the grade (food closest to its
-    date, goods held longest): {grade: unit}, empty when there is none."""
+    date, goods held longest): {grade: unit}, empty when there is none. Food that would not last the hours the
+    buyer asks for (need_hours) is left out."""
     inv = inventory()
     if inv.get("round", 0) < 3:
         return {}, inv
     want = text.lower()
     units = [u for u in inv.get("units", []) if u.get("grade") in RANK and u["unit"] not in taken]
+    need = need_hours(text)
+    if need is not None:
+        until = time.time() + (need + NEED_MARGIN_H) * 3600
+        units = [u for u in units if u.get("kind") != "food" or not u.get("expires_at") or u["expires_at"] >= until]
     named = [u for u in units if u["sku"].lower() in want]
     if not named:
         named = [u for u in units if (u.get("name") or "").lower() in want]
@@ -495,8 +516,10 @@ class Seller(AgentExecutor):
     async def opening(self, task_id, text, up, say):
         by_grade, inv = find_units(text, self.held())
         if not by_grade:
-            append(MISSED, {"ts": time.time(), "text": text[:300], "round": inv.get("round")})
-            log(f"[task {task_id[:8]}] nothing in stock for this request")
+            need = need_hours(text)
+            append(MISSED, {"ts": time.time(), "text": text[:300], "round": inv.get("round"), "need_hours": need})
+            log(f"[task {task_id[:8]}] nothing in stock for this request"
+                + (f" (lasting {need:g} h)" if need is not None else ""))
             await up.reject(say("Sorry, we have none of that in stock right now."))
             return
         p = policy.load()
