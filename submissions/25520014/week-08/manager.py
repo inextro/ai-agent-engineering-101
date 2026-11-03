@@ -234,7 +234,7 @@ def summary(md, now):
                             "steps_at_close": dict(Counter(d.get("step") for d in deals))},
         "price_bandit_mean_reward": {f"{k}@{a}": round(v[0] / sum(v), 3) for (k, a), v in bandit.items()},
         "requests_for_items_not_in_stock_last_hour": len(missed),
-        "market": {"settles_in_window": len(est.sales), "lambda0_per_category_per_hour": round(est.lambda0, 3),
+        "market": {"settles_in_window": len(est.sales), "lambda0_per_category_per_hour": round(est.lambda0, 3), "prior_weight_h": round(est.prior_weight_h, 3),
                    "our_share": round(est.share_mean, 4), "our_settles": len(our_settles),
                    "hottest_categories": [(c, round(est.rate(c), 2)) for c in hot]},
         "break_rate_by_grade": {g: round(r, 3) for g, r in est.break_rate.items()},

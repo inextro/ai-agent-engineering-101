@@ -28,7 +28,7 @@ NUMBERS = {
     "c_discount":        (0.10, 0.00, 0.25),   # extra cut off the opening ask for grade C (food near its date, refurbished goods)
     "liquidate_hours":   (24, 12, 48),         # from this many hours before the end the floor falls to cost
     "half_life_h":       (24, 6, 72),          # demand memory: weight of a sale halves every this many hours
-    "prior_hours":       (2.0, 0.5, 8),          # gamma prior worth this many hours of observation (beta)
+    "prior_hours":       (2.0, 0.5, 8),          # cap on the demand prior's weight in hours; the market's spread sets it below
     "warranty_hours":    (6, 0, 6),            # goods break within 6 h of the sale, so 6 covers all of it
 }
 # 11-03 23 h: reserve_frac, goods_cap_frac, review_minutes, scout_frac and hysteresis are gone. restock prices each

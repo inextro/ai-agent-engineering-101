@@ -6,11 +6,15 @@ Demand, per catalog category: settled deals arrive as a Poisson process with an 
 whole market). The rate gets a gamma prior; the gamma is conjugate to the Poisson, so the posterior is two sums:
     alpha = alpha0 + sum of w_i            (w_i = 0.5 ** (age_i / half_life): old sales count less)
     beta  = beta0  + discounted exposure   (the hours watched, discounted the same way)
-The prior is the same for all 140 categories (orders pick a category, not a SKU): rate lambda0 = the pooled
-discounted rate / 140, worth `prior_hours` of observation (beta0). A category nobody sold in yet keeps lambda0.
+The prior is the same for all 140 categories (orders pick a category, not a SKU), and it comes from the market's
+own data (empirical Bayes): mean lambda0 = the mean of the categories' observed rates, variance = their spread less
+the Poisson noise of a count, so the gamma is worth mean / variance hours of observation, at most `prior_hours`.
+Until 11-03 it was always worth `prior_hours` (2 h): with demand this skewed that lifted a category with no sale in
+3 h (air conditioners) to 4.9 deals an hour, and restock bought 2.1M of large appliances that do not sell.
 
 Our share of a category's deals: Beta, prior mean 1 / (shops holding stock in that category, market average),
-weight 5, updated with our deals against everyone's deals in the categories we sold in. One share for the shop.
+weight 5, updated with our deals against everyone's deals in the categories we sold in. One share for the shop,
+scaled down in a category more shops than usual stock, never up.
 
 Then for a horizon of H hours, with our rate s * lambda, the gamma-Poisson predictive count is negative binomial:
     P(we sell none in H) = (beta / (beta + s H)) ** alpha,   and tail(c, H)[k-1] = P(we sell at least k in H)
@@ -140,11 +144,20 @@ class Estimates:
             if d.get("shop") in mine:
                 self.w_ours[c] += wt
             self.sales.append((ts, d))
-        total = sum(self.w.values())
-        self.lambda0 = max(total / max(watched, 1e-9) / len(self.categories), LAMBDA_FLOOR) if watched else LAMBDA_FLOOR
+        # the prior from the market itself: the spread of the categories' observed rates (empirical Bayes).
+        # A gamma with that mean and variance is worth mean / variance hours; demand is skewed (mattresses near
+        # 200 deals an hour, air conditioners none), so it is worth minutes and each category's own count decides.
         b0 = self.p["prior_hours"]
-        self.alpha = {c: self.lambda0 * b0 + self.w[c] for c in self.categories}
-        self.beta = b0 + watched
+        self.lambda0, self.prior_weight_h = LAMBDA_FLOOR, b0
+        if watched > 0 and self.categories:
+            rates = [self.w[c] / watched for c in self.categories]
+            m = sum(rates) / len(rates)
+            var = sum((r - m) ** 2 for r in rates) / len(rates) - m / watched   # less the Poisson noise of a count
+            self.lambda0 = max(m, LAMBDA_FLOOR)
+            if var > 0:
+                self.prior_weight_h = min(b0, self.lambda0 / var)
+        self.alpha = {c: self.lambda0 * self.prior_weight_h + self.w[c] for c in self.categories}
+        self.beta = self.prior_weight_h + watched
 
     def rate(self, c):
         """Posterior mean deals per hour in category c, whole market."""
@@ -163,13 +176,15 @@ class Estimates:
         self.share_mean = a / (a + b)
 
     def share(self, c):
-        """Our expected share in c: the shop-wide share, scaled down where more shops than usual hold stock."""
+        """Our expected share in c: the shop-wide share, scaled down where more shops than usual hold stock. Never
+        scaled up where few hold: few shops stock what few buyers order (11-03: 8% for air conditioners nobody
+        bought, against 3% measured)."""
         n = self.competitors.get(c)
         if n is None:
             return self.share_mean
         held = [x for x in self.competitors.values() if x is not None]
         usual = 1 + (sum(held) / len(held) if held else 3)
-        return min(1.0, self.share_mean * usual / (1 + n))
+        return self.share_mean * min(1.0, usual / (1 + n))
 
     def p_none(self, c, hours):
         """P(we sell nothing in c within `hours`): negative binomial at zero."""
@@ -400,7 +415,7 @@ def pick_arm(kind, stats=None):
 
 if __name__ == "__main__":
     e = Estimates()
-    print(f"lambda0 {e.lambda0:.3f}/h per category, beta {e.beta:.2f} h, share {e.share_mean:.3f}, "
+    print(f"lambda0 {e.lambda0:.3f}/h per category, prior worth {e.prior_weight_h:.3f} h, beta {e.beta:.2f} h, share {e.share_mean:.3f}, "
           f"{len(e.sales)} settles in the window")
     top = sorted(e.categories, key=e.rate, reverse=True)[:10]
     for c in top:

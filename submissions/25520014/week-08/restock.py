@@ -309,7 +309,7 @@ def main():
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps({"ts": now, "balance": inv.get("balance"), "held": len(plan["target"]), "buy": buy,
                             "plan": {k: v for k, v in plan.items() if k != "target"},
-                            "lambda0": round(est.lambda0, 4), "share": round(est.share_mean, 4)},
+                            "lambda0": round(est.lambda0, 4), "prior_h": round(est.prior_weight_h, 4), "share": round(est.share_mean, 4)},
                            ensure_ascii=False) + "\n")
     print(f"[restock] {len(plan['target'])} categories in the plan (cycle {plan.get('cycle_minutes')} min), buying "
           f"{sum(b['qty'] for b in buy)} units in {len(buy)} lines, balance {inv.get('balance')}, reserve {plan['reserve']}")
