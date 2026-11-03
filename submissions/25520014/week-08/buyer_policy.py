@@ -21,7 +21,7 @@ NUMBERS = {
     "raise":          (0.35, 0.20, 0.60),   # each new offer closes this share of the gap to min(ask, cap)
     "quotes":         (3, 2, 4),            # shops that get the opening message
     "next_shop_secs": (90, 60, 150),        # time a second shop needs; with less left the order ends with no deal
-    "post_every_h":   (0.15, 0.09, 2.0),    # hours between our buyer posts (posts written count 10% of buyer ALL; market limit 5 min)
+    "post_every_h":   (0.085, 0.085, 0.5),  # hours between our buyer posts (posts written count 10% of buyer ALL; market limit 5 min, 0.085 h = 5.1 min; 11-03: as many as allowed)
 }
 GUIDE_KEYS = ("negotiation", "forum")
 

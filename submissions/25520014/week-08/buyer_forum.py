@@ -1,6 +1,6 @@
 """Week 08 buyer forum: our buyer posts what it bought, as facts anyone can check on the ledger.
 
-    python buyer_forum.py --dir .            # runs forever, checks every minute
+    python buyer_forum.py --dir .            # runs forever, checks every 20 s
     python buyer_forum.py --dir . --once     # one pass (testing)
 
 Buyer posts are 0.3 (votes from other owners' agents with 5+ deals) + 0.1 (how many we wrote) of the buyer's score, so each post should
@@ -9,14 +9,23 @@ claimed, the warranty. Only facts the market signed (data/purchases.jsonl, writt
 with the ledger entries in refs so a reader can check them. Never how our buyer chooses shops or haggles, never our
 own shop (we cannot buy there; naming it reads as an ad), no advice, no attacks.
 
-One post every post_every_h hours (buyer_policy), the first of these that has something to say (11-03 policy: be
-the buyer other agents read for facts they cannot get alone):
-  1. a reply to a wanted post (wanted.py, last WANTED_H hours): which shops hold that category now (GET /api/shops),
-     and what it sold for on the ledger; never our own shop, nothing when no shop holds it and nothing sold
-  2. our purchases not posted yet, a false grade claim first
-  3. a shop check (at most every DIGEST_EVERY): per shop over the last day, settles, how many grade claims were true,
-     the warranty given and the median share of the list price, from the public ledger
-Replies and the shop check are code templates (every number is computed, refs cite the ledger); purchases go through
+One post every post_every_h hours (buyer_policy; the count of posts is scored, so as often as the market's 5 min
+limit allows), the kinds taken in turn, skipping a kind with nothing new (11-03: many posts, of every kind, no repeats;
+be the buyer other agents read for facts they cannot get alone). A wanted post under WANTED_JUMP_S old goes first.
+  1. wanted: a reply to a wanted post (wanted.py, last WANTED_H hours, newest first): which shops hold that category
+     now (GET /api/shops), and what it sold for on the ledger; nothing when no shop holds it and nothing sold
+  2. arrivals: what other shops took in at the supply windows since our last such post, by category
+  3. purchases: our purchases not posted yet, a false grade claim first (haiku writes these)
+  4. trend: the busiest category's settles and median share of the list price, last TREND_H hours against the rest
+     of the day
+  5. compare: one category's shops side by side over the last day, cheapest median share of the list price first
+  6. broken: goods that broke in the last day, by grade, hours after the sale, warranty and refunds
+  7. shop check (at most every DIGEST_EVERY): per shop over the last day, settles, how many grade claims were true,
+     the warranty given and the median share of the list price
+  8. summary (at most every SUMMARY_EVERY): the market's last hour, settles, buyers, shops, busiest categories, grades
+Every number comes from the public ledger or the market's API; never our own shop's name.
+No repeats: a category (stock reply or price trend) waits TOPIC_H hours, and a text already posted in the last 300
+posts is dropped. Replies, trends and the shop check are code templates (every number is computed, refs cite the ledger); purchases go through
 haiku as before. haiku writes it from the facts (the buyer manager's forum guidance in front); a post with a number the
 facts do not give, our shop's name, or over MAX_CHARS is retried once, then the template goes out instead.
 """
@@ -42,8 +51,12 @@ MODEL, EFFORT = "haiku", "medium"
 MAX_ITEMS = 2             # posts are frequent now (their count is scored), so each carries fewer purchases
 MAX_CHARS = 280           # the forum shows about 300 characters
 MARKET = "https://market.ourolabs.ai"
-WANTED_H = 2              # wanted posts older than this get no reply (the order behind them has likely expired)
+WANTED_H = 0.5            # wanted posts older than this get no reply (the order behind them has likely expired)
+WANTED_JUMP_S = 600       # a wanted post this fresh goes ahead of the turn (unless the last post was a reply too)
 DIGEST_EVERY = 3600
+SUMMARY_EVERY = 3600
+TOPIC_H = 2               # a category (stock reply or price trend) is not posted again within this many hours
+TREND_H = 6               # the price trend compares the last TREND_H hours with the rest of the day
 DAY = 86400
 
 
@@ -77,17 +90,17 @@ def facts(rows, names):
 def template(fs):
     parts = []
     for f in fs:
-        s = f"{f['item']} at {f['shop']}"
+        s = f"{f['shop']}에서 {f['item']}"
         if "pct_of_list" in f:
-            s += f": {f['pct_of_list']}% of list"
+            s += f", 정가의 {f['pct_of_list']}%"
         if f.get("grade_as_claimed") is False:
-            s += ", grade NOT as claimed"
+            s += ", 등급이 말한 것과 달랐음"
         elif f.get("grade"):
-            s += f", grade {f['grade']} as claimed" if f.get("grade_as_claimed") else f", grade {f['grade']}"
+            s += f", {f['grade']}등급 말한 대로" if f.get("grade_as_claimed") else f", {f['grade']}등급"
         if f.get("warranty_hours"):
-            s += f", {f['warranty_hours']}h warranty"
+            s += f", 보증 {f['warranty_hours']}시간"
         parts.append(s)
-    text = "Recent buys (receipts in refs): " + "; ".join(parts) + "."
+    text = "[구매 후기] 영수증은 refs에: " + "; ".join(parts) + "."
     return text if len(text) <= MAX_CHARS else text[:MAX_CHARS - 1] + "…"
 
 
@@ -95,7 +108,7 @@ PROMPT = """{guide}You write a short forum post on an agent marketplace, as a bu
 Other buyers read it to choose shops. The facts (from the market's signed receipts):
 {facts}
 
-Write one post in English, at most {chars} characters, plain text. Say per purchase: the item, the shop, the share of
+Write one post in Korean starting with "[구매 후기] ", at most {chars} characters, plain text. Say per purchase: the item, the shop, the share of
 the list price paid, and whether the grade was as claimed (say it plainly when it was not). Use only these facts and
 only their numbers. Do not explain how you pick shops or negotiate, give no advice, do not praise or attack beyond the
 facts, no hashtags. Reply with the post only."""
@@ -131,6 +144,7 @@ def wanted_reply(md, db, st, now):
     """(text, refs, thread) for the oldest wanted post not answered yet that we have facts for, else None."""
     cat, demand = read(md / "catalog.json", {}), read(md / "demand.json", [])
     posts = [w for w in wanted.recent(db, cat, demand, now - WANTED_H * 3600) if str(w["id"]) not in st["replied"]]
+    posts.reverse()       # newest first: on 11-03 oldest-first replies came 12 min to 1.8 h late, after the asker had bought
     if not posts:
         return None
     try:
@@ -139,6 +153,8 @@ def wanted_reply(md, db, st, now):
         return None
     for w in posts:
         st["replied"][str(w["id"])] = now
+        if recent(st, f"cat:{w['category']}", now):       # the same category answered lately: same shops, same numbers
+            continue
         name = wanted.item_name(demand, w["category"])
         held = wanted.stock_by_shop(shops, cat, w["category"])[:3]
         sold = wanted.settles_in(db, cat, w["category"], now - DAY)
@@ -157,7 +173,7 @@ def wanted_reply(md, db, st, now):
             if sold:
                 parts.append(f"last 24 h: {len(sold)} settles, median {pct[len(pct) // 2]}% of list (public ledger)")
             text = "[In stock] " + "; ".join(parts) + "."
-        return fit(text), [s for s, _ in sold[-3:]], w["id"]
+        return fit(text), [s for s, _ in sold[-3:]], w["id"], w["category"]
     return None
 
 
@@ -191,28 +207,184 @@ def shop_check(md, db, now):
     return fit("[가게 점검] 최근 24시간 공개 원장: " + "; ".join(parts) + "."), [x for r in rows[:3] for x in r["seqs"][-2:]]
 
 
-def send(md, st, now, text, refs, how, thread=None):
+def settle_rows(db, cat, since, mine=()):
+    """The market's settles since a time with their category and % of the list price, our shop's left out."""
+    out = []
+    for r in db.execute("SELECT seq, ts, data FROM ledger WHERE round >= 3 AND kind='settle' AND ts >= ?", (since,)):
+        d = json.loads(r["data"])
+        x, price = cat.get(model.sku_of(d)) or {}, d.get("amount") or d.get("price")
+        if d.get("shop") in mine or not price or not x.get("list_price") or not x.get("category"):
+            continue
+        out.append({"seq": r["seq"], "ts": r["ts"], "d": d, "cat": x["category"],
+                    "pct": round(100 * price / x["list_price"])})
+    return out
+
+
+def median(xs):
+    xs = sorted(xs)
+    return xs[len(xs) // 2]
+
+
+def arrivals(md, db, st, now):
+    """(text, refs) of what other shops took in at the supply windows since our last such post (at most 30 min back),
+    by category, most units first; None under 3 units."""
+    cat, demand = read(md / "catalog.json", {}), read(md / "demand.json", [])
+    since = max(st["arrivals_ts"], now - 1800)
+    by, seqs, last = {}, [], since
+    for r in db.execute("SELECT seq, ts, data FROM ledger WHERE round >= 3 AND kind='supply' AND ts > ?", (since,)):
+        d = json.loads(r["data"])
+        c = (cat.get(d.get("sku")) or {}).get("category")
+        last = max(last, r["ts"])
+        if not c or not d.get("qty") or str(d.get("shop", "")).lower() in NAMES:
+            continue
+        shops = by.setdefault(c, {})
+        shops[d["shop"]] = shops.get(d["shop"], 0) + int(d["qty"])
+        seqs.append(r["seq"])
+    if sum(sum(s.values()) for s in by.values()) < 3:
+        return None
+    st["arrivals_ts"] = last
+    rows = sorted(by.items(), key=lambda kv: -sum(kv[1].values()))[:3]
+    parts = [f"{wanted.item_name(demand, c)} {sum(s.values())}개 (" +
+             ", ".join(f"{n} {k}" for n, k in sorted(s.items(), key=lambda kv: -kv[1])[:3]) + ")" for c, s in rows]
+    return fit("[입고 소식] 방금 공급 창에서 들어온 물건: " + "; ".join(parts) + ". 공개 원장 기준."), seqs[-3:]
+
+
+def compare(md, db, st, now):
+    """(text, refs, category): shops side by side in one category over the last day, cheapest median first."""
+    cat, demand = read(md / "catalog.json", {}), read(md / "demand.json", [])
+    names = shop_names()
+    by = {}
+    for s in settle_rows(db, cat, now - DAY, model.our_urls(db)):       # by name: one owner's shop can have two URLs
+        u = s["d"].get("shop")
+        by.setdefault(s["cat"], {}).setdefault(names.get(u, u.rsplit("/", 1)[-1]), []).append(s)
+    best = None
+    for c, shops in by.items():
+        ok = {u: xs for u, xs in shops.items() if len(xs) >= 2}
+        if len(ok) >= 3 and not recent(st, f"cmp:{c}", now):
+            n = sum(len(xs) for xs in ok.values())
+            if not best or n > best[0]:
+                best = (n, c, ok)
+    if not best:
+        return None
+    _, c, ok = best
+    rows = sorted(ok.items(), key=lambda kv: median([s["pct"] for s in kv[1]]))[:4]
+    parts = [f"{n} {median([s['pct'] for s in xs])}% ({len(xs)}건)" for n, xs in rows]
+    refs = [xs[-1]["seq"] for _, xs in rows]
+    return (fit(f"[가격 비교] {wanted.item_name(demand, c)}, 최근 24시간 가게별 정가 대비 중앙값: " + ", ".join(parts)
+                + ". 공개 원장 기준."), refs, c)
+
+
+def broken_report(md, db, st, now):
+    """(text, refs) on goods that broke in the last day, by grade and warranty, when some broke since our last one."""
+    rows = db.execute("SELECT seq, data FROM ledger WHERE round >= 3 AND kind='broken' AND ts >= ? ORDER BY seq",
+                      (now - DAY,)).fetchall()
+    if not rows or rows[-1]["seq"] <= st["broken_seq"]:
+        return None
+    st["broken_seq"] = rows[-1]["seq"]
+    bs = [json.loads(r["data"]) for r in rows]
+    units = {b.get("unit") for b in bs}
+    grade = {}
+    for r in db.execute("SELECT data FROM ledger WHERE round >= 3 AND kind='settle' AND ts >= ?", (now - 2 * DAY,)):
+        d = json.loads(r["data"])
+        if d.get("unit") in units:
+            grade[d["unit"]] = d.get("grade") or "?"
+    g = {}
+    for b in bs:
+        k = grade.get(b.get("unit"), "?")
+        g[k] = g.get(k, 0) + 1
+    hours = [b["hours_after_sale"] for b in bs if isinstance(b.get("hours_after_sale"), (int, float))]
+    warranty = sum(1 for b in bs if b.get("warranty_hours"))
+    refunded = sum(1 for b in bs if b.get("refunded"))
+    text = (f"[고장 기록] 최근 24시간 고장 {len(bs)}건, 등급별 " + ", ".join(f"{k} {n}건" for k, n in sorted(g.items()))
+            + (f", 판매 후 중앙값 {median(hours):.1f}시간 만에 고장" if hours else "")
+            + f". 보증이 붙어 있던 것 {warranty}건, 환불된 것 {refunded}건. 공개 원장 기준.")
+    return fit(text), [r["seq"] for r in rows[-3:]]
+
+
+def summary(md, db, st, now):
+    """(text, refs): the market over the last hour (settles, buyers, shops, % of list, busiest categories, grades)."""
+    if now - st["last_summary"] < SUMMARY_EVERY:
+        return None
+    cat, demand = read(md / "catalog.json", {}), read(md / "demand.json", [])
+    ss = settle_rows(db, cat, now - 3600)
+    if len(ss) < 5:
+        return None
+    st["last_summary"] = now
+    by = {}
+    for s in ss:
+        by[s["cat"]] = by.get(s["cat"], 0) + 1
+    top = sorted(by.items(), key=lambda kv: -kv[1])[:3]
+    grades = {}
+    for s in ss:
+        if s["d"].get("grade"):
+            grades[s["d"]["grade"]] = grades.get(s["d"]["grade"], 0) + 1
+    n_g = sum(grades.values())
+    text = (f"[시장 요약] 지난 1시간 정산 {len(ss)}건, 구매자 {len({s['d'].get('buyer') for s in ss})}명, "
+            f"가게 {len({s['d'].get('shop') for s in ss})}곳, 정가 대비 중앙값 {median([s['pct'] for s in ss])}%. "
+            "많이 팔린 품목: " + ", ".join(f"{wanted.item_name(demand, c)} {n}건" for c, n in top) + ".")
+    if n_g:
+        text += " 등급 비율 " + ", ".join(f"{k} {round(100 * v / n_g)}%" for k, v in sorted(grades.items())) + "."
+    return fit(text), [s["seq"] for s in ss[-3:]]
+
+
+def price_trend(md, db, st, now):
+    """(text, refs, category) of the busiest category not posted lately: settles and median share of the list price
+    in the last TREND_H hours against the hours before, from the public ledger; None with too few settles."""
+    cat, demand = read(md / "catalog.json", {}), read(md / "demand.json", [])
+    by = {}
+    for r in db.execute("SELECT seq, ts, data FROM ledger WHERE round >= 3 AND kind='settle' AND ts >= ?", (now - DAY,)):
+        d = json.loads(r["data"])
+        x, price = cat.get(model.sku_of(d)) or {}, d.get("amount") or d.get("price")
+        if x.get("category") and price and x.get("list_price"):
+            by.setdefault(x["category"], []).append((r["seq"], r["ts"], round(100 * price / x["list_price"])))
+    cut = now - TREND_H * 3600
+    rows = []
+    for c, xs in by.items():
+        new = sorted(p for _, t, p in xs if t >= cut)
+        old = sorted(p for _, t, p in xs if t < cut)
+        if len(new) >= 3 and not recent(st, f"cat:{c}", now):
+            rows.append((len(new), c, new, old, [s for s, t, _ in xs if t >= cut][-3:]))
+    if not rows:
+        return None
+    _, c, new, old, refs = max(rows)
+    text = (f"[가격 동향] {wanted.item_name(demand, c)}: 최근 {TREND_H}시간 정산 {len(new)}건, 정가 대비 중앙값 "
+            f"{new[len(new) // 2]}% (범위 {new[0]}~{new[-1]}%)")
+    if old:
+        text += f", 그 전 {24 - TREND_H}시간은 {len(old)}건 {old[len(old) // 2]}%"
+    return fit(text + ". 공개 원장 기준."), refs, c
+
+
+def recent(st, topic, now):
+    """True when a post on this topic (a category, the shop check) went out less than TOPIC_H hours ago."""
+    return now - st["topics"].get(topic, 0) < TOPIC_H * 3600
+
+
+def send(md, st, now, text, refs, how, thread=None, topic=None, extra=None):
+    """Queue one post unless the same text is among our last 300 posts; True when it was queued."""
+    if text in st["texts"]:
+        log(f"skipped a repeat ({how}): {text[:120]}")
+        return False
     line = {"post": text, "refs": refs, "as": "buyer"}
     if thread is not None:
         line["thread"] = thread
     queue_post(md, line)
     st["last_post"] = now
+    st["texts"] = (st["texts"] + [text])[-300:]
+    if topic:
+        st["topics"][topic] = now
     with open(LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"ts": now, "text": text, "refs": refs, "how": how, "thread": thread},
+        f.write(json.dumps({"ts": now, "text": text, "refs": refs, "how": how, "thread": thread, **(extra or {})},
                            ensure_ascii=False) + "\n")
     log(f"posted ({how}): {text[:120]}")
+    return True
 
 
-def one_pass(md, st, now):
-    p = buyer_policy.load()
-    if now - st["last_post"] < p["post_every_h"] * 3600:
-        return
-    db = model.connect()
+def post_wanted(md, db, st, now):
     r = wanted_reply(md, db, st, now)
-    st["replied"] = {k: v for k, v in st["replied"].items() if now - v < DAY}
-    if r:
-        send(md, st, now, r[0], r[1], "wanted reply", thread=r[2])
-        return
+    return bool(r) and send(md, st, now, r[0], r[1], "wanted reply", thread=r[2], topic=f"cat:{r[3]}")
+
+
+def post_purchases(md, db, st, now):
     rows = []
     try:
         rows = [json.loads(x) for x in PURCHASES.read_text(encoding="utf-8").splitlines() if x.strip()]
@@ -220,22 +392,75 @@ def one_pass(md, st, now):
         pass
     new = [r for r in rows if r.get("ledger") not in st["posted"] and r.get("ts", 0) > st["since"]]
     if not new:
-        if now - st["last_digest"] >= DIGEST_EVERY and (c := shop_check(md, db, now)):
-            st["last_digest"] = now
-            send(md, st, now, c[0], c[1], "shop check")
-        return
+        return False
     new.sort(key=lambda r: (r.get("claim_honest") is not False, -r.get("ts", 0)))     # false claims first, newest
     pick = new[:MAX_ITEMS]
-    fs = facts(pick, shop_names())
-    text, how = write(fs)
-    refs = [r["ledger"] for r in pick if isinstance(r.get("ledger"), int)]
-    queue_post(md, {"post": text, "refs": refs, "as": "buyer"})
-    st["last_post"] = now
     st["posted"] = (st["posted"] + [r.get("ledger") for r in pick])[-500:]
-    with open(LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"ts": now, "text": text, "refs": refs, "how": how, "waiting": len(new) - len(pick)},
-                           ensure_ascii=False) + "\n")
-    log(f"posted ({how}, {len(pick)} purchases, {len(new) - len(pick)} left): {text[:120]}")
+    text, how = write(facts(pick, shop_names()))
+    refs = [r["ledger"] for r in pick if isinstance(r.get("ledger"), int)]
+    return send(md, st, now, text, refs, how, extra={"waiting": len(new) - len(pick)})
+
+
+def post_trend(md, db, st, now):
+    r = price_trend(md, db, st, now)
+    return bool(r) and send(md, st, now, r[0], r[1], "price trend", topic=f"cat:{r[2]}")
+
+
+def post_shop_check(md, db, st, now):
+    if now - st["last_digest"] < DIGEST_EVERY or not (c := shop_check(md, db, now)):
+        return False
+    st["last_digest"] = now
+    return send(md, st, now, c[0], c[1], "shop check")
+
+
+def post_arrivals(md, db, st, now):
+    r = arrivals(md, db, st, now)
+    return bool(r) and send(md, st, now, r[0], r[1], "arrivals")
+
+
+def post_compare(md, db, st, now):
+    r = compare(md, db, st, now)
+    return bool(r) and send(md, st, now, r[0], r[1], "compare", topic=f"cmp:{r[2]}")
+
+
+def post_broken(md, db, st, now):
+    r = broken_report(md, db, st, now)
+    return bool(r) and send(md, st, now, r[0], r[1], "broken")
+
+
+def post_summary(md, db, st, now):
+    r = summary(md, db, st, now)
+    return bool(r) and send(md, st, now, r[0], r[1], "summary")
+
+
+KINDS = {"wanted": post_wanted, "arrivals": post_arrivals, "purchases": post_purchases, "trend": post_trend,
+         "compare": post_compare, "broken": post_broken, "shop check": post_shop_check, "summary": post_summary}
+
+
+def fresh_wanted(md, db, st, now):
+    """A wanted post under WANTED_JUMP_S old that we have not answered: worth more now than in a few turns."""
+    cat, demand = read(md / "catalog.json", {}), read(md / "demand.json", [])
+    return any(str(w["id"]) not in st["replied"] for w in wanted.recent(db, cat, demand, now - WANTED_JUMP_S))
+
+
+def one_pass(md, st, now):
+    """Every post_every_h hours one post, the kinds taken in turn (after the last kind posted, the next one with
+    something new to say), so the forum sees every kind, not one over and over. A fresh wanted post goes first."""
+    p = buyer_policy.load()
+    st["replied"] = {k: v for k, v in st["replied"].items() if now - v < DAY}
+    st["topics"] = {k: v for k, v in st["topics"].items() if now - v < DAY}
+    if now - st["last_post"] < p["post_every_h"] * 3600:
+        return
+    db = model.connect()
+    names = list(KINDS)
+    start = (names.index(st["last_kind"]) + 1) % len(names) if st["last_kind"] in names else 0
+    order = names[start:] + names[:start]
+    if st["last_kind"] != "wanted" and fresh_wanted(md, db, st, now):
+        order = ["wanted"] + [k for k in order if k != "wanted"]
+    for k in order:
+        if KINDS[k](md, db, st, now):
+            st["last_kind"] = k
+            return
 
 
 def main():
@@ -246,7 +471,8 @@ def main():
     md = Path(a.dir) / ".market"
     while True:
         now = time.time()
-        st = {"last_post": 0, "posted": [], "since": now, "replied": {}, "last_digest": 0, **read(STATE, {})}     # purchases before the first run stay
+        st = {"last_post": 0, "posted": [], "since": now, "replied": {}, "last_digest": 0, "topics": {}, "texts": [],
+              "last_kind": None, "arrivals_ts": 0, "broken_seq": 0, "last_summary": 0, **read(STATE, {})}     # purchases before the first run stay
         try:
             if read(md / "inventory.json", {}).get("round", 0) >= 3:
                 one_pass(md, st, now)
@@ -258,7 +484,7 @@ def main():
         tmp.replace(STATE)
         if a.once:
             return
-        time.sleep(60)
+        time.sleep(20)            # posts may go every 5.4 min (post_every_h 0.09); a 60 s tick would make it 6
 
 
 if __name__ == "__main__":
