@@ -54,6 +54,7 @@ bandit had counted them as sales. A deal with no result yet waits PAY_WAIT, then
 import json
 import math
 import random
+import re
 import sqlite3
 import time
 from collections import defaultdict
@@ -69,6 +70,25 @@ BREAK_PRIOR = {"A": 0.03, "B": 0.15, "C": 0.35}
 BREAK_PRIOR_W = 10
 LAMBDA_FLOOR = 0.01             # deals per hour per category before any data
 SHARE_WEIGHT = 5
+MISSED = policy.DATA / "missed.jsonl"   # requests to our shop that found nothing (seller.py)
+SKU_IN_TEXT = re.compile(r"\bG[0-9a-f]{8}\b")
+P_CLOSE_DEFAULT = 0.5           # share of our talks that end in a deal, until 20 talks in 6 h measure it
+
+
+def read_jsonl(path, since):
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if r.get("ts", 0) >= since:
+                    out.append(r)
+    except OSError:
+        pass
+    return out
 
 
 def connect(path=DB):
@@ -158,6 +178,33 @@ class Estimates:
                 self.prior_weight_h = min(b0, self.lambda0 / var)
         self.alpha = {c: self.lambda0 * self.prior_weight_h + self.w[c] for c in self.categories}
         self.beta = self.prior_weight_h + watched
+        self._asked(hl, horizon, watched)
+
+    def _asked(self, hl, horizon, watched):
+        """Requests that came to our shop for what we did not hold (data/missed.jsonl, written by the seller), per
+        category and SKU, discounted like the sales. They are demand for us that the market's settles do not show
+        as ours, so share() lets them raise our share in that category. Food asked to last longer than the SKU's
+        whole shelf life could never have been served and does not count."""
+        self.asked_w, self.asked_sku = defaultdict(float), defaultdict(float)
+        self.asked_rate, self.p_close = {}, P_CLOSE_DEFAULT
+        if watched <= 0:
+            return
+        for r in read_jsonl(MISSED, self.now - horizon):
+            m = SKU_IN_TEXT.search(r.get("text") or "")
+            x = self.cat.get(m.group(0)) if m else None
+            if not x:
+                continue
+            need = r.get("need_hours")
+            if x.get("kind") == "food" and need and (x.get("shelf_hours") or 0) < need + 1:
+                continue
+            wt = 0.5 ** ((self.now - r["ts"]) / hl)
+            self.asked_w[x["category"]] += wt
+            self.asked_sku[m.group(0)] += wt
+        self.asked_rate = {c: w / watched for c, w in self.asked_w.items()}
+        negs = read_jsonl(NEGOTIATIONS, self.now - 6 * 3600)
+        opened = sum(1 for r in negs if r.get("outcome") == "open")
+        if opened >= 20:                                       # our close rate once there are enough talks
+            self.p_close = sum(1 for r in negs if r.get("outcome") == "deal") / opened
 
     def rate(self, c):
         """Posterior mean deals per hour in category c, whole market."""
@@ -178,13 +225,17 @@ class Estimates:
     def share(self, c):
         """Our expected share in c: the shop-wide share, scaled down where more shops than usual hold stock. Never
         scaled up where few hold: few shops stock what few buyers order (11-03: 8% for air conditioners nobody
-        bought, against 3% measured)."""
+        bought, against 3% measured). Requests that came to us and found nothing raise it: they would have closed
+        at our close rate, so our rate (share x market rate) is at least requests per hour x close rate. That can
+        pass 1 x the market where the market's few settles undercount what is asked of us."""
         n = self.competitors.get(c)
-        if n is None:
-            return self.share_mean
-        held = [x for x in self.competitors.values() if x is not None]
-        usual = 1 + (sum(held) / len(held) if held else 3)
-        return self.share_mean * min(1.0, usual / (1 + n))
+        s = self.share_mean
+        if n is not None:
+            held = [x for x in self.competitors.values() if x is not None]
+            usual = 1 + (sum(held) / len(held) if held else 3)
+            s *= min(1.0, usual / (1 + n))
+        asked = self.asked_rate.get(c, 0.0) * self.p_close
+        return max(s, asked / max(self.rate(c), 1e-9)) if asked else s
 
     def p_none(self, c, hours):
         """P(we sell nothing in c within `hours`): negative binomial at zero."""

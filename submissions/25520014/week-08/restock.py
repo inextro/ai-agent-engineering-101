@@ -162,8 +162,9 @@ def categories(inv, cat, demand, est, p, now):
             continue
         kind = skus[0][1]["kind"]
         m = median.get(c) or sorted(x["list_price"] for _, x in skus)[len(skus) // 2]
-        fit = sorted((s for s in skus if WORST_COST * s[1]["list_price"] <= unit_cap),
-                     key=lambda s: abs(math.log(s[1]["list_price"] / m)))   # nearest the median price first
+        fit = sorted((s for s in skus if WORST_COST * s[1]["list_price"] <= unit_cap),   # the SKU buyers asked us
+                     key=lambda s: (-est.asked_sku.get(s[0], 0.0),                    # for most, then the one
+                                    abs(math.log(s[1]["list_price"] / m))))          # nearest the median price
         if not fit:
             continue
         lp = fit[0][1]["list_price"]
@@ -270,7 +271,9 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
     plan.update(cycle_minutes=round(cycle, 1), target={c: x["have"] + target[c] for c, x in cands.items()
                                              if x["have"] + target[c] > 0},
                 stocked_categories=sum(1 for x in cands.values() if x["have"]),
-                price_ours_factor=round(est.price_ours, 3), price_market_ratio=round(est.price_market, 3))
+                price_ours_factor=round(est.price_ours, 3), price_market_ratio=round(est.price_market, 3),
+                asked_of_us_per_h={c.split(">")[-1]: round(r, 2) for c, r in sorted(
+                    est.asked_rate.items(), key=lambda t: -t[1])[:10]}, close_rate=round(est.p_close, 3))
     return list(buy.values()), plan
 
 
