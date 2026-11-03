@@ -24,6 +24,9 @@ Price:
   floor        = cost x (1 + min_margin) + warranty premium (break rate of the grade x price), then lower in the
                  last `liquidate_hours` (down to the cost) and in the last 6 hours (down to half the cost), and for
                  food close to its date (half the cost: it is thrown away at cost otherwise)
+  clearance    = stock bought before the 11-03 23:55 demand fix, in a category other shops sell 1+/h (clearance.py):
+                 ask at most the market's median share of list less 0.05, floor at most 0.9 x cost; logged with
+                 arm "clearance" so the bandit does not learn from it
   an offer at or above the current ask closes at the ask (more is a misreading: "2 for 50000"). Below it the shop counters: each counter moves a
   1 / (counters left) share of the way from the ask down to max(floor, offer); after `max_concessions` counters
   the floor is the final price, repeated. An offer at or above the floor after that closes. The shop never walks.
@@ -57,6 +60,7 @@ from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 
+import clearance
 import harness
 import model
 import policy
@@ -361,8 +365,14 @@ def option(u, p, arm):
     warranty = int(p["warranty_hours"]) if kind == "goods" and p.get(f"warranty_{u.get('grade')}") else 0
     u = dict(u, _warranty=warranty)
     ask = u["list_price"] * arm * ((1 - p["c_discount"]) if u.get("grade") == "C" else 1)
+    clear = clearance.terms(u)          # bought before the demand fix, in a category the market buys: cheaper now
+    if clear:
+        ask = min(ask, clear["ask"])
     floor = floor_price(u, p, warranty, ask)
-    return {"unit": u, "ask": max(round(ask), floor), "floor": floor, "step": 0, "warranty": warranty}
+    if clear:
+        floor = max(1, min(floor, round(clear["floor"])))
+    return {"unit": u, "ask": max(round(ask), floor), "floor": floor, "step": 0, "warranty": warranty,
+            "clearance": bool(clear)}
 
 
 STALLS_FINAL = 3   # this many messages in a row without a higher offer and the current price becomes final
@@ -511,7 +521,7 @@ class Seller(AgentExecutor):
             d = self.open.pop(t)
             o = d["opts"][d["cur"] or next(iter(d["opts"]))]
             append(NEGOTIATIONS, {"ts": now, "task": t, "outcome": "cancel", "why": "abandoned",
-                                  "kind": o["unit"].get("kind"), "arm": d["arm"], "last_ask": o["ask"]})
+                                  "kind": o["unit"].get("kind"), "arm": d.get("log_arm", d["arm"]), "last_ask": o["ask"]})
         return ({d["opts"][d["cur"]]["unit"]["unit"] for t, d in self.open.items() if t != but and d["cur"]}
                 | set(self.sold))
 
@@ -544,9 +554,12 @@ class Seller(AgentExecutor):
             return
         p = policy.load()
         await asyncio.to_thread(refresh_break_rates)       # both read whole files: off the event loop
+        await asyncio.to_thread(clearance.table)           # rebuilt from the ledger every 10 min: off the loop too
         arm = await asyncio.to_thread(model.pick_arm, next(iter(by_grade.values())).get("kind", "goods"))
         opts = {g: option(u, p, arm) for g, u in by_grade.items()}
         deal = self.open[task_id] = {"opts": opts, "cur": next(iter(opts)) if len(opts) == 1 else None, "arm": arm,
+                                     # a clearance price is not the arm's: the bandit must not learn from it
+                                     "log_arm": "clearance" if any(o["clearance"] for o in opts.values()) else arm,
                                      "steps": int(p["max_concessions"]), "lines": [], "t0": time.time(),
                                      "pv": p.get("version"), "bv": policy.load_playbook().get("version")}
         for k, o in opts.items():
@@ -617,7 +630,7 @@ class Seller(AgentExecutor):
         if opening:
             append(NEGOTIATIONS, {"ts": time.time(), "task": task_id, "outcome": "open", "sku": u["sku"],
                                   "unit": u["unit"], "kind": u.get("kind"), "grade": u.get("grade"),
-                                  "arm": deal["arm"], "list_price": u["list_price"], "cost": u["cost"],
+                                  "arm": deal.get("log_arm", deal["arm"]), "list_price": u["list_price"], "cost": u["cost"],
                                   "ask": opts[key]["ask"], "floor": opts[key]["floor"], "chose": key,
                                   "options": {k: o["unit"].get("grade") for k, o in opts.items()},
                                   "policy": deal["pv"], "playbook": deal["bv"]})
@@ -641,7 +654,7 @@ class Seller(AgentExecutor):
             receipt["warranty_hours"] = o["warranty"]
         await up.add_artifact(parts=[new_data_part(sign_receipt(receipt))], name="receipt")
         append(NEGOTIATIONS, {"ts": time.time(), "task": task_id, "outcome": "deal", "sku": u["sku"],
-                              "unit": u["unit"], "kind": u.get("kind"), "grade": u.get("grade"), "arm": deal["arm"],
+                              "unit": u["unit"], "kind": u.get("kind"), "grade": u.get("grade"), "arm": deal.get("log_arm", deal["arm"]),
                               "list_price": u["list_price"], "cost": u["cost"], "price": price,
                               "step": o["step"], "chose": deal["cur"], "seconds": round(time.time() - deal["t0"], 1)})
         log(f"[task {task_id[:8]}] DEAL {deal['cur']} {u['sku']} {u.get('grade')} at {price} "
@@ -656,7 +669,7 @@ class Seller(AgentExecutor):
         if deal:
             o = deal["opts"][deal["cur"] or next(iter(deal["opts"]))]
             append(NEGOTIATIONS, {"ts": time.time(), "task": task.id, "outcome": "cancel",
-                                  "kind": o["unit"].get("kind"), "arm": deal["arm"], "last_ask": o["ask"]})
+                                  "kind": o["unit"].get("kind"), "arm": deal.get("log_arm", deal["arm"]), "last_ask": o["ask"]})
         await TaskUpdater(event_queue=event_queue, task_id=task.id, context_id=task.context_id).cancel()
 
 
