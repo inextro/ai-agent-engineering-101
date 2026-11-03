@@ -26,6 +26,7 @@ from collections import Counter
 from pathlib import Path
 
 import buyer_policy
+import rules
 import model
 import notify
 import policy
@@ -140,8 +141,9 @@ deal it rates the shop from the market's receipt and posts its purchases on the 
 Once an hour you review the record and set what the code runs on next. The owner does not watch; they read your
 report afterwards and correct you when needed.
 
-Score (percentiles among buyers): 0.5 x surplus (list price of what was useful - price paid + warranty refunds)
-+ 0.3 x votes on our buyer posts (from other owners' agents with 5+ deals) + 0.2 x number of deals. At least 20
+Score (percentiles among buyers; the rules page below has the current formula): 0.5 x surplus (list price of what
+was useful - price paid + warranty refunds) + 0.3 x votes on our buyer posts (from other owners' agents with 5+
+deals) + 0.1 x number of deals + 0.1 x number of our buyer posts (hidden posts do not count). At least 20
 settled deals are needed to rank. The kit stops an order after 300 s.
 
 Policy now, with the allowed range of each number (a change moves at most a quarter of the range):
@@ -194,7 +196,7 @@ def decide(md, now):
     prompt = PROMPT.format(policy=describe(p), negotiation=json.dumps(b["negotiation"] or "(none)"),
                            forum=json.dumps(b["forum"] or "(none)"), chars=policy.GUIDE_CHARS,
                            summary=json.dumps(s, ensure_ascii=False, indent=1), memory=memory or "(empty)",
-                           mem_chars=MEMORY_CHARS, report_spec=REPORT_SPEC, why_spec=WHY_SPEC.format(skip="")) + "\n\n" + UPVOTE_RULE
+                           mem_chars=MEMORY_CHARS, report_spec=REPORT_SPEC, why_spec=WHY_SPEC.format(skip="")) + "\n\n" + UPVOTE_RULE + rules.section("buyer")
     answer, used = ask_model(prompt)
     if answer is None or "review" not in answer:
         log("no decision this hour; the policy stays")

@@ -52,6 +52,7 @@ import harness
 import model
 import notify
 import policy
+import rules
 
 os.environ["TZ"] = "Asia/Seoul"             # the lab server runs on UTC; reports, archive hours and lookups read KST
 time.tzset()
@@ -250,8 +251,9 @@ def summary(md, now):
 
 PROMPT = """You are the manager of a shop in an agent marketplace (Round 3, 14 days). The shop's code sells units
 it bought from the market, negotiates with buyer agents (haiku writes the replies; the code sets every price and
-unit), answers forum posts about the shop (opus), and restocks every minute by a newsvendor rule on a gamma-Poisson
-demand estimate. You do not trade. Once an hour you review the last hour and set what the code runs on next. The
+unit), answers forum posts about the shop (opus), and restocks by a newsvendor rule on a gamma-Poisson demand estimate,
+buying only in the market's supply windows (planned so stock lasts until the next window; few restock runs an hour
+are expected). You do not trade. Once an hour you review the last hour and set what the code runs on next. The
 owner does not watch; they read your report afterwards and correct you when needed.
 
 Score (percentiles among shops): 0.5 x profit (balance - 5,000,000 - bankruptcy money; unsold stock counts as a
@@ -438,7 +440,7 @@ def decide(md, now):
     prompt = PROMPT.format(policy=describe(p), negotiation=json.dumps(b["negotiation"] or "(none)"),
                            forum=json.dumps(b["forum"] or "(none)"), skips=json.dumps(skips),
                            chars=policy.GUIDE_CHARS, skip_hours=policy.SKIP_HOURS, skip_max=policy.SKIP_MAX,
-                           report_spec=REPORT_SPEC, why_spec=WHY_SPEC.format(skip=" / restock_skip"), summary=json.dumps(s, ensure_ascii=False, indent=1)) + "\n\n" + UPVOTE_RULE
+                           report_spec=REPORT_SPEC, why_spec=WHY_SPEC.format(skip=" / restock_skip"), summary=json.dumps(s, ensure_ascii=False, indent=1)) + "\n\n" + UPVOTE_RULE + rules.section("shop")
     memory = MEMORY.read_text(encoding="utf-8") if MEMORY.exists() else ""
     index, looked, used, answer = archive_index(now), [], [], None
     db = model.connect()
@@ -569,7 +571,7 @@ def shop_post(md, p, est_db):
     warranty = (f"a {int(p['warranty_hours'])}-hour warranty on goods of grade {'/'.join(grades)}"
                 if grades and p["warranty_hours"] > 0 else "no warranty on goods for now")
     text = (f"[{model.SHOP_NAME}] Certificates always shown, grades stated truthfully (check claim_honest on our "
-            f"settles), {warranty}. Food and goods across many categories, restocked every minute. Ask for the item "
+            f"settles), {warranty}. Food and goods across many categories, restocked every supply window. Ask for the item "
             "by SKU and send your offer as a number.")
     with open(md / "outbox.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps({"post": text, "refs": refs, "as": "shop"}, ensure_ascii=False) + "\n")
