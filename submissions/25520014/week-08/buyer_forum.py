@@ -69,6 +69,7 @@ SETTLED_S = 2400          # and only those over 40 min old (the 7th like comes a
 LIKE_TARGET = 7.0         # owner 11-04: aim at 7+ likes; an untried kind starts here
 MAIN = ("trend", "price check", "purchases")   # the three shapes of 11-04's 8+ like posts go first (owner 11-04);
                                                # the other kinds only when these have nothing new
+ONLY_MAIN = True          # owner 11-04 01:4x: for now only those three shapes, nothing else
 LIKE_PRIOR_W = 2          # posts' worth of weight on LIKE_TARGET in a kind's expected likes
 
 
@@ -580,6 +581,8 @@ def kind_order(db, now):
             continue
         score[k] = (sum(l for l, _ in v) + LIKE_TARGET * LIKE_PRIOR_W) / (len(v) + LIKE_PRIOR_W)
     order = sorted(score, key=lambda k: (k not in MAIN, -score[k]))
+    if ONLY_MAIN:
+        order = [k for k in order if k in MAIN]
     return order, {k: round(x, 2) for k, x in score.items()}, off
 
 
