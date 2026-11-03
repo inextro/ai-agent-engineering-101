@@ -32,6 +32,9 @@ ratio, blended with 1 the same way.
 Price bandit, per kind (food, goods) and arm (share of list price for the opening ask): Beta(1, 1), updated from
 our own negotiations (data/negotiations.jsonl) with a reward in [0, 1]: 0 for no deal, else
 (0.5 x margin + 0.3 x price) / (0.8 x list price), the shop score's weights on profit and revenue.
+A deal counts only once it is paid: the buyer's `result` on the ledger (market.db) names our task in its receipt
+and says `checks.settled`. In the first hour of Round 3 (11-03) 10 of 24 agreed deals were never paid, and the
+bandit had counted them as sales. A deal with no result yet waits PAY_WAIT, then counts as no sale.
 """
 import json
 import math
@@ -269,10 +272,32 @@ def reward(rec):
     return min(1.0, (0.5 * margin + 0.3 * rec["price"]) / (0.8 * rec["list_price"]))
 
 
-def bandit_stats(path=NEGOTIATIONS, since=0, now=None):
+PAY_WAIT = 900   # seconds a deal may wait for the buyer's result before it counts as unpaid
+
+
+def paid_tasks(db_path=DB):
+    """{task: settled} from the buyers' results on the ledger; None when market.db cannot be read."""
+    try:
+        db = connect(db_path)
+        rows = db.execute("SELECT json_extract(data, '$.receipt.task'), json_extract(data, '$.checks.settled') "
+                          "FROM ledger WHERE round >= 3 AND kind = 'result' AND data LIKE '%\"task\"%'").fetchall()
+        db.close()
+    except sqlite3.Error:
+        return None
+    out = {}
+    for task, ok in rows:
+        if task:
+            out[task] = out.get(task, False) or bool(ok)
+    return out
+
+
+def bandit_stats(path=NEGOTIATIONS, since=0, now=None, paid=...):
     """Beta counts per (kind, arm). A negotiation is its `open` line plus a `deal` line, or no deal when it was
-    cancelled or has been open for 10 minutes (buyers often just stop answering)."""
+    cancelled or has been open for 10 minutes (buyers often just stop answering). A deal is a sale only when the
+    buyer paid (paid_tasks); unknown for PAY_WAIT, then no sale. Without market.db every deal counts, as before."""
     now = now or time.time()
+    if paid is ...:
+        paid = paid_tasks()
     stats = {(k, a): [1.0, 1.0] for k in ("food", "goods") for a in policy.ARMS}
     opened, closed = {}, {}
     try:
@@ -297,7 +322,11 @@ def bandit_stats(path=NEGOTIATIONS, since=0, now=None):
         key = (rec.get("kind"), rec.get("arm"))
         if key not in stats:
             continue
-        r = reward(end) if end and end.get("outcome") == "deal" else 0.0
+        r = 0.0
+        if end and end.get("outcome") == "deal":
+            if paid is not None and task not in paid and now - end["ts"] < PAY_WAIT:
+                continue
+            r = reward(end) if paid is None or paid.get(task) else 0.0
         stats[key][0] += r
         stats[key][1] += 1 - r
     return stats
