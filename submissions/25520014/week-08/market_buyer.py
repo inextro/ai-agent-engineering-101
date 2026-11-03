@@ -60,7 +60,8 @@ DEAL_PRIOR = (4.0, 1.0)     # Beta prior of P(a shop deals with us)
 SUPPLY = {"A": 0.70, "B": 0.20, "C": 0.10}     # goods grades as supplied (agent.md)
 FOOD_MARGIN_H = 0.5         # hours of shelf life asked on top of use_within_hours
 REFUSED = ("TASK_STATE_REJECTED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED")
-AVOID_H, AVOID_AFTER = 6, 3  # shops that turned us down this often in this many hours, with no deal, are skipped
+AVOID_H, AVOID_AFTER = 6, 3  # shops that turned us down this often in this many hours are skipped ...
+AVOID_RATE = 0.10           # ... unless at least this share of the orders we asked them about was paid
 HOURS_SAID = re.compile(r"(\d+(?:\.\d+)?)\s*(?:h\b|hrs?\b|hours?\b|시간)", re.I)
 REPLY_MODEL, REPLY_EFFORT, REPLY_TIMEOUT = "haiku", "medium", 20
 buyer.RPC_TIMEOUT = 60      # one slow shop must not eat the order: the opening waits for the slowest of QUOTES
@@ -122,10 +123,22 @@ def paid_by_shop():
     return out
 
 
+def turned_down(r, shop):
+    """Did `shop` turn order r down at the first question: a refused task, or (11-04) an answer with no price in it
+    that ended the order ("no price in the shop's message": bjeon01 and jiseokkk, 10 in an hour)?"""
+    said = str((r.get("shop_said") or {}).get(shop, ""))
+    if said.startswith(REFUSED):
+        return True
+    return (r.get("shop") == shop and str(r.get("end", "")).startswith("no price")
+            and (r.get("quotes") or {}).get(shop) is None)
+
+
 def avoid_list(now=None):
     """Shops to leave out for now, from our own record (data/buyer.jsonl is the buyer's memory): AVOID_AFTER or more
-    refusals at the first question in the last AVOID_H hours and no paid deal with us in that time. Written to
-    data/buyer_avoid.json so the buyer manager and the owner see it."""
+    first-question refusals (turned_down) in the last AVOID_H hours, and under AVOID_RATE of the orders we asked them
+    about paid. Until 11-04 01:10 one paid deal let a shop off: bjeon01 was asked 129 times in 6 h, refused 50 and
+    paid 3, and kept being asked first; jiseokkk (99 asked, 34 paid) stays. Written to data/buyer_avoid.json so the
+    buyer manager and the owner see it."""
     now = now or time.time()
     paid = set()
     try:
@@ -138,19 +151,22 @@ def avoid_list(now=None):
                 paid.add(x.get("order"))
     except OSError:
         pass
-    refused, dealt = {}, set()
+    refused, asked, dealt = {}, {}, {}
     for r in past_orders():
         if r.get("ts", 0) < now - AVOID_H * 3600:
             continue
         if r.get("order") in paid and r.get("shop"):
-            dealt.add(r["shop"])
-        for shop, said in (r.get("shop_said") or {}).items():
-            if str(said).startswith(REFUSED):
+            dealt[r["shop"]] = dealt.get(r["shop"], 0) + 1
+        for shop in set(r.get("quotes") or {}) | set(r.get("shop_said") or {}):
+            asked[shop] = asked.get(shop, 0) + 1
+            if turned_down(r, shop):
                 refused[shop] = refused.get(shop, 0) + 1
-    out = {s: n for s, n in refused.items() if n >= AVOID_AFTER and s not in dealt}
+    out = {s: n for s, n in refused.items()
+           if n >= AVOID_AFTER and dealt.get(s, 0) < AVOID_RATE * asked.get(s, n)}
     try:
         (policy.DATA / "buyer_avoid.json").write_text(json.dumps(
-            {"ts": now, "hours": AVOID_H, "refusals": out}, ensure_ascii=False), encoding="utf-8")
+            {"ts": now, "hours": AVOID_H, "refusals": out, "asked": {k: asked.get(k) for k in out},
+             "paid": {k: dealt.get(k, 0) for k in out}}, ensure_ascii=False), encoding="utf-8")
     except OSError:
         pass
     return out
