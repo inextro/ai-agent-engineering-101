@@ -75,6 +75,7 @@ SKU_IN_TEXT = re.compile(r"\bG[0-9a-f]{8}\b")
 P_CLOSE_DEFAULT = 0.5           # share of our talks that end in a deal, until 20 talks in 6 h measure it
 SKU_SHARE_DEFAULT = 0.3         # our share of a SKU's sales until we sold 2 (discounted) of the SKUs we held
 SKU_SHARE_MIN_W = 2.0
+SKU_PRIOR_H = 2.0               # hours the market-based guess of our own sales of a SKU is worth (own_sku_rate)
 
 
 def read_jsonl(path, since):
@@ -156,6 +157,7 @@ class Estimates:
         self.w_ours = defaultdict(float)
         self.w_sku, self.w_sku_ours = defaultdict(float), defaultdict(float)   # the same per SKU (restock's caps)
         self.watched = watched
+        self._held_since = None                                # SKU -> our first supply of it (own_sku_rate)
         self.sales = []                                       # (ts, data) for the manager's summary
         for ts, d in entries(self.db, "settle", self.now - horizon):
             if not settled(d):
@@ -226,6 +228,28 @@ class Estimates:
         if ours < SKU_SHARE_MIN_W:
             return SKU_SHARE_DEFAULT
         return ours / sum(self.w_sku[k] for k in skus)
+
+    def own_sku_rate(self, sku):
+        """Our own paid sales of one SKU per hour: a gamma-Poisson posterior of our settles of it around the market's
+        guess (its sales x our share of the category), worth SKU_PRIOR_H hours. The hours of evidence are those
+        since our first supply of the SKU (discounted like the sales), not all the hours watched: a SKU we never
+        held has shown nothing and stays at the guess (a1's check, 11-04). Where we sell a SKU above our share of
+        its category its cap rises, where below it falls (owner, 11-04 01:30). Settles, not agreed talks: of our
+        food deals in 6 h only 125 of 187 were paid."""
+        c = self.cat.get(sku, {}).get("category")
+        prior = self.sku_share(c) * self.sku_rate(sku) if c else 0.0
+        if self._held_since is None:
+            self._held_since = {}
+            hl = self.p["half_life_h"] * 3600
+            for ts, d in entries(self.db, "supply", self.now - 6 * hl):
+                if d.get("shop") == SHOP_NAME and d.get("sku") and d["sku"] not in self._held_since:
+                    self._held_since[d["sku"]] = ts
+        since = self._held_since.get(sku)
+        if since is None:
+            return prior
+        hl = self.p["half_life_h"] * 3600
+        exposed = hl / math.log(2) * (1 - 0.5 ** ((self.now - since) / hl)) / 3600
+        return (self.w_sku_ours.get(sku, 0.0) + SKU_PRIOR_H * prior) / (exposed + SKU_PRIOR_H)
 
     def rate(self, c):
         """Posterior mean deals per hour in category c, whole market."""
