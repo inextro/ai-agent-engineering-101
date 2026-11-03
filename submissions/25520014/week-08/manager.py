@@ -125,7 +125,9 @@ def hour_metrics(since, until):
             "price_over_list": round(sum(d["price"] / d["list_price"] for d in deals) / len(deals), 3) if deals else None,
             "missed_requests": sum(1 for r in jsonl(policy.DATA / "missed.jsonl", since) if r["ts"] < until),
             "replies": len(turns), "template_replies": sum(1 for t in turns if t.get("template")),
-            "balance_at_end": restocks[-1]["balance"] if restocks else None}
+            # the balance when the hour's last restock ran, not now: read as the current balance it made the manager
+            # report "restock plans on a stale balance" for 7 hours (11-04 01:01-07:01)
+            "balance_at_last_restock": restocks[-1]["balance"] if restocks else None}
 
 
 def recent_decisions(now, n=6):
@@ -195,7 +197,14 @@ def restock_plan(units):
     st = json.loads((policy.DATA / "restock_state.json").read_text()) if (policy.DATA / "restock_state.json").exists() else {}
     target = st.get("target") or {}
     have = Counter(u.get("category") for u in units if u.get("grade") != "expired")
-    return {"target_categories": len(target), "target_units": sum(target.values()),
+    ts = st.get("ts")
+    last = (jsonl(policy.DATA / "restock.jsonl", ts - 1) if ts else [])[-1:]
+    return {"note": ("restock runs in every supply window and works each plan out from the balance at that moment; "
+                     "cash_to_spend and balance_when_planned are as of plan_minutes_ago, and the gap to the balance "
+                     "now is sales since then, not a stale balance"),
+            "plan_minutes_ago": round((time.time() - ts) / 60, 1) if ts else None,
+            "balance_when_planned": last[0].get("balance") if last else None,
+            "target_categories": len(target), "target_units": sum(target.values()),
             "held_categories_now": len(have), "held_units_now": sum(have.values()),
             "target_categories_with_no_stock_now": sum(1 for c in target if not have.get(c)),
             **{k: st.get(k) for k in ("cycle_minutes", "lines_per_window", "window_minutes", "reserve",
@@ -369,7 +378,7 @@ def archive_index(now):
         m = r.get("metrics") or {}
         lines.append(f"{r['hour']}: deals {m.get('deals')}/{m.get('opened')} opened, margin {m.get('margin_over_cost')}, "
                      f"missed {m.get('missed_requests')}, templates {m.get('template_replies')}, balance "
-                     f"{m.get('balance_at_end')}"
+                     f"{m.get('balance_at_last_restock', m.get('balance_at_end'))} (at the hour's last restock)"
                      + (f" | alerts: {'; '.join(r['alerts'])[:200]}" if r.get("alerts") else "")
                      + (f" | problems: {' / '.join(r['problems'])[:300]}" if r.get("problems") else "")
                      + (f" | changed: {', '.join(r['changed'])}" if r.get("changed") else ""))
