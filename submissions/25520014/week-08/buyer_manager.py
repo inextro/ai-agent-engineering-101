@@ -51,6 +51,14 @@ def log(msg):
     print(f"{time.strftime('%m-%d %H:%M:%S')} [buyer-manager] {msg}", flush=True)
 
 
+def read_avoid():
+    """market_buyer's avoid list (data/buyer_avoid.json): shop -> refusals in its window."""
+    try:
+        return json.loads((policy.DATA / "buyer_avoid.json").read_text(encoding="utf-8")).get("refusals")
+    except (OSError, ValueError):
+        return None
+
+
 def refusal_kind(why):
     """Why the kit did not pay an agreed deal, as a kind; the reason itself is kept whole in the examples (cut at 60
     characters it lost the hours the order asked for, and the manager called a correct refusal a bug, 11-04)."""
@@ -139,6 +147,7 @@ def summary(md, now):
         "market_settles_this_round": len(settles),
         "last_hour": window(now - 3600, now),
         "last_6_hours": window(now - 6 * 3600, now),
+        "shops_skipped_now_for_refusing_us_at_the_first_question": read_avoid(),
         "orders_last_hour": [{k: r.get(k) for k in ("category", "kind", "use_within_hours", "budget", "shop", "list", "cap", "expect",
                                                      "quotes", "asks", "offers", "end", "price", "secs", "tried")}
                              for r in last],

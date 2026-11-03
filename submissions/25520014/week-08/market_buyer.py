@@ -59,6 +59,9 @@ NEXT_SHOP_SECS = P["next_shop_secs"]   # time a second shop needs; with less lef
 DEAL_PRIOR = (4.0, 1.0)     # Beta prior of P(a shop deals with us)
 SUPPLY = {"A": 0.70, "B": 0.20, "C": 0.10}     # goods grades as supplied (agent.md)
 FOOD_MARGIN_H = 0.5         # hours of shelf life asked on top of use_within_hours
+REFUSED = ("TASK_STATE_REJECTED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED")
+AVOID_H, AVOID_AFTER = 6, 3  # shops that turned us down this often in this many hours, with no deal, are skipped
+HOURS_SAID = re.compile(r"(\d+(?:\.\d+)?)\s*(?:h\b|hrs?\b|hours?\b|시간)", re.I)
 REPLY_MODEL, REPLY_EFFORT, REPLY_TIMEOUT = "haiku", "medium", 20
 buyer.RPC_TIMEOUT = 60      # one slow shop must not eat the order: the opening waits for the slowest of QUOTES
 USE_MODEL = os.environ.get("BUYER_LLM", "1") != "0"
@@ -107,11 +110,49 @@ def paid_by_shop():
         paid[p.get("order")] = bool(p.get("paid"))
     out = {}
     for r in past_orders():
-        if not r.get("shop"):
+        haggled = r.get("shop")
+        if haggled:
+            ok = paid.get(r.get("order"), False) if r.get("receipt") else False
+            a, b = out.get(haggled, (0, 0))
+            out[haggled] = (a + ok, b + (not ok))
+        for shop, said in (r.get("shop_said") or {}).items():   # turned us down at the first question: a talk
+            if shop != haggled and str(said).startswith(REFUSED):   # without a deal (11-04: bjeon01 35 times in
+                a, b = out.get(shop, (0, 0))                         # 6 h, and it still ranked first)
+                out[shop] = (a, b + 1)
+    return out
+
+
+def avoid_list(now=None):
+    """Shops to leave out for now, from our own record (data/buyer.jsonl is the buyer's memory): AVOID_AFTER or more
+    refusals at the first question in the last AVOID_H hours and no paid deal with us in that time. Written to
+    data/buyer_avoid.json so the buyer manager and the owner see it."""
+    now = now or time.time()
+    paid = set()
+    try:
+        for line in (MARKET_DIR / "payments.jsonl").read_text(encoding="utf-8").splitlines():
+            try:
+                x = json.loads(line)
+            except ValueError:
+                continue
+            if x.get("paid"):
+                paid.add(x.get("order"))
+    except OSError:
+        pass
+    refused, dealt = {}, set()
+    for r in past_orders():
+        if r.get("ts", 0) < now - AVOID_H * 3600:
             continue
-        ok = paid.get(r.get("order"), False) if r.get("receipt") else False
-        a, b = out.get(r["shop"], (0, 0))
-        out[r["shop"]] = (a + ok, b + (not ok))
+        if r.get("order") in paid and r.get("shop"):
+            dealt.add(r["shop"])
+        for shop, said in (r.get("shop_said") or {}).items():
+            if str(said).startswith(REFUSED):
+                refused[shop] = refused.get(shop, 0) + 1
+    out = {s: n for s, n in refused.items() if n >= AVOID_AFTER and s not in dealt}
+    try:
+        (policy.DATA / "buyer_avoid.json").write_text(json.dumps(
+            {"ts": now, "hours": AVOID_H, "refusals": out}, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
     return out
 
 
@@ -223,11 +264,29 @@ def write_message(c, offer, ask, other, history, tag):
     return tpl
 
 
-def open_talk(c, url):
+def opening(c, need_h):
+    """The first message. Food states the hours it must last, so a shop can offer a unit that does (ours filters by
+    it) or say it has none, before a deal the kit would refuse to pay (11-04: 54 deals in 6 h, all food)."""
+    text = f"I want to buy {c['name']} ({c['sku']})."
+    if c.get("kind") == "food" and need_h:
+        text += (f" I need it to last {need_h:g} hours: please offer only a unit with at least "
+                 f"{need_h + FOOD_MARGIN_H:g} hours of shelf life left, with the market's certificate.")
+    return text + " What is your price?"
+
+
+def short_food(c, task, need_h):
+    """The shop's own words give the unit fewer hours than we need: no point haggling there."""
+    if c.get("kind") != "food" or not need_h:
+        return False
+    said = [float(h) for h in HOURS_SAID.findall(buyer.status_text(task) or "")]
+    return bool(said) and max(said) < need_h + FOOD_MARGIN_H
+
+
+def open_talk(c, url, need_h=None):
     """The opening message to one shop; returns (task, ask) or (None, None)."""
     try:
         _, rpc_url = buyer.find_endpoint(url)
-        task = buyer.send(rpc_url, f"I want to buy {c['name']} ({c['sku']}). What is your price?")
+        task = buyer.send(rpc_url, opening(c, need_h))
     except Exception as e:
         log(f"{c['shop']}: no answer ({type(e).__name__}: {str(e)[:120]})")
         return None, None, None
@@ -346,33 +405,55 @@ def main():
     timer.daemon = True                         # it must not keep the process alive after the result is printed
     timer.start()
     cands = [c for c in candidates(order, shops, cat, m) if c["es"] > 0]
-    picks, seen = [], set()
-    for c in cands:
-        if c["shop"] not in seen:
-            seen.add(c["shop"])
-            c["ratio"] = m.ratio(c["shop"])
-            picks.append(c)
-        if len(picks) == QUOTES:
-            break
-    log(f"{order.get('item')} budget {order.get('budget')}: {len(cands)} candidates, asking "
-        + ", ".join(f"{c['shop']} {c['sku']} (list {c['list']}, cap {c['cap']}, expect {c['expect']}, es {c['es']})"
-                    for c in picks))
-    if not picks:
+    avoid = avoid_list(started)
+    if any(c["shop"] not in avoid for c in cands):      # every candidate avoided: try them anyway
+        skipped = {c["shop"] for c in cands if c["shop"] in avoid}
+        cands = [c for c in cands if c["shop"] not in avoid]
+        if skipped:
+            rec["avoided"] = sorted(skipped)
+    need_h = order.get("use_within_hours") if order.get("kind") == "food" else None
+    if not cands:
+        log(f"{order.get('item')} budget {order.get('budget')}: 0 candidates")
         rec["end"] = "no shop with a positive expected surplus"
         finish(rec, result)
         return
-    with cf.ThreadPoolExecutor(len(picks)) as ex:
-        opened = list(ex.map(lambda c: open_talk(c, c["url"]), picks))
-    live = []
-    for c, (rpc_url, task, ask) in zip(picks, opened):
-        if task is None:
-            continue
-        rec["quotes"][c["shop"]] = ask
-        if task["status"]["state"] not in ("TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED"):
-            said(rec, c["shop"], task)          # turned down at the first question: keep why
-        if ask is None and task["status"]["state"] == "TASK_STATE_COMPLETED":
-            ask = (buyer.receipt(task) or {}).get("price")
-        live.append((c, rpc_url, task, ask))
+    seen, live = set(), []
+    # ask QUOTES shops at once; when every one of them turns us down (or says its food is too short), ask the next
+    # QUOTES while time is left (11-04: 110 of 450 orders in 6 h ended at the first question)
+    while not any(t[2]["status"]["state"] in ("TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED") for t in live):
+        picks = []
+        for c in cands:
+            if c["shop"] not in seen:
+                seen.add(c["shop"])
+                c["ratio"] = m.ratio(c["shop"])
+                picks.append(c)
+            if len(picks) == QUOTES:
+                break
+        if not picks or (rec.get("rounds_of_quotes") and time.time() - started > DEADLINE - NEXT_SHOP_SECS):
+            break
+        log(f"{order.get('item')} budget {order.get('budget')}: {len(cands)} candidates, asking "
+            + ", ".join(f"{c['shop']} {c['sku']} (list {c['list']}, cap {c['cap']}, expect {c['expect']}, "
+                        f"es {c['es']})" for c in picks))
+        with cf.ThreadPoolExecutor(len(picks)) as ex:
+            opened = list(ex.map(lambda c: open_talk(c, c["url"], need_h), picks))
+        for c, (rpc_url, task, ask) in zip(picks, opened):
+            if task is None:
+                continue
+            rec["quotes"][c["shop"]] = ask
+            state = task["status"]["state"]
+            if state == "TASK_STATE_INPUT_REQUIRED" and short_food(c, task, need_h):
+                said(rec, c["shop"], task)
+                rec.setdefault("too_short", []).append(c["shop"])
+                threading.Thread(target=buyer.walk_away, args=(rpc_url, task["id"], "the food would not last"),
+                                 daemon=True).start()
+                continue
+            if state not in ("TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED"):
+                said(rec, c["shop"], task)          # turned down at the first question: keep why
+                continue
+            if ask is None and state == "TASK_STATE_COMPLETED":
+                ask = (buyer.receipt(task) or {}).get("price")
+            live.append((c, rpc_url, task, ask))
+        rec["rounds_of_quotes"] = rec.get("rounds_of_quotes", 0) + 1
     # where to haggle: the most surplus at the ask we heard (no ask: the expected price)
     live.sort(key=lambda t: -(t[0]["value"] - (t[3] if t[3] is not None else t[0]["expect"])))
     for c, rpc_url, task, ask in live[1:]:      # in the background: a slow shop must not hold up the haggle
@@ -380,7 +461,7 @@ def main():
             threading.Thread(target=buyer.walk_away, args=(rpc_url, task["id"], "bought elsewhere"),
                              daemon=True).start()
     if not live:
-        rec["end"] = "no shop answered"
+        rec["end"] = ("every shop asked turned us down" if rec.get("shop_said") else "no shop answered")
         finish(rec, result)
         return
     receipt = None
@@ -388,7 +469,7 @@ def main():
         if i > 0:                       # the first shop did not deal: open the next one again while time is left
             if time.time() - started > DEADLINE - NEXT_SHOP_SECS:
                 break
-            rpc_url, task, ask = open_talk(c, c["url"])
+            rpc_url, task, ask = open_talk(c, c["url"], need_h)
             if task is None:
                 continue
         quoted = [(o[0]["shop"], o[3]) for o in live if o[0] is not c and o[3] is not None]
