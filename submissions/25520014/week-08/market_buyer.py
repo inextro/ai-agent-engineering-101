@@ -230,6 +230,36 @@ def candidates(order, shops, cat, m):
     return sorted(out, key=lambda c: -c["es"])
 
 
+def why_none(order, shops, cat, m):
+    """Why an order has no candidate, counted over the shops' offers (shops.json is overwritten by the next order,
+    so this is the only record): 66 orders in 3 h on 11-04 ended with none, mostly mattresses with a budget of 1.3
+    to 3 million and milk with one of 10 to 24 thousand, and nothing said which filter took them."""
+    acc = set(order.get("acceptable") or [])
+    need_h = (order.get("use_within_hours") or 0) + FOOD_MARGIN_H
+    n = {"shops_with_offers": sum(1 for s in shops if s.get("offers")), "acceptable_skus": len(acc),
+         "offers_of_acceptable": 0, "of_them_qty_0": 0, "food_shelf_too_short": 0, "not_in_catalog": 0}
+    for s in shops:
+        for o in s.get("offers") or []:
+            if acc and o.get("sku") not in acc:
+                continue
+            n["offers_of_acceptable"] += 1
+            x = cat.get(o.get("sku"))
+            if not x:
+                n["not_in_catalog"] += 1
+            elif not o.get("qty"):
+                n["of_them_qty_0"] += 1
+            elif x.get("kind") == "food" and order.get("use_within_hours") and (x.get("shelf_hours") or 1e9) < need_h:
+                n["food_shelf_too_short"] += 1
+    c = candidates(order, shops, cat, m)
+    n["es_not_positive"] = sum(1 for x in c if x["es"] <= 0)
+    if c:
+        n["best"] = {k: c[0][k] for k in ("shop", "sku", "list", "value", "cap", "expect", "es")}
+    lists = sorted(cat[k]["list_price"] for k in acc if k in cat)
+    if lists:
+        n["acceptable_list_price_min_max"] = [lists[0], lists[-1]]
+    return n
+
+
 # --- talking
 
 def time_left():
@@ -451,7 +481,8 @@ def main():
             rec["avoided"] = sorted(skipped)
     need_h = order.get("use_within_hours") if order.get("kind") == "food" else None
     if not cands:
-        log(f"{order.get('item')} budget {order.get('budget')}: 0 candidates")
+        rec["why_none"] = why_none(order, shops, cat, m)
+        log(f"{order.get('item')} budget {order.get('budget')}: 0 candidates {rec['why_none']}")
         rec["end"] = "no shop with a positive expected surplus"
         finish(rec, result)
         return
