@@ -62,7 +62,19 @@ MODELS = (("opus", "medium"), ("sonnet", "medium"))
 LOG = policy.DATA / "manager.jsonl"
 REPORTS = policy.DATA / "reports.md"     # the owner's after-the-fact report, newest at the bottom
 TURNS = policy.DATA / "turns.jsonl"
-STALE = 15 * 60                          # a process silent this long gets an alert
+# a process silent this long gets an alert. restock writes once per supply window (every 20 min since 11-03), so
+# 15 min raised a false "restock stopped" every hour (11-04 00:01 report)
+STALE = {"kit": 15 * 60, "collector": 15 * 60, "restock": 30 * 60}
+
+
+def clip(text, n):
+    """Shorten a text to about n characters keeping its start and its end, where a shop puts its price: a plain
+    cut made "the asking price is 53" out of 53135 and the manager reported it as a bug (11-03 23:00)."""
+    text = text or ""
+    if len(text) <= n:
+        return text
+    tail = n // 3
+    return f"{text[:n - tail - 5]} [...] {text[-tail:]}"
 EXCERPTS, MISSED_SHOWN = 6, 12
 MEMORY = policy.DATA / "manager_memory.md"
 ARCHIVE = policy.DATA / "manager_archive.jsonl"
@@ -141,7 +153,7 @@ def health(md, now, p, b):
     turns = jsonl(TURNS, now - 3600)
     opens = [r for r in jsonl(model.NEGOTIATIONS, now - 3600) if r["outcome"] == "open"]
     alerts = [f"{k} has not written for {m} minutes" for k, m in seen.items()
-              if k.split()[0] in ("kit", "collector", "restock") and (m is None or m * 60 > STALE)]
+              if k.split()[0] in STALE and (m is None or m * 60 > STALE[k.split()[0]])]
     tmpl = sum(1 for t in turns if t.get("template"))
     if turns and tmpl / len(turns) > 0.3:
         alerts.append(f"{tmpl} of {len(turns)} replies in the last hour were templates (haiku failing)")
@@ -171,8 +183,8 @@ def excerpts(now):
     talks = []
     for task, ts in sorted(by_task.items(), key=rank)[:EXCERPTS]:
         talks.append({"task": task[:8], "deal": task in closed,
-                      "turns": [f"buyer: {t['buyer'][:300]} | shop ({t.get('unit')}, {t['price']}"
-                                f"{', template' if t.get('template') else ''}): {t['shop'][:300]}" for t in ts]})
+                      "turns": [f"buyer: {clip(t['buyer'], 300)} | shop ({t.get('unit')}, {t['price']}"
+                                f"{', template' if t.get('template') else ''}): {clip(t['shop'], 300)}" for t in ts]})
     missed = Counter(r.get("text", "")[:160] for r in jsonl(policy.DATA / "missed.jsonl", now - 3600))
     return talks, [{"request": k, "times": n} for k, n in missed.most_common(MISSED_SHOWN)]
 
@@ -298,8 +310,9 @@ toward the floor), holds its price when the buyer does not, and after three numb
 the held price final and never moves it again; an offer at or above the current price closes; the shop never walks
 away; claims are true and certificates shown. If
 the code itself looks wrong (a bug, a process down), say so in "problems" and the report; the owner fixes code.
+Before calling something a bug, check it against the rules page below and the record: a refusal or a number that follows from the rules (an order asking more hours than a unit has, a supply window that is closed) is not a bug. "[...]" marks where this record shortened a long text; the buyer and the shop saw it whole.
 
-The record (code-computed; the last hour's negotiations are verbatim):
+The record (code-computed; the last hour's negotiations are verbatim apart from "[...]"):
 {summary}
 
 Review, in this order:
@@ -393,8 +406,8 @@ def lookup(reqs, now, db):
             for t in jsonl(TURNS, t0):
                 if t["ts"] < t1:
                     by_task.setdefault(t["task"], []).append(t)
-            got["negotiations"] = [[f"buyer: {t['buyer'][:200]} | shop ({t.get('unit')}, {t['price']}"
-                                    f"{', template' if t.get('template') else ''}): {t['shop'][:200]}" for t in ts]
+            got["negotiations"] = [[f"buyer: {clip(t['buyer'], 200)} | shop ({t.get('unit')}, {t['price']}"
+                                    f"{', template' if t.get('template') else ''}): {clip(t['shop'], 200)}" for t in ts]
                                    for ts in list(by_task.values())[:8]]
             got["negotiation_outcomes"] = dict(Counter(r["outcome"] for r in jsonl(model.NEGOTIATIONS, t0)
                                                        if r["ts"] < t1))

@@ -51,9 +51,26 @@ def log(msg):
     print(f"{time.strftime('%m-%d %H:%M:%S')} [buyer-manager] {msg}", flush=True)
 
 
+def refusal_kind(why):
+    """Why the kit did not pay an agreed deal, as a kind; the reason itself is kept whole in the examples (cut at 60
+    characters it lost the hours the order asked for, and the manager called a correct refusal a bug, 11-04)."""
+    w = why.lower()
+    if "shelf life" in w:
+        return "food lasts less than the order's use_within_hours (+0.5 h): correct refusal"
+    if "grade" in w:
+        return "grade not worth the price under our accept policy"
+    if "certificate" in w:
+        return "no certificate"
+    if "not in stock" in w:
+        return "the shop no longer had the unit at checkout"
+    return "other: " + why[:120]
+
+
 def window(since, until):
     """One window of the buyer, from its own order log."""
-    rs = [r for r in jsonl(ORDERS, since) if r["ts"] < until]
+    every = [r for r in jsonl(ORDERS, since) if r["ts"] < until]
+    rs = [r for r in every if r.get("kind")]      # orders with no kind are the old chair/bookshelf/lamp kind: no
+                                                  # SKU sells for them and the board does not count them
     agreed = [r for r in rs if r.get("end") == "deal" and r.get("price") and r.get("list")]
     paid = {}
     try:
@@ -69,9 +86,14 @@ def window(since, until):
     msgs = Counter()
     for r in rs:
         msgs.update(r.get("messages") or {})
-    return {"orders": len(rs), "agreed": len(agreed), "paid_deals": len(deals),
-            "kit_refused": dict(Counter(str((paid.get(r.get("order")) or {}).get("reason"))[:60] for r in agreed
-                                        if r.get("order") in paid and not paid[r["order"]].get("paid"))),
+    refused = [(r, str(paid[r["order"]].get("reason"))) for r in agreed
+               if r.get("order") in paid and not paid[r["order"]].get("paid")]
+    kinds = Counter(refusal_kind(why) for _, why in refused)
+    return {"orders": len(rs), "old_kind_orders_skipped": len(every) - len(rs),
+            "agreed": len(agreed), "paid_deals": len(deals),
+            "kit_refused": {k: {"times": n, "examples": [
+                f"{why} (order use_within_hours {r.get('use_within_hours')}, kind {r.get('kind')})"
+                for r, why in refused if refusal_kind(why) == k][:2]} for k, n in kinds.most_common()},
             "ends": dict(Counter(str(r.get("end"))[:60] for r in rs).most_common(8)),
             "price_over_list": round(sum(r["price"] / r["list"] for r in deals) / len(deals), 3) if deals else None,
             "surplus_sum": sum(r["list"] - r["price"] for r in deals),
@@ -109,7 +131,7 @@ def summary(md, now):
                             "ORDER BY id DESC LIMIT 30", (f"%{us.lower()}%",)).fetchall()
     except Exception:
         mine, others = [], []
-    last = jsonl(ORDERS, now - 3600)[-ORDERS_SHOWN:]
+    last = [r for r in jsonl(ORDERS, now - 3600) if r.get("kind")][-ORDERS_SHOWN:]
     s = {
         "time": time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(now)),
         "hours_left_in_round": round(policy.hours_left(now), 1),
@@ -117,7 +139,7 @@ def summary(md, now):
         "market_settles_this_round": len(settles),
         "last_hour": window(now - 3600, now),
         "last_6_hours": window(now - 6 * 3600, now),
-        "orders_last_hour": [{k: r.get(k) for k in ("category", "kind", "budget", "shop", "list", "cap", "expect",
+        "orders_last_hour": [{k: r.get(k) for k in ("category", "kind", "use_within_hours", "budget", "shop", "list", "cap", "expect",
                                                      "quotes", "asks", "offers", "end", "price", "secs", "tried")}
                              for r in last],
         "our_reviews_6h": {"stars": dict(Counter(r.get("stars") for r in bought)),
@@ -160,6 +182,7 @@ What the code does by design (guidance cannot change it): offers always rise and
 at or under the shop's usual price, when the shop meets our offer, when it stops moving under the cap, or in the last
 round; a second shop is opened only when the first ends without a deal and enough time is left. If the code itself
 looks wrong (a bug, orders failing for one reason), say so in "problems" and the report; the owner fixes code.
+Before calling something a bug, check it against the rules page below and the record: a refusal or a number that follows from the rules (an order asking more hours than a unit has, a supply window that is closed) is not a bug. "[...]" marks where this record shortened a long text; the buyer and the shop saw it whole.
 
 The record (code-computed):
 {summary}
