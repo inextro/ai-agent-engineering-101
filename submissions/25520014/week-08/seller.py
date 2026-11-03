@@ -401,6 +401,7 @@ def option(u, p, arm):
             "clearance": bool(clear)}
 
 
+SMALL_GAP = 0.02   # an offer at or above the floor and this close to the price under talk closes at the offer
 STALLS_FINAL = 3   # this many messages in a row without a higher offer and the current price becomes final
 
 
@@ -422,6 +423,10 @@ def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, s
     if offer is not None and (offer >= o["ask"] or (o["step"] >= steps and offer >= o["floor"])):
         # never above the ask: an offer over it is a misreading ("2 for 50000" read as 50000 for one)
         return {"close": True, "price": min(offer, o["ask"]), "step": o["step"], "final": True}
+    if offer is not None and offer >= o["floor"] and o["ask"] - offer <= SMALL_GAP * o["ask"]:
+        # a few hundred won apart is not worth the deal: buyers who raise under MIN_RAISE froze the price and walked
+        # 45 times in 10 h at 2% or less above our floor (11-04 report, owner: mirror the buyer's SMALL_STEP)
+        return {"close": True, "price": offer, "step": o["step"], "final": True}
     if opening:
         # the first number is where the buyer starts, not a raise: the shop keeps its asking price
         return {"close": False, "price": o["ask"], "step": o["step"], "final": False, "opening": True,
