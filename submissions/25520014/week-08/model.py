@@ -70,6 +70,7 @@ BREAK_PRIOR = {"A": 0.03, "B": 0.15, "C": 0.35}
 BREAK_PRIOR_W = 10
 LAMBDA_FLOOR = 0.01             # deals per hour per category before any data
 SHARE_WEIGHT = 5
+SHARE_PRIOR_OURS = 10           # a category's own share counts once we have about this many (discounted) sales in it
 MISSED = policy.DATA / "missed.jsonl"   # requests to our shop that found nothing (seller.py)
 SKU_IN_TEXT = re.compile(r"\bG[0-9a-f]{8}\b")
 P_CLOSE_DEFAULT = 0.5           # share of our talks that end in a deal, until 20 talks in 6 h measure it
@@ -268,9 +269,12 @@ class Estimates:
         self.share_mean = a / (a + b)
 
     def share(self, c):
-        """Our expected share in c: the shop-wide share, scaled down where more shops than usual hold stock. Never
-        scaled up where few hold: few shops stock what few buyers order (11-03: 8% for air conditioners nobody
-        bought, against 3% measured). Requests that came to us and found nothing raise it: they would have closed
+        """Our expected share in c: the category's own share (our sales in c over the market's), shrunk toward a
+        prior worth SHARE_PRIOR_OURS of our sales. The prior is the shop-wide share, scaled down where more shops
+        than usual hold stock; never scaled up where few hold: few shops stock what few buyers order (11-03: 8% for
+        air conditioners nobody bought, against 3% measured). A category we never sold in keeps the prior. Until
+        11-04 07 h every category used the shop-wide 5.8%: mattresses (8.6% ours, 32-40 deals an hour) were planned
+        at 4.2% and sofas (24.7%) at 4.1%, so restock thought 30 mattresses would not sell in a cycle. Requests that came to us and found nothing raise it: they would have closed
         at our close rate, so our rate (share x market rate) is at least requests per hour x close rate. That can
         pass 1 x the market where the market's few settles undercount what is asked of us."""
         n = self.competitors.get(c)
@@ -279,6 +283,10 @@ class Estimates:
             held = [x for x in self.competitors.values() if x is not None]
             usual = 1 + (sum(held) / len(held) if held else 3)
             s *= min(1.0, usual / (1 + n))
+        ours = self.w_ours.get(c, 0.0)
+        if ours > 0 and s > 0:
+            k = SHARE_PRIOR_OURS / s                           # the prior, in market sales
+            s = (ours + SHARE_PRIOR_OURS) / (self.w[c] + k)
         asked = self.asked_rate.get(c, 0.0) * self.p_close
         return max(s, asked / max(self.rate(c), 1e-9)) if asked else s
 
