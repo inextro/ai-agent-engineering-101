@@ -16,7 +16,8 @@ clear first within it (food closest to its date, goods held longest). Each has i
 step. haiku picks which to offer from the buyer's words: the lowest grade that meets what the buyer asked for, said
 plainly and cheaper, to a buyer who minds nothing; the best grade to a buyer who looks like a fixed script (it may
 refuse a low grade at checkout). A bare number or yes keeps the current unit. When haiku fails the shop offers the
-best grade. Since 11-04 01:50 the lower grades are offered only to a buyer who asks for one (LOWER_OK):
+best grade. Since 11-04 01:50 the code offers one grade, the best, and a lower one only to a buyer who asks for it
+(offer_grade):
 buyers' kits left 59% of our food C deals and 55% of goods C unpaid, none of food A.
 
 Price:
@@ -179,6 +180,26 @@ def need_hours(text):
     """Hours the buyer says the food must last, None when it says nothing."""
     m = NEED_HOURS.search(text or "")
     return float(m.group(1) or m.group(2)) if m else None
+
+
+NAMED_GRADE = re.compile(r"\bgrade\s*([abc])\b|\b([abc])[ -]grade\b|([ABC])\s*등급|등급\s*([ABC])", re.I)
+
+
+def offer_grade(text, opts):
+    """The one grade to offer: the best held, unless the buyer asks for a lower one (LOWER_OK). Then the lowest
+    grade the buyer named that we hold, else the lowest grade at or above the lowest named, else our lowest."""
+    held = sorted(opts, key=RANK.get)                    # lowest first
+    if not LOWER_OK.search(text or ""):
+        return held[-1]
+    named = {next(x for x in m.groups() if x).upper() for m in NAMED_GRADE.finditer(text)}
+    named = {g for g in named if g in RANK}
+    if not named:
+        return held[0]
+    for g in held:
+        if g in named:
+            return g
+    least = min(named, key=RANK.get)
+    return next((g for g in held if RANK[g] >= RANK[least]), held[-1])
 
 
 def find_units(text, taken):
@@ -562,11 +583,13 @@ class Seller(AgentExecutor):
         await asyncio.to_thread(clearance.table)           # rebuilt from the ledger every 10 min: off the loop too
         arm = await asyncio.to_thread(model.pick_arm, next(iter(by_grade.values())).get("kind", "goods"))
         opts = {g: option(u, p, arm) for g, u in by_grade.items()}
-        if len(opts) > 1 and not LOWER_OK.search(text):
-            # the best grade only, unless the buyer asked for a lower one: their kits refuse to pay for low grades
-            # (11-04, 6 h of our receipts: unpaid food A 0 of 33, B 29 of 105, C 34 of 58; goods C 6 of 11)
-            best = max(opts, key=RANK.get)
-            opts = {best: opts[best]}
+        if len(opts) > 1:
+            # one grade, chosen by the code: the best we hold, since buyers' kits refuse to pay for low grades
+            # (11-04, 6 h of our receipts: unpaid food A 0 of 33, B 29 of 105, C 34 of 58; goods C 6 of 11),
+            # unless the buyer asks for a lower one: then the lowest grade it named that we hold ("grade C is fine"
+            # gets C, not a choice of B and C; owner 11-04 01:40), or our lowest for "refurbished", "cheapest"
+            g = offer_grade(text, opts)
+            opts = {g: opts[g]}
         deal = self.open[task_id] = {"opts": opts, "cur": next(iter(opts)) if len(opts) == 1 else None, "arm": arm,
                                      # a clearance price is not the arm's: the bandit must not learn from it
                                      "log_arm": "clearance" if any(o["clearance"] for o in opts.values()) else arm,
