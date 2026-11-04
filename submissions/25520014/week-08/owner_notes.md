@@ -163,3 +163,10 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   closed 7 of 25, on A 9 of 14; 자코모 4인 B 1 of 10 (cut to 1.51M), and no A of it sold. Buyers left on the first
   B quote without a number, at a B ask well under the A's: a grade they refuse, not a price. The 62% close of B
   openings was measured with no A held. Do not report the 20:32-20:51 drop in deals as a new problem.
+- 11-04 21:00 seller fallback offers B before C (B_FALLBACK): when an A's price is final and the buyer's offer is
+  under what closes it, the B of the SKU whose floor the offer meets is offered once at the buyer's offer, else the
+  C as before; same yes / repeated-number / refusal rules. A number above the fallback's price closes at that number
+  (at most list; 19:58 a buyer sent 1,438,400 to a C asking 1,276,000 and paid 1,276,000). Other shops sell goods B
+  at its supply share (18-23% of their goods deals) and ours sat at 13%; a B put before a held A loses the buyer
+  (20:32-20:51), a B after the A failed costs no A deal. B fallback deals, logged "fallback" with fallback_grade B in
+  turns, are this rule, on purpose; the owner judges them with the C ones (paid share, stars).
