@@ -319,9 +319,13 @@ def one_pass(md, st, now):
         queue_post(md, {"post": reply, "refs": list(records), "thread": post["id"], "as": "shop"})
         # a post in our thread may be about another shop (4 of 14 open complaints on 11-04 named only others):
         # only a post that names us, or cites one of our settles and names no other shop, goes on the complaint
-        # list the manager reads (post 3967 cited 4 settles, one ours, and complained of dragonash's 3 h warranty)
+        # list the manager reads (post 3967 cited 4 settles, one ours, and complained of dragonash's 3 h warranty).
+        # A post that names other shops as well as us must also cite one of our settles: 4596 (11-04 14:14) was a
+        # rival buyer's ad listing nine shops' quotes, ours among them, and cited none of our settles. Replayed over
+        # the 17 complaints so far, this drops 4596 only.
         text = (post.get("text") or "").lower()
-        if a.get("complaint") and (any(n in text for n in NAMES) or (records and not names_other(db, text))):
+        us, other = any(n in text for n in NAMES), names_other(db, text)
+        if a.get("complaint") and (us or records) and (not other or (us and records)):
             st["complaints"][str(post["id"])] = {"ts": now, "issue": str(a.get("issue", ""))[:120],
                                                  "text": (post.get("text") or "")[:300], "version": p["version"]}
         st["last_post"] = now

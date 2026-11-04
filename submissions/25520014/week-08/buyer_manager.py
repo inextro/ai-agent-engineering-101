@@ -136,6 +136,9 @@ def our_forum(board, us):
     return f, sum(1 for b in ranked if (b.get("forum") or 0) < f) / (len(ranked) - 1)
 
 
+AVG_DROP = 0.03   # how far under the forum score the last 2 h of posts must average before "평균 하락" fires
+
+
 def forum_alerts(db, now, us):
     """Code checks that the forum strategy's premises broke (owner 11-04: tell me when the forum policy needs a
     change). Each alert is one Korean line with its numbers; the manager explains them, the owner decides."""
@@ -151,10 +154,14 @@ def forum_alerts(db, now, us):
     hit = [(i, votes[i][1]) for i, t in mine if t > now - 3900 and votes.get(i, (0, 0))[1] > 0]
     if hit:
         out.append("싫어요: 우리 글 " + ", ".join(f"#{i}({d}개)" for i, d in hit) + "이 싫어요를 받았습니다")
-    # 2. new posts pull the average down: posts older than 10 min of the last 2 h, against the score now
+    # 2. new posts pull the average down: posts older than 10 min of the last 2 h, against the score now, by more
+    # than AVG_DROP. Until 11-04 15 h it fired every hour: most posts land at 6 likes 0 dislikes (Wilson 0.61)
+    # against a 0.635 score, which moved the score 0.637 -> 0.635 in 8 h with the percentile at 0.80-0.84; the
+    # owner found the hourly alert dulled it. At 0.03 twelve 6/0 posts (0.610) stay quiet, two 5/0 of twelve
+    # (0.602) or one 7/1 of twelve (0.603) still trip it.
     aged = [i for i, t in mine if now - 7200 < t < now - 600]
     worth = [w for w in (wilson(*votes[i]) for i in aged if i in votes) if w is not None]
-    if score is not None and len(worth) >= 6 and sum(worth) / len(worth) < score:
+    if score is not None and len(worth) >= 6 and sum(worth) / len(worth) < score - AVG_DROP:
         out.append(f"평균 하락: 최근 2시간 글 {len(worth)}편의 Wilson 하한 평균 {sum(worth) / len(worth):.3f}이 "
                    f"지금 forum 점수 {score:.3f}보다 낮아, 새 글이 평균을 깎고 있습니다")
     # 3. votes stopped: the last six posts older than 10 min have no likes at all

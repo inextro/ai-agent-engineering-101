@@ -73,6 +73,12 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   41/59/118만 on 99/117/130 deals the buyer later raised into: no change; do not ask to close at the buyer's offer.
 - 11-04 11:16 seller: when the unit is swapped for another (taken by a parallel talk) the reply keeps the opening
   wording, or says "this unit's price"; "we came down" on a first reply (5ffb5c63) is fixed.
+- 11-04 15:30 apple Gfb2c0249 shelf-life complaints (1781, 2474, 4556) are not a unit-selection bug: each cites a
+  sale whose buyer never said how many hours it needed (4556 cites the 05:16 sale, 32.2 h left), and the need
+  appears only in the later post. Talks that state a need get a unit that meets it (36 h asked: 37-45 h sold).
+  Do not report the unit-selection code for these again; report only a sale whose talk stated a need it missed.
+- 11-04 15:30 forum: a post that names other shops as well as us goes on the complaint list only if it cites one
+  of our settles (4596 was tomato&potato's ad listing nine shops). 3967 and 4596 were taken off the list by hand.
 
 ## buyer
 
@@ -84,3 +90,6 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   rule; do not ask to skip it again. Ask only if it stops paying entirely for 6 h.
 - 11-04 07:29 forum_alerts: "평균 하락" right after a post is usually the newest posts not having their votes yet;
   the owner reads it and decides (11-04: ignore it when it is that).
+- 11-04 15:30 forum_alerts: "평균 하락" now fires only when the last 2 h of posts average 0.03 under the score.
+  Posts at 6 likes 0 dislikes (Wilson 0.61) are the normal case and the owner ignores them; the old rule fired every
+  hour on them. Report it only when it fires under the new rule.
