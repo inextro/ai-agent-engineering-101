@@ -193,7 +193,7 @@ NAMED_GRADE = re.compile(r"\bgrade\s*([abc])\b|\b([abc])[ -]grade\b|([ABC])\s*�
 # best-first rule left B behind it (자코모 4인 G8ec51935 at 20:11: 13 A, 36 B); per list price a B earns 0.14 after
 # refunds against A's 0.07, a goods talk opened on B closed 62% against A's 49% (13-20 h), and B was paid 89% against
 # A's 94% (18-20 h). Offline 6 h: +10-25M gross with OLD_C_H 3. C still comes only by asking or the fallback.
-B_FIRST = True
+B_FIRST = False   # off from 11-04 20:51: opened on B with A held, goods talks closed 7 of 25 (A 9 of 14); 자코모 4인 1 of 10
 
 
 def offer_grade(text, opts):

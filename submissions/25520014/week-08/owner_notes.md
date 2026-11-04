@@ -159,3 +159,7 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   then held without A); B paid 89%, A 94% (18-20 h). Offline 6 h with OLD_C_H 3: +10-25M gross. Only 5 of 3,968
   talks asked for A after a first message naming no grade. More B deals and an A count that grows is this rule, on
   purpose; the owner judges it at 21 and 22 h by talks opened on B (close and paid share) and stars.
+- 11-04 20:51 B_FIRST off (seller opens on the best grade again). 20:33-20:45, with A held: goods talks opened on B
+  closed 7 of 25, on A 9 of 14; 자코모 4인 B 1 of 10 (cut to 1.51M), and no A of it sold. Buyers left on the first
+  B quote without a number, at a B ask well under the A's: a grade they refuse, not a price. The 62% close of B
+  openings was measured with no A held. Do not report the 20:32-20:51 drop in deals as a new problem.
