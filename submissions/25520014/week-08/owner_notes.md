@@ -297,15 +297,16 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   orders started over the cap with another shop under it; 69% closed against 96%). The buyer posts stopped at 03:39
   ON PURPOSE for now: totato2203-r3 dislikes almost every post in the market since about 02 h (667 of 689 posts at
   04-06 h, its own excepted), so every kind of ours got a dislike and buyer_forum has none left to post. The owner
-  holds it until the bombing fades; posting resumes by itself when our disliked posts age out. Do not report the
+  holds it until the bombing fades (from 08:10 no automatic resume, see below). Do not report the
   pause as a fault; report when posting resumes or other posts stop getting dislikes. offers[0] over the cap is a
   record artifact (offers and asks are kept across all shops of an order, the cap is the last shop's).
 - 11-05 07:3x (owner: watch the dislike bombing): forum_strategy_checks now carries
   market_dislike_share_by_hour_newest_first (other buyers' posts 10-70 min old in each hour, and how many got a
   dislike; under 2% before 11-05 01 h, 96-97% at 03-07 h). "싫어요 테러 진행" fires while the last hour is 30% or more,
-  with the hours it has run and when buyer_forum would post again by itself (13:20 now); "싫어요 테러 잦아듦" fires
+  with the hours it has run (the 13:20 automatic resume was removed at 08:10); "싫어요 테러 잦아듦" fires
   once it falls under 10% after being on, so the owner decides when to resume. "글 멈춤" is left out while it is on:
   the pause is the owner's. Each hour say in one line whether the share is rising, steady or fading.
 - 11-05 08:10 (buyer_forum, buyer_manager restarted). The owner stopped buyer posts until the dislike bombing is seen
   to end (buyer_forum.POSTING_PAUSED): there is no automatic resume at 13:20 any more. Report "싫어요 테러 잦아듦"
-  with the numbers so the owner can decide; do not ask to restart buyer_forum or report the pause as a fault.
+  with the numbers so the owner can decide; do not ask to restart buyer_forum or report the pause as a fault, and do
+  not offer an automatic resume as an option: there is none.
