@@ -315,7 +315,9 @@ def facts(u, warranty):
     if h is not None:
         parts.append(f"at least {h} hours of shelf life left" if h >= 1 else "it must be used within the hour")
     if warranty:
-        parts.append(f"a {NUMBER_WORDS.get(warranty, warranty)}-hour warranty: if it breaks in that time the market "
+        # digits, as the market's receipts give warranty_hours (owner, 11-05 01 h): buyers asking for "a 6 h warranty"
+        # closed none of their talks with us in a day while the shop wrote "six-hour"
+        parts.append(f"a {warranty} h warranty: if it breaks in that time the market "
                      "refunds the full price from our balance")
     elif kind == "goods":
         parts.append("no warranty")
@@ -328,6 +330,8 @@ def check_reply(reply, u, price, buyer_text):
     from facts() (one either side: the hour can turn between the prompt and the check) (made-up numbers).
     Calling a price final is left to the prompt: a word check rejected good replies ("it should last", "not final")."""
     allowed = {n.replace(",", "") for n in re.findall(r"\d[\d,]*", (u.get("name") or "") + " " + buyer_text)}
+    if u.get("_warranty"):
+        allowed.add(str(u["_warranty"]))
     h = hours_said(u)
     if h is not None:
         allowed |= {str(max(0, h + d)) for d in (-1, 0, 1)}
@@ -611,6 +615,30 @@ def floor_price(u, p, warranty, est_price):
     return max(1, round(floor))
 
 
+# First replies without the model (owner, 11-05 01 h): buyers ask several shops at once and buy from the first fit;
+# 121 of our 137 high-end talks left after our first reply had the SKU settle elsewhere (median 1.9 s after our
+# reply). Our first reply took 9.9 s (haiku 6.5 s a call, bandit_stats 1.0 s, clearance and break rates 2 s every
+# 10 min); walkaways after it 46% at 4-8 s, 60% at 8-12 s, 79% over 12 s. The template states the same facts.
+FAST_OPENING = True
+STATS_TTL = 60
+_stats = {"at": 0.0, "v": None}
+
+
+def bandit_stats_cached():
+    if _stats["v"] is None or time.time() - _stats["at"] >= STATS_TTL:
+        _stats["v"], _stats["at"] = model.bandit_stats(), time.time()
+    return _stats["v"]
+
+
+def warm():
+    """The slow per-talk reads, refreshed off the talks (a thread every 30 s); a failure keeps the last values."""
+    for f in (refresh_break_rates, clearance.table, bandit_stats_cached):
+        try:
+            f()
+        except Exception as e:
+            log(f"[warm] {f.__name__}: {type(e).__name__}: {str(e)[:160]}")
+
+
 BREAK = dict(model.BREAK_PRIOR)   # refreshed from model.py at most every 10 minutes
 _break_at = 0
 
@@ -727,7 +755,9 @@ class Seller(AgentExecutor):
         p = policy.load()
         await asyncio.to_thread(refresh_break_rates)       # both read whole files: off the event loop
         await asyncio.to_thread(clearance.table)           # rebuilt from the ledger every 10 min: off the loop too
-        arm = await asyncio.to_thread(model.pick_arm, next(iter(by_grade.values())).get("kind", "goods"))
+        # (the warm thread rebuilds both and the bandit counts first, so a talk rarely waits for them)
+        arm = await asyncio.to_thread(model.pick_arm, next(iter(by_grade.values())).get("kind", "goods"),
+                                      bandit_stats_cached())
         wants_w = bool(WANTS_WARRANTY.search(text or ""))
         opts = {g: option(u, p, arm, wants_w) for g, u in by_grade.items()}
         if len(opts) > 1:
@@ -816,12 +846,18 @@ class Seller(AgentExecutor):
                 sit += (f" Also say, in one short sentence with no price and no number, that the shop has a cheaper "
                         f"{words} unit of the same item if the buyer prefers it.")
                 tmpl = tmpl.replace(". Send your offer", f". We also have a cheaper {words} one if you prefer. Send your offer")
-            reply = await asyncio.to_thread(write_reply, u, m["price"], sit, history, text, tmpl, how, m["close"])
+            if opening and FAST_OPENING:
+                reply = tmpl; how["fast"] = True
+            else:
+                reply = await asyncio.to_thread(write_reply, u, m["price"], sit, history, text, tmpl, how, m["close"])
         elif len(opts) == 1 or (cur and bare(text)):
             key = cur or next(iter(opts))
             u, m = opts[key]["unit"], moves[key]
-            reply = await asyncio.to_thread(write_reply, u, m["price"], situation(m), history, text, template(u, m),
-                                            how, m["close"])
+            if opening and FAST_OPENING:
+                reply = template(u, m); how["fast"] = True
+            else:
+                reply = await asyncio.to_thread(write_reply, u, m["price"], situation(m), history, text,
+                                                template(u, m), how, m["close"])
         else:
             key, reply = await asyncio.to_thread(choose_reply, deal, moves, history, text, how)
         if cur and key != cur:
@@ -964,5 +1000,11 @@ if __name__ == "__main__":
                     log(f"[rule_watch] {type(e).__name__}: {str(e)[:160]}")
                 time.sleep(120)
         threading.Thread(target=loop, name="rule_watch", daemon=True).start()
+
+        def warm_loop():
+            while True:
+                warm()
+                time.sleep(30)
+        threading.Thread(target=warm_loop, name="warm", daemon=True).start()
     watch_rules()
     uvicorn.run(build_app(args.port), host="127.0.0.1", port=args.port, log_level="warning")
