@@ -15,6 +15,12 @@ under FLOOR_COST x cost (with FLOOR_COST x cost alone a grade C sofa costing 21�
 could be talked down to 19만). 13-16 h: 30 SKUs held 2 h+ had no sale of ours in 6 h; their floor (cost x 1.08 + warranty) sat at or over
 the market's prices (TV G7f82f04e 23.9만 asked, market 20-26만; carbon mat floor 7.9만, buyer offered 7.5만), and
 once sold restock does not buy them again (first unit ranked 624-748 of 752 by value per won).
+Since 11-04 22:50 (owner: sell the ones we hold but cannot sell a little cheaper) a goods SKU other shops settled
+STUCK_MKT times or more in the last STUCK_WINDOW_H hours while we settled under STUCK_SHARE of that is "stuck": a unit of it held
+STUCK_HELD_H hours or more opens at the SKU's market median share of list (no ASK_UNDER) with its floor STUCK_FLOOR x
+that ask, never under its cost (it sells in the market: no reason to lose on it). 20:40-22:40: 지누스 그린티 sold 379 in the market at a median 0.73 of list,
+ours 0 of 68 held in 42 talks, our floor 0.78 (a buyer stopped at 0.75); 다우닝 플라나 4인 86 / 0 of 15, 우아미 윈4인
+35 / 0 of 19, 헬렌스타인 구스 35 / 0 of 9.
 Negotiations that offer a clearance unit are logged with arm "clearance", so the price bandit (model.bandit_stats)
 leaves them out.
 
@@ -36,12 +42,17 @@ STALE_H = 6               # a goods unit held this long is clearance (11-04 16:5
 MIN_SKU_SETTLES = 3       # other shops' settles of the SKU in the last day for its own median; else the category's
 NO_DATA_ASK = 1.10        # opening ask as a share of cost when nobody sold the SKU or its category in a day
 STALE_FLOOR = 0.90        # a stale unit's floor as a share of its clearance ask (never under FLOOR_COST x cost)
+STUCK_WINDOW_H = 2        # a SKU is stuck when, over this window, other shops settled it STUCK_MKT times
+STUCK_MKT = 20            # ... or more and we settled under STUCK_SHARE of their count (11-04 22:50; "none" let one
+STUCK_SHARE = 0.05        # sale of a 6 h stale unit put the other 66 지누스 back on the usual 0.78 floor)
+STUCK_HELD_H = 1          # a unit of a stuck SKU held this long goes on clearance
+STUCK_FLOOR = 0.95        # its floor as a share of its ask (the SKU's market median), never under its cost
 REFRESH = 600
 DAY = 86400
 PATH = policy.DATA / "clearance.json"
 
 _table, _built = {}, 0.0
-_stale = {"sku": {}, "category": {}}
+_stale = {"sku": {}, "category": {}, "stuck": set()}
 
 
 def build(now=None):
@@ -55,9 +66,15 @@ def build(now=None):
     since = max(now - DAY, model.round_start(db) or now)
     hours = max((now - since) / 3600, 0.5)
     n, pct, by_sku = {}, {}, {}
-    for _, d in model.entries(db, "settle", since):
+    recent_mkt, recent_ours = {}, {}
+    for ts, d in model.entries(db, "settle", since):
         x = cat.get(model.sku_of(d)) or {}
         price = model.amount_of(d)
+        if ts >= now - STUCK_WINDOW_H * 3600:
+            if d.get("shop") in ours:
+                recent_ours[model.sku_of(d)] = recent_ours.get(model.sku_of(d), 0) + 1
+            elif x.get("kind", "goods") == "goods":
+                recent_mkt[model.sku_of(d)] = recent_mkt.get(model.sku_of(d), 0) + 1
         if d.get("shop") in ours or not x.get("category") or not price or not x.get("list_price"):
             continue
         c = x["category"]
@@ -66,7 +83,8 @@ def build(now=None):
         by_sku.setdefault(model.sku_of(d), []).append(price / x["list_price"])
     med = lambda v: sorted(v)[len(v) // 2]
     _stale = {"sku": {k: round(med(v), 3) for k, v in by_sku.items() if len(v) >= MIN_SKU_SETTLES},
-              "category": {c: round(med(v), 3) for c, v in pct.items()}}
+              "category": {c: round(med(v), 3) for c, v in pct.items()},
+              "stuck": {k for k, v in recent_mkt.items() if v >= STUCK_MKT and recent_ours.get(k, 0) < STUCK_SHARE * v}}
     out = {}
     for c, k in n.items():
         if MIN_RATE <= k / hours <= MAX_RATE:
@@ -83,7 +101,8 @@ def table():
             _table = build(now)
             PATH.write_text(json.dumps({"ts": now, "fix_ts": FIX_TS, "min_rate": MIN_RATE, "max_rate": MAX_RATE, "ask_under": ASK_UNDER,
                                         "floor_cost": FLOOR_COST, "categories": _table, "stale_h": STALE_H,
-                                        "stale_median_sku": _stale["sku"]}, ensure_ascii=False),
+                                        "stale_median_sku": _stale["sku"], "stuck": sorted(_stale["stuck"])},
+                                       ensure_ascii=False),
                             encoding="utf-8")
         except Exception as e:             # a failed rebuild keeps the last table; the seller must never stop on it
             print(f"[clearance] rebuild failed: {type(e).__name__}: {str(e)[:160]}", flush=True)
@@ -103,9 +122,15 @@ def terms(u, now=None, c_discount=0.0):
         t = table().get(u.get("category"))
         if t:
             return {"ask": u["list_price"] * max(t["median"] - ASK_UNDER, 0.05), "floor": FLOOR_COST * u["cost"]}
+    table()
+    now = now or time.time()
+    share = _stale["sku"].get(u.get("sku"))
+    if (u.get("sku") in _stale["stuck"] and share and u.get("kind", "goods") == "goods" and u.get("grade") != "expired"
+            and now - (u.get("supplied_at") or now) >= STUCK_HELD_H * 3600):
+        ask = u["list_price"] * share * ((1 - c_discount) if u.get("grade") == "C" else 1)
+        return {"ask": ask, "floor": max(u.get("_pool_cost") or u["cost"], STUCK_FLOOR * ask)}
     if not stale(u, now):
         return None
-    table()
     share = _stale["sku"].get(u.get("sku")) or _stale["category"].get(u.get("category"))
     ask = u["list_price"] * max(share - ASK_UNDER, 0.05) if share else NO_DATA_ASK * u["cost"]
     if u.get("grade") == "C":

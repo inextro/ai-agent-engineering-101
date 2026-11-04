@@ -181,3 +181,8 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   list x 0.59 for goods, so a surged SKU looked cheaper than it was (지누스 그린티 x1.23). From 21:27 to 22:40 we paid
   0.91M over the plain price, 0.86M of it on 자코모 4인. Fewer units of surged SKUs, or none once the factor eats the
   margin, are this rule, on purpose. Do not answer it with restock skips.
+- 11-04 22:44 clearance: a goods SKU other shops settled 20+ times in the last 2 h while we settled under 5% of that
+  is "stuck"; a unit of it held 1 h+ opens at the SKU's market median share of list, floor 0.95 x that, never under
+  its cost (owner: sell what we hold but cannot sell a little cheaper). 20:40-22:40: 지누스 그린티 sold 379 in the
+  market at a median 0.73, ours 0 of 68 in 42 talks, our floor 0.78 with a buyer stopped at 0.75. These talks are
+  logged with arm "clearance". Sales of stuck SKUs at about the market median are this rule, on purpose.
