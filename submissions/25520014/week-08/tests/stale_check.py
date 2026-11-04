@@ -1,6 +1,6 @@
 """Did the 11-04 16:50 stale-stock rules work? Read-only, run on the server from the week-08 folder:
 
-    python3 tests/stale_check.py [--since EPOCH]     # default: the deploy, 11-04 16:50 KST
+    python3 tests/stale_check.py [--since EPOCH]     # default: the deploy, 11-04 16:49 KST
 
 Rules judged (clearance.py STALE_H, seller.py MENTION_H, restock.py OLD_C_H):
   - goods held 6 h+ open at the market's median less 5% (grade C less c_discount too), floor 0.9 x that ask;
@@ -20,7 +20,7 @@ import sqlite3
 import time
 from collections import Counter, defaultdict
 
-DEPLOY = 1793778600          # 11-04 16:50 KST
+DEPLOY = 1793778543          # 11-04 16:49:03 KST, the kit registered with the new seller
 BASE = {"stale6": (43, 3_320_000), "oldc3": (38, 3_190_000)}
 
 
