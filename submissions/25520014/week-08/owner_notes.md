@@ -220,6 +220,14 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   starts from max(floor, 0.95 x the market's price for its SKU and grade) x (1 + arm): without the warranty a C's
   floor is ~0.37 of list while the market pays 0.68. restock counts the warranty cost of B and C at the share of
   buyers who ask.
+- 11-05 00:50 model + restock (no restart). own_sku_rate: half-life 1.0 h and, when the market settled the SKU 5+
+  times in the last hour and we held it 0.5 h of it, half its mean from our settles of that hour (RECENT_W): a
+  share lost to another shop shows within the hour (자코모 4인 18.4 -> 10.0/h). Backtest 11-04 12-23 h: deviance
+  2389 -> 1918, bias +1.4% -> -0.3%. restock cap is continuous: min(2 h of demand, max(3 units, 0.34 h of demand));
+  the 3/h cliff gave a SKU just under it 6 units and one just over it 2. Offline 6 h: gross 68.2M -> 74.7M, board
+  +142.8M -> +161.2M, stock 56.6M -> 44.6M, fewest stockouts. Judge us against the whole market (our share of its
+  revenue and of its top SKUs), not against the first-placed shop: 23-00 h the market held while our share fell
+  from 26% (16 h) to 7%, Kiro729 0.7% -> 11-19%.
 
 ## buyer
 
