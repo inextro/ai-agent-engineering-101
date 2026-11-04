@@ -117,8 +117,9 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   B is this rule, on purpose.
 - 11-04 19:39 seller C fallback (c_fallback): when the price of an A or B goods unit is final and the buyer's offer is
   still under what closes, a C unit of the SKU whose floor the offer meets is offered once, at the buyer's offer,
-  with its grade and certificate said; only the buyer who then says yes (or asks for the refurbished one) gets it,
-  anyone else stays on A or B. Never to a buyer who named a grade. 13-19 h: 164 goods talks ended that way with a C
+  with its grade and certificate said; the buyer who then says yes, asks for the refurbished one, or sends a number
+  at or over the C's price without refusing gets it (from 11-04 19:53: three of the first four sent their number
+  again; owner: A sells anyway, sell C when we can). A number that reaches what closes the A or B closes the A or B. Never to a buyer who named a grade. 13-19 h: 164 goods talks ended that way with a C
   held and the buyer's best at or over its floor, and with A or B held no C of those SKUs sold. C deals at the
   buyer's offer, logged "fallback", are this rule, on purpose; the price bandit leaves them out. The owner judges it
   by fallback offers against C deals; do not change it from one hour's numbers.
