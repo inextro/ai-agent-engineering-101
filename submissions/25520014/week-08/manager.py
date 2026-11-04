@@ -276,7 +276,9 @@ def summary(md, now):
                    "hottest_categories": [(c, round(est.rate(c), 2)) for c in hot]},
         "break_rate_by_grade": {g: round(r, 3) for g, r in est.break_rate.items()},
         "break_counts_by_grade(breaks, exposure)": est.break_counts,
-        "our_claims_honest": f"{sum(1 for h in honest if h)}/{len(honest)}",
+        # claim_honest is None when the buyer checked out without our receipt's claim (no claim made), not a lie
+        "our_claims(true/false/none_made)": f"{sum(1 for h in honest if h is True)}/"
+                                            f"{sum(1 for h in honest if h is False)}/{sum(1 for h in honest if h is None)}",
         "our_settles_this_round_vs_20_needed_to_rank": [
             sum(1 for r in db.execute("SELECT data FROM ledger WHERE round >= 3 AND kind='settle'")
                 if json.loads(r[0]).get("shop") in mine), 20],

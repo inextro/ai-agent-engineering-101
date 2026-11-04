@@ -76,7 +76,7 @@ REPLY_MODEL, REPLY_EFFORT, REPLY_TIMEOUT = "haiku", "medium", 20
 GRADE_WORDS = {
     "food": {"A": "grade A, plenty of shelf life left", "B": "grade B, a fair amount of shelf life left",
              "C": "grade C, close to its date"},
-    "goods": {"A": "grade A, new and in perfect condition", "B": "grade B, the box is damaged, the item is fine",
+    "goods": {"A": "grade A, in normal condition with no defects", "B": "grade B, the box is damaged, the item is fine",
               "C": "grade C, refurbished"},
 }
 NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
@@ -249,7 +249,7 @@ def facts(u, warranty):
         parts.append(f"at least {h} hours of shelf life left" if h >= 1 else "it must be used within the hour")
     if warranty:
         parts.append(f"a {NUMBER_WORDS.get(warranty, warranty)}-hour warranty: if it breaks in that time the market "
-                     "refunds the full price")
+                     "refunds the full price from our balance")
     elif kind == "goods":
         parts.append("no warranty")
     return "; ".join(parts)
@@ -402,17 +402,21 @@ def option(u, p, arm):
 
 
 SMALL_GAP = 0.02   # an offer at or above the floor and this close to the price under talk closes at the offer
+# 11-04: 4 deals in 24 h were lost when a raise past the ask came on the last turn and the shop asked to confirm
+OVER_RAISE = 1.2
 STALLS_FINAL = 3   # this many messages in a row without a higher offer and the current price becomes final
 
 
-def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, stalls=0, frozen=False):
+def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, stalls=0, frozen=False,
+              raised=False):
     """What the shop does with option o on this buyer message, without changing o: close at a price, or say a price
     (the opening ask, a concession, the floor as the final price, the ask again when the offer is above it, or the
     same price when the buyer did not move). The shop concedes only when the buyer raised its offer: a message with
     no number or with the same or a lower number holds the price, and after STALLS_FINAL numbers in a row that did
     not rise the held price is final and stays so (frozen: a price called final never moves again). A lowball
-    repeated never reaches the floor; a buyer who keeps raising walks the ladder."""
-    if offer is not None and offer > o["ask"] and not over_seen:
+    repeated never reaches the floor; a buyer who keeps raising walks the ladder. A buyer who raised an earlier
+    offer to just past the ask (raised, at most OVER_RAISE x ask) is bidding for one unit: it closes at the ask."""
+    if offer is not None and offer > o["ask"] and not over_seen and not (raised and offer <= OVER_RAISE * o["ask"]):
         # above the ask is a misreading ("2 for 50000"): say the price of one unit; the same again closes at the ask
         return {"close": False, "price": o["ask"], "step": o["step"], "final": o["step"] >= steps,
                 "opening": opening, "over": offer}
@@ -623,7 +627,8 @@ class Seller(AgentExecutor):
         # a raise is at least MIN_RAISE of the price under talk: +1 at a time must not walk the ladder to the floor
         moved = offer is not None and offer >= deal.get("best_offer", -1) + max(1, round(MIN_RAISE * ref["ask"]))
         moves = {k: next_move(o, offer, deal["steps"], opening, k == cur and offer is None and accepts(text),
-                              deal.get("over_seen", False), moved, deal.get("stalls", 0), deal.get("frozen", False))
+                              deal.get("over_seen", False), moved, deal.get("stalls", 0), deal.get("frozen", False),
+                              moved and deal.get("best_offer", -1) >= 0)
                  for k, o in opts.items()}
         history = "\n".join(deal["lines"][-8:])
         how = {}
