@@ -320,8 +320,9 @@ def candidates(inv, cat, demand, est, p, now):
     cap_h = cap_hours()
     warranty_rate = 0.0
     if p["warranty_hours"] > 0:
-        rates = [est.break_rate[g] for g in "ABC" if p[f"warranty_{g}"]]
-        warranty_rate = sum(rates) / len(rates) if rates else 0.0
+        # weighted by the grades as supplied (11-05 00:20); a plain mean of A, B, C counted a C in every third unit,
+        # harmless while the break rates were mismatched low (model._breaks) and 0.163 against 0.101 once fixed
+        warranty_rate = sum(w * est.break_rate[g] for g, w in SUPPLY_MIX.items() if p[f"warranty_{g}"])
     # 11-04 21:27 rule: past 50 units of a SKU in the market's last hour, each unit adds 0.2% to its cost, up to +50%.
     # Costs here were list x COST_SHARE, so a surged SKU looked cheaper than it was (지누스 그린티 x1.23 makes an A
     # cost about its market price, 0.73 of list). 22:41: x inventory.json `surge` now; 11-04 23:30: each new unit at

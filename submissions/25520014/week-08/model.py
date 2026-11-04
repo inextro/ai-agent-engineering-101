@@ -434,11 +434,11 @@ class Estimates:
         sold = [(ts, d) for ts, d in entries(self.db, "settle", self.now - hours * 3600)
                 if settled(d) and d.get("shop") in self.mine and (d.get("warranty_hours") or 0) > 0
                 and self.cat.get(sku_of(d), {}).get("kind") == "goods"]
-        broke = {(d.get("buyer"), sku_of(d)) for _, d in entries(self.db, "broken", self.now - hours * 3600)}
+        broke = {d.get("unit") for _, d in entries(self.db, "broken", self.now - hours * 3600)}
         mean = var = 0.0
         for ts, d in sold:
             a = amount_of(d) or 0
-            if (d.get("buyer"), sku_of(d)) in broke:          # already refunded (or will be at once)
+            if d.get("unit") in broke:                        # already refunded (or will be at once)
                 continue
             p, e = self.break_rate.get(d.get("grade"), max(self.break_rate.values())), min(1.0, (self.now - ts) / BREAK_WINDOW)
             p = p * (1 - e) / (1 - p * e) if p * e < 1 else 0.0   # it has not broken in the part already passed
@@ -449,21 +449,26 @@ class Estimates:
     # --- break rates per goods grade
 
     def _breaks(self):
+        # A break names its unit (and order); until 11-05 00:20 it was matched to the last sale of its (buyer, SKU),
+        # and buyers buy a SKU many times in several grades: A read 0.063, B 0.094, C 0.134 while the unit-matched
+        # market rates were A 0.030, B 0.12, C 0.34 (11-04, 1,680 breaks), so A floors sat ~2.5%p of list too high
+        # and C under warranty was sold at prices its refunds (34% of C revenue) did not cover.
         since = self.now - 7 * 86400
-        sold = defaultdict(list)                              # (buyer, sku) -> [(ts, grade)]
+        sold = {}                                             # unit -> (ts, grade)
         n = defaultdict(float)
         for ts, d in entries(self.db, "settle", since):
             sku = sku_of(d)
             if not settled(d) or self.cat.get(sku, {}).get("kind") != "goods":
                 continue
             g = d.get("grade") or "?"
-            sold[(d.get("buyer"), sku)].append((ts, g))
+            if d.get("unit"):
+                sold[d["unit"]] = (ts, g)
             n[g] += min(1.0, (self.now - ts) / BREAK_WINDOW)   # exposure: a 3-hour-old sale has had half its window
         k = defaultdict(int)
         for ts, d in entries(self.db, "broken", since):
-            cands = [g for t, g in sold.get((d.get("buyer"), sku_of(d)), []) if 0 <= ts - t <= BREAK_WINDOW]
-            if cands:
-                k[cands[-1]] += 1
+            s = sold.get(d.get("unit"))
+            if s and 0 <= ts - s[0] <= BREAK_WINDOW + 60:
+                k[s[1]] += 1
         self.break_counts = {g: (k[g], round(n[g], 1)) for g in "ABC"}
         self.break_rate = {g: (BREAK_PRIOR_W * BREAK_PRIOR[g] + k[g]) / (BREAK_PRIOR_W + max(n[g], k[g]))
                            for g in "ABC"}

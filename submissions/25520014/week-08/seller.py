@@ -242,6 +242,11 @@ def mention_alt(g, opts):
 # before an A held (20:33-20:45, 7 of 25 closed, B_FIRST) but take one when the A is gone (62%), and 5 of the first
 # 7 C fallback offers closed. B is paid 89%, C 55%.
 FALLBACK_GRADES = ("A", "B")
+# 11-05 00:20 (owner: sell C when we can, at least at cost): a fallback the buyer let lapse (a lower number) came
+# back once, when the buyer's number is again at or over the last one offered. Before, one offer per talk: of 119
+# offers (11-04) 14 lapsed and the buyer later sent at least its price, 5 of those ended with no deal (3.5M at the
+# fallback price; e8dec12d 다우닝 3인: C offered at 1,550,000, buyer 1,400,000, then 1,500,000 ... 1,775,000, cancelled).
+FALLBACK_MAX = 2
 B_FALLBACK = True
 
 
@@ -664,7 +669,8 @@ class Seller(AgentExecutor):
         in another talk has a floor the offer meets: B first after an A (B_FALLBACK), else C. It goes into the talk
         as an option of its grade, asking the offer, final."""
         o = deal["opts"].get(key)
-        if (o is None or deal.get("fb_done") or deal.get("named") or offer is None or m["close"] or not m["final"]
+        if (o is None or deal.get("fb_done", 0) >= FALLBACK_MAX or deal.get("named") or offer is None or m["close"]
+                or not m["final"] or (deal.get("fb_done") and offer < deal.get("fb_last", 0))
                 or o["unit"].get("kind", "goods") != "goods" or o["unit"].get("grade") not in FALLBACK_GRADES
                 or offer >= close_floor(o)):
             return None
@@ -683,7 +689,7 @@ class Seller(AgentExecutor):
             if offer < close_floor(co):
                 continue
             co["ask"], co["step"] = max(round(offer), co["floor"]), deal["steps"]
-            deal["fb_done"] = True
+            deal["fb_done"], deal["fb_last"] = deal.get("fb_done", 0) + 1, co["ask"]
             return co
         return None
 
