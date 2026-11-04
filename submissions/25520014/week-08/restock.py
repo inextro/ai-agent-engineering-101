@@ -58,6 +58,7 @@ FOOD_LIFE = 0.20                                # expected share of shelf life a
 MAX_LINES = 10                                  # the kit's lines per run
 MAX_QTY = 20                                    # the kit's units per line
 RUN_GAP = 300                                   # runs further apart than this are in different windows
+OLD_C_H = 3                                     # a goods unit of grade C held this long is not counted as stock
 WINDOW_MIN, RUNS_PER_WINDOW = 20, 2             # until three windows are measured (agent.md; 11-03 logs)
 WANTED_H = 2                                    # wanted posts this recent are worth one unit (wanted.py)
 WINDOW_LEAD = 45                                # print the plan when a window opens within this many seconds
@@ -167,6 +168,12 @@ def cap_hours():
     return min(max((cyc or 60) / 60, CAP_HOURS[0]), CAP_HOURS[1])
 
 
+def old_c(u, cat, now):
+    """A goods unit of grade C held OLD_C_H hours or more (food's C is its date, and food is not kept that long)."""
+    return (u.get("grade") == "C" and cat.get(u.get("sku"), {}).get("kind", u.get("kind")) != "food"
+            and now - (u.get("supplied_at") or now) >= OLD_C_H * 3600)
+
+
 def candidates(inv, cat, demand, est, p, now):
     """What each SKU's units are worth, before the horizon: {sku: facts}. Each SKU is its own demand (buyers order
     a SKU, and those of a quilt are not those of a sheet): its rate is our posterior for it (model.own_sku_posterior,
@@ -176,6 +183,11 @@ def candidates(inv, cat, demand, est, p, now):
     balance = inv.get("balance") or 0
     units = [u for u in inv.get("units", []) if u.get("grade") != "expired"]
     have_sku = Counter(u.get("sku") for u in units)
+    # 11-04: the seller offers the best grade held, so A and B sell and C stays; counted as stock, old C kept the
+    # A and B a buyer asked for from being bought (sheet Ge62449c9: 16 C, 3 B, 0 A; 13-16 h, 15 talks that opened
+    # on C were cancelled by buyers who take only A or B). A goods C unit held OLD_C_H hours is still on sale but
+    # does not count toward a SKU's units.
+    count_sku = Counter(u.get("sku") for u in units if not old_c(u, cat, now))
     median = {d["category"]: d["median_price"] for d in demand}
     by_cat = {}
     for sku, x in cat.items():
@@ -201,7 +213,7 @@ def candidates(inv, cat, demand, est, p, now):
         cap = math.ceil(rate * cap_h - 1e-9)
         if asked:
             cap = max(cap, 1)                           # a buyer asked us for it
-        room = min(cap - have_sku.get(s, 0), MAX_QTY)
+        room = min(cap - count_sku.get(s, 0), MAX_QTY)
         if room <= 0:
             continue
         price, cost = est.price_ratio(c) * lp, COST_SHARE[kind] * lp
@@ -212,7 +224,7 @@ def candidates(inv, cat, demand, est, p, now):
         a += (rate - est.own_sku_rate(s)) * b           # the missed requests, at the same weight
         out[s] = {"kind": kind, "category": c, "lp": lp, "cost": cost, "worst": WORST_COST * lp, "cu": cu,
                   "life": FOOD_LIFE * (x.get("shelf_hours") or 24) if kind == "food" else None,
-                  "have": have_sku.get(s, 0), "room": room, "a": a, "b": b}
+                  "have": count_sku.get(s, 0), "room": room, "a": a, "b": b}
     return out, units, have_sku, by_cat, median, skip
 
 

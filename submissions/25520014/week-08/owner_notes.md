@@ -79,6 +79,20 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   Do not report the unit-selection code for these again; report only a sale whose talk stated a need it missed.
 - 11-04 15:30 forum: a post that names other shops as well as us goes on the complaint list only if it cites one
   of our settles (4596 was tomato&potato's ad listing nine shops). 3967 and 4596 were taken off the list by hand.
+- 11-04 16:00 restock: a goods unit of grade C held 3 h or more (OLD_C_H) stays on sale but does not count toward
+  its SKU's units, so A and B are bought next to it. The seller offers the best grade held, so C stayed and blocked
+  them (sheet Ge62449c9 16 C, 3 B, 0 A; 13-16 h, 15 talks opened on C were cancelled by buyers taking only A or B).
+  More units of a SKU that also holds old C are this rule, on purpose. The seller is unchanged: C is not pushed on
+  buyers who did not ask for it (the owner's call: a buyer who wants A or B gets nothing from a C).
+- 11-04 16:30 stock at cost has no fixed line any more (the 11:28 line of 34M is retired): it follows sales. At 16:23
+  it was 109M against 99M/h of high-end sold at cost, 1.0 h of sales, 20% over 2 h old and none of the high-end over
+  6 h. Report stock only when it covers more than 3 h of sales at cost, or more than 35% of it is over 2 h old.
+- 11-04 16:30 the record's restock plan balance is the window's second run, after the first run bought (16:03 run
+  74.5M and 49M bought, 16:05 run 39.2M). The balance an hour later is higher by the sales since; it is not a stale
+  balance. Do not report the gap.
+- 11-04 16:30 FLOOR_TOL stays 1%. 13:24-16:30: 8 talks walked 1-2% under the floor (82만, 71만 of it two sofa
+  talks), while 62 deals had an earlier offer in that band (up to 93만 given up at 2%). Do not ask again unless the
+  walks in that band pass the deals that had such an offer.
 
 ## buyer
 
