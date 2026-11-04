@@ -158,7 +158,7 @@ class Estimates:
         self.w_ours = defaultdict(float)
         self.w_sku, self.w_sku_ours = defaultdict(float), defaultdict(float)   # the same per SKU (restock's caps)
         self.watched = watched
-        self._held_since = None                                # SKU -> our first supply of it (own_sku_rate)
+        self._spans = None                                     # SKU -> spans we held a unit of it (own_sku_rate)
         self.sales = []                                       # (ts, data) for the manager's summary
         for ts, d in entries(self.db, "settle", self.now - horizon):
             if not settled(d):
@@ -232,25 +232,57 @@ class Estimates:
 
     def own_sku_rate(self, sku):
         """Our own paid sales of one SKU per hour: a gamma-Poisson posterior of our settles of it around the market's
-        guess (its sales x our share of the category), worth SKU_PRIOR_H hours. The hours of evidence are those
-        since our first supply of the SKU (discounted like the sales), not all the hours watched: a SKU we never
-        held has shown nothing and stays at the guess (a1's check, 11-04). Where we sell a SKU above our share of
-        its category its cap rises, where below it falls (owner, 11-04 01:30). Settles, not agreed talks: of our
-        food deals in 6 h only 125 of 187 were paid."""
+        guess (its sales x our share of the category), worth SKU_PRIOR_H hours. The hours of evidence are the
+        hours we had a unit of it in stock (discounted like the sales): buyers ask only shops whose shops.json offers
+        list the SKU, so while we hold none nobody can buy it from us, and those hours say nothing about demand.
+        Until 11-04 11 h they were the hours since our first supply, empty hours included: quilt G5cd4ffbc sold 5 in
+        the 0.6 h we had it (8.4 an hour; the market 27) and its cap stayed at 1-2, while dae-yangkim sold 87 in
+        12 h. A SKU we never held has shown nothing and stays at the guess (a1's check, 11-04). Where we sell a SKU
+        above our share of its category its cap rises, where below it falls (owner, 11-04 01:30). Settles, not
+        agreed talks: of our food deals in 6 h only 125 of 187 were paid."""
         c = self.cat.get(sku, {}).get("category")
         prior = self.sku_share(c) * self.sku_rate(sku) if c else 0.0
-        if self._held_since is None:
-            self._held_since = {}
-            hl = self.p["half_life_h"] * 3600
-            for ts, d in entries(self.db, "supply", self.now - 6 * hl):
-                if d.get("shop") == SHOP_NAME and d.get("sku") and d["sku"] not in self._held_since:
-                    self._held_since[d["sku"]] = ts
-        since = self._held_since.get(sku)
-        if since is None:
+        if self._spans is None:
+            self._spans = self._stock_spans()
+        spans = self._spans.get(sku)
+        if not spans:
             return prior
         hl = self.p["half_life_h"] * 3600
-        exposed = hl / math.log(2) * (1 - 0.5 ** ((self.now - since) / hl)) / 3600
+        exposed = sum(hl / math.log(2) * (0.5 ** ((self.now - b) / hl) - 0.5 ** ((self.now - a) / hl))
+                      for a, b in spans) / 3600
         return (self.w_sku_ours.get(sku, 0.0) + SKU_PRIOR_H * prior) / (exposed + SKU_PRIOR_H)
+
+    def _stock_spans(self):
+        """SKU -> the merged time spans we held at least one unit of it: each unit from its supply to its settle or
+        expiry (now while it is still here), from the ledger."""
+        since = self.now - 6 * self.p["half_life_h"] * 3600
+        unit = {}                                             # unit -> [sku, supplied, gone]
+        for ts, d in entries(self.db, "supply", since):
+            if d.get("shop") == SHOP_NAME and d.get("sku"):
+                for u in d.get("units") or []:
+                    unit[u] = [d["sku"], ts, None]
+        for ts, d in entries(self.db, "settle", since):
+            x = unit.get(d.get("unit"))
+            if x and x[2] is None and d.get("shop") in self.mine:
+                x[2] = ts
+        for ts, d in entries(self.db, "expire", since):
+            if d.get("shop") == SHOP_NAME:
+                for u in d.get("units") or []:
+                    if u in unit and unit[u][2] is None:
+                        unit[u][2] = ts
+        by = defaultdict(list)
+        for sku, a, b in unit.values():
+            by[sku].append((a, min(b or self.now, self.now)))
+        out = {}
+        for sku, iv in by.items():
+            merged = []
+            for a, b in sorted(iv):
+                if merged and a <= merged[-1][1]:
+                    merged[-1][1] = max(merged[-1][1], b)
+                else:
+                    merged.append([a, b])
+            out[sku] = merged
+        return out
 
     def rate(self, c):
         """Posterior mean deals per hour in category c, whole market."""

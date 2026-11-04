@@ -42,6 +42,12 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   walked at 3.7% under a held final (218k profit lost), and holding there won 0 of 810 deals. SMALL_GAP stays 2%
   for the rest of the talk. Deals closing a few % under the last ask after small raises are this rule, on purpose;
   do not ask to widen SMALL_GAP for them. A buyer whose best offer is under the floor still gets no deal.
+- 11-04 11:16 restock: a SKU's cap counts our sales per hour IN STOCK (hours we held at least one unit), not per
+  hour since its first supply: buyers only ask shops whose offers list the SKU, so empty hours show no demand. Caps
+  of SKUs that sell out fast rise (sofa G5e3784e6 6.8 -> 9.9 an hour); category totals do not change, so the stock
+  at cost should not grow from this. More units of a few fast SKUs in a category is this rule, on purpose.
+- 11-04 11:16 seller: when the unit is swapped for another (taken by a parallel talk) the reply keeps the opening
+  wording, or says "this unit's price"; "we came down" on a first reply (5ffb5c63) is fixed.
 
 ## buyer
 

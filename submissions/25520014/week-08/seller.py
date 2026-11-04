@@ -483,7 +483,7 @@ def template(u, m):
     if m.get("opening"):
         return f"{u['name']}: {facts(u, u.get('_warranty'))}. Send your offer as a number. Asking {p}"
     word = "final price" if m["final"] else "we can do better if you raise your offer" if m.get("hold") \
-        else "we came down"
+        else "this unit's price" if m.get("swapped") else "we came down"
     return f"{u['name']}: {word}. Asking {p}"
 
 
@@ -654,8 +654,9 @@ class Seller(AgentExecutor):
             return
         if swapped and moves[key]["price"] < opts[key]["floor"]:
             # the price was worked out on the old unit's floor; the new unit costs more: counter at its floor
+            # (the price went up, so the reply must not say "we came down": 5ffb5c63 said it on its first reply)
             moves[key] = {"close": False, "price": opts[key]["floor"], "step": opts[key]["step"], "final": False,
-                          "offer": offer}
+                          "offer": offer, "opening": bool(moves[key].get("opening")), "swapped": True}
             reply = template(opts[key]["unit"], moves[key])
         deal["cur"] = key
         deal["over_seen"] = deal.get("over_seen") or "over" in moves[key]
