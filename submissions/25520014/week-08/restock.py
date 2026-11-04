@@ -104,6 +104,7 @@ MARKET_CHECK = True
 A_COST = 0.66                                   # mean cost / list of a goods A unit (828 supplied before 21:27: 0.55-0.75)
 SUPPLY_MIX = {"A": 0.60, "B": 0.24, "C": 0.16}  # goods grades as supplied to us (1,378 units before 21:27)
 GRADE_REL = {"A": 1.0, "B": 0.87, "C": 0.75}    # a grade the market has too few sales of: this x its A price
+WARRANTY_ASKED = {"B": 0.13, "C": 0.08}         # share of our first messages asking for a warranty (11-04, 24 h)
 SURGE_FREE, SURGE_STEP, SURGE_MAX = 50, 0.002, 1.5
 SURGE_WINDOW = 3600
 SUPPLY_OPEN_S = 180                             # a window stays open 3 minutes
@@ -322,7 +323,9 @@ def candidates(inv, cat, demand, est, p, now):
     if p["warranty_hours"] > 0:
         # weighted by the grades as supplied (11-05 00:20); a plain mean of A, B, C counted a C in every third unit,
         # harmless while the break rates were mismatched low (model._breaks) and 0.163 against 0.101 once fixed
-        warranty_rate = sum(w * est.break_rate[g] for g, w in SUPPLY_MIX.items() if p[f"warranty_{g}"])
+        # B and C carry a warranty only for buyers who ask (seller.WARRANTY_ON_ASK, 11-05 00:50)
+        warranty_rate = sum(w * est.break_rate[g] * WARRANTY_ASKED.get(g, 1.0)
+                            for g, w in SUPPLY_MIX.items() if p[f"warranty_{g}"])
     # 11-04 21:27 rule: past 50 units of a SKU in the market's last hour, each unit adds 0.2% to its cost, up to +50%.
     # Costs here were list x COST_SHARE, so a surged SKU looked cheaper than it was (지누스 그린티 x1.23 makes an A
     # cost about its market price, 0.73 of list). 22:41: x inventory.json `surge` now; 11-04 23:30: each new unit at

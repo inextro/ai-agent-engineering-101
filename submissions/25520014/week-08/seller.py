@@ -452,15 +452,32 @@ def choose_reply(deal, moves, history, buyer_text, how=None):
     return got
 
 
-def option(u, p, arm):
-    """One unit the shop can offer, with its own asking price, floor and concession step."""
+# Goods of these grades get the warranty only when the buyer asks for one in its first message (owner, 11-05 00:50).
+# Market goods settled 11-04 (break window closed), per sale as a share of list: C without a warranty 0.676 paid,
+# no refund; with one 0.681 paid, 0.203 refunded (ours 0.666 / 0.200); B 0.721 / 0 against 0.727 / 0.069 (ours
+# 0.726 / 0.109). Buyers do not pay for it and stars come at the sale, before any break. Of our first messages 8%
+# (C), 13% (B), 31% (A) ask for a warranty; with one B and C still clear their cost, so those buyers keep it.
+WARRANTY_ON_ASK = ("B", "C")
+MKT_BASE = 0.95          # a goods ask starts from at least this share of the market's price for its SKU and grade
+WANTS_WARRANTY = re.compile(r"warrant|guarantee|보증|보장", re.I)
+
+
+def option(u, p, arm, wants_warranty=True):
+    """One unit the shop can offer, with its own asking price, floor and concession step. wants_warranty: the buyer
+    asked for a warranty (WARRANTY_ON_ASK grades get one only then)."""
     kind = u.get("kind", "goods")
     warranty = int(p["warranty_hours"]) if kind == "goods" and p.get(f"warranty_{u.get('grade')}") else 0
+    if u.get("grade") in WARRANTY_ON_ASK and not wants_warranty:
+        warranty = 0
     u = dict(u, _warranty=warranty)
     if kind == "goods" and arm in policy.GOODS_ARMS:
-        # goods: a premium over the floor (policy.GOODS_ARMS, 11-05 00:30); the floor's break premium is priced at
-        # what we ask, so the ask is set from a floor at 0.8 of list and the floor then follows that ask
-        ask = min(u["list_price"], floor_price(u, p, warranty, 0.8 * u["list_price"]) * (1 + arm))
+        # goods: a premium over the floor (policy.GOODS_ARMS, 11-05 00:22); the floor's break premium is priced at
+        # what we ask, so the ask is set from a floor at 0.8 of list and the floor then follows that ask. Never from
+        # under MKT_BASE x what the market pays for the SKU and grade: without a warranty a C's floor is about 0.39
+        # of list and the market pays 0.68 for it (11-05 00:50)
+        m = clearance.market_ratio(u)
+        base = max(floor_price(u, p, warranty, 0.8 * u["list_price"]), MKT_BASE * m * u["list_price"] if m else 0)
+        ask = min(u["list_price"], base * (1 + arm))
     else:
         ask = u["list_price"] * arm * ((1 - p["c_discount"]) if u.get("grade") == "C" else 1)
     clear = clearance.terms(u, c_discount=p["c_discount"], floor=floor_price(u, p, warranty, ask))
@@ -663,7 +680,7 @@ class Seller(AgentExecutor):
                     and x["unit"] not in held and x["unit"] != u["unit"]), None)
         if alt is None:
             return False
-        new = option(alt, policy.load(), deal["arm"])
+        new = option(alt, policy.load(), deal["arm"], deal.get("wants_warranty", True))
         o["unit"], o["floor"] = new["unit"], max(o["floor"], new["floor"])
         log(f"[task {task_id[:8]}] unit {u['unit']} was taken meanwhile; offering {alt['unit']}")
         return True
@@ -690,7 +707,7 @@ class Seller(AgentExecutor):
                 continue
             c = min(cs, key=lambda x: (x.get("supplied_at") or 0))          # the one held longest
             c = dict(c, _pool_cost=sum(x["cost"] for x in cs) / len(cs))
-            co = option(c, policy.load(), deal["arm"])
+            co = option(c, policy.load(), deal["arm"], deal.get("wants_warranty", True))
             if offer < close_floor(co):
                 continue
             co["ask"], co["step"] = max(round(offer), co["floor"]), deal["steps"]
@@ -711,7 +728,8 @@ class Seller(AgentExecutor):
         await asyncio.to_thread(refresh_break_rates)       # both read whole files: off the event loop
         await asyncio.to_thread(clearance.table)           # rebuilt from the ledger every 10 min: off the loop too
         arm = await asyncio.to_thread(model.pick_arm, next(iter(by_grade.values())).get("kind", "goods"))
-        opts = {g: option(u, p, arm) for g, u in by_grade.items()}
+        wants_w = bool(WANTS_WARRANTY.search(text or ""))
+        opts = {g: option(u, p, arm, wants_w) for g, u in by_grade.items()}
         if len(opts) > 1:
             # one grade, chosen by the code: the best we hold, since buyers' kits refuse to pay for low grades
             # (11-04, 6 h of our receipts: unpaid food A 0 of 33, B 29 of 105, C 34 of 58; goods C 6 of 11),
@@ -727,7 +745,7 @@ class Seller(AgentExecutor):
                                      # a clearance price is not the arm's: the bandit must not learn from it
                                      "log_arm": "clearance" if opts[g]["clearance"] else arm,
                                      "steps": int(p["max_concessions"]), "lines": [], "t0": time.time(),
-                                     "named": bool(NAMED_GRADE.search(text or "")),
+                                     "named": bool(NAMED_GRADE.search(text or "")), "wants_warranty": wants_w,
                                      "pv": p.get("version"), "bv": policy.load_playbook().get("version")}
         for k, o in opts.items():
             u = o["unit"]

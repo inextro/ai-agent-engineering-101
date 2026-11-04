@@ -121,6 +121,12 @@ def table():
     return _table
 
 
+def market_ratio(u):
+    """What other shops are paid for this SKU and grade, median paid / list (model.market_grade_prices), or None."""
+    table()
+    return _stale["grade"].get(u.get("sku"), {}).get(u.get("grade"))
+
+
 def stale(u, now=None):
     """A goods unit held STALE_H hours or more."""
     return (u.get("kind", "goods") == "goods" and u.get("grade") != "expired"
