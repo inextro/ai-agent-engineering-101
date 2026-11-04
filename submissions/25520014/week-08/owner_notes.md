@@ -236,6 +236,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   walkaways 46% at 4-8 s, 60% at 8-12 s, 79% over 12 s. Not a price or star problem: 자코모 4인 A cleared at market
   price (0.80 of list, cost 0.78) and still lost 9 of 10. Do not dump 자코모 A or C below cost: A sells 56/h in the market.
 
+- 11-05 01:11 model + restock (no restart). A SKU short of supply in the market's last hour (sold >= 85% of the
+  market's stock at the start plus what was supplied, that stock near 0, 3+ sold) is entered without the unproven
+  wait, its demand to us at least the hour's sales / (shops that supplied it + 1), its cap up to 1 h of that. On
+  11-04 we held such SKUs in 29% of their short hours against 95% of saturated hours, and entered 라클라우드 퀸,
+  시몬스 퀸, 에이스 BMA 7-8 h after they went short; dragonash took 48-77% of such mid-price bedding SKUs. A short
+  hour was followed by a saturated one 0% of the time. Surge cost and the market A price check still apply.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
