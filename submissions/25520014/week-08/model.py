@@ -632,7 +632,8 @@ def bandit_stats(path=NEGOTIATIONS, since=0, now=None, paid=..., stars=...):
         paid = paid_tasks()
     if stars is ...:
         stars = task_stars()
-    stats = {(k, a): [1.0, 1.0] for k in ("food", "goods") for a in policy.ARMS}
+    stats = {(k, a): [1.0, 1.0] for k in ("food", "goods") for a in policy.arms(k)}   # goods talks before
+    # 11-05 00:30 have list-share arms (0.7-1.0) that are not goods arms any more: left out
     opened, closed = {}, {}
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -669,7 +670,7 @@ def bandit_stats(path=NEGOTIATIONS, since=0, now=None, paid=..., stars=...):
 
 def pick_arm(kind, stats=None):
     stats = stats or bandit_stats()
-    draws = {a: random.betavariate(*stats[(kind, a)]) for a in policy.ARMS}
+    draws = {a: random.betavariate(*stats[(kind, a)]) for a in policy.arms(kind)}
     return max(draws, key=draws.get)
 
 
@@ -687,4 +688,4 @@ if __name__ == "__main__":
         print(f"  {pr.shop[s]:.3f}  ({pr.W[s]:.1f} deals)  {s}")
     s = bandit_stats()
     for k in ("food", "goods"):
-        print(k, {a: round(s[(k, a)][0] / sum(s[(k, a)]), 2) for a in policy.ARMS})
+        print(k, {a: round(s[(k, a)][0] / sum(s[(k, a)]), 2) for a in policy.arms(k)})

@@ -457,7 +457,12 @@ def option(u, p, arm):
     kind = u.get("kind", "goods")
     warranty = int(p["warranty_hours"]) if kind == "goods" and p.get(f"warranty_{u.get('grade')}") else 0
     u = dict(u, _warranty=warranty)
-    ask = u["list_price"] * arm * ((1 - p["c_discount"]) if u.get("grade") == "C" else 1)
+    if kind == "goods" and arm in policy.GOODS_ARMS:
+        # goods: a premium over the floor (policy.GOODS_ARMS, 11-05 00:30); the floor's break premium is priced at
+        # what we ask, so the ask is set from a floor at 0.8 of list and the floor then follows that ask
+        ask = min(u["list_price"], floor_price(u, p, warranty, 0.8 * u["list_price"]) * (1 + arm))
+    else:
+        ask = u["list_price"] * arm * ((1 - p["c_discount"]) if u.get("grade") == "C" else 1)
     clear = clearance.terms(u, c_discount=p["c_discount"], floor=floor_price(u, p, warranty, ask))
     #   bought before the demand fix in a category the market buys, stuck, underwater (its usual floor over the
     #   market's price for its SKU and grade, 11-04 23:50), or goods held clearance.STALE_H hours: cheaper now

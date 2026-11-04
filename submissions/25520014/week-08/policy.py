@@ -40,6 +40,21 @@ FLAGS = {
 }
 BANKRUPT_LINE = 500_000         # agent.md; inventory.json's bankrupt_line wins when present
 ARMS = (0.70, 0.80, 0.90, 1.00) # opening ask as a share of the list price; the bandit picks one per negotiation
+# Goods open at the floor x (1 + arm), at most the list price (owner, 11-05 00:30). With list x ARMS, the floor (cost
+# x 1.08 + break premium) overrode the arm in half the goods talks (arm 0.7: 76%), so the bandit learned the floor's
+# results. 11-04 07-24 h goods talks by opening premium over the floor, within floor/list bands: floor 0.70-0.78 of
+# list, at the floor 41% paid deals and profit 0.042 of list a talk, 6-10% over 47% 0.083, 10-15% 47% 0.098, 15-25%
+# 40% 0.122, 25%+ 20% 0.080; floor 0.78+: at it 40% 0.046, 10-15% 36% 0.082 (observational: units with room over
+# their floor are cheaper ones too). A replay of the last 6 h (859 talks, the buyers' numbers as sent, which answered
+# our old asks) favours the old arms (paid-deal rate 49%; +0% 39%, +4% 46%, +8% 35%, +15% 30%) and cannot judge
+# demand; the two disagree, so the bandit decides, with the floor itself (0.0) among the arms. Revert if the goods
+# deal rate falls over 5%p or profit per talk falls in the first hour (owner, 11-05 00:45).
+GOODS_ARMS = (0.0, 0.04, 0.08, 0.15)   # 0.0: open at the floor, the old behaviour in half the talks
+
+
+def arms(kind):
+    """The bandit's arms for a kind: food a share of list (ARMS), goods a premium over the floor (GOODS_ARMS)."""
+    return GOODS_ARMS if kind == "goods" else ARMS
 LAST_HOURS_BELOW_COST = 6       # in the last hours the floor may go to half the cost: unsold stock is a total loss
 
 
