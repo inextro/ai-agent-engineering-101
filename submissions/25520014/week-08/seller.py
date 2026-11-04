@@ -222,6 +222,15 @@ def mention_alt(g, opts):
     return None
 
 
+# 11-04 19:39: when the price of an A or B goods unit is final and the buyer's offer is still under what closes, a C
+# unit of the same SKU whose floor the offer meets is offered once, at the buyer's offer; the buyer who says yes on
+# its next message gets it. Only for a buyer who never named a grade. 13-19 h, 164 goods talks ended that way with a
+# C held and the buyer's best number at or over its floor, while A or B held kept the seller from offering any C
+# (none of those SKUs' C sold 16:31-19:03). The open record keeps the arm; the deal has "fallback" and the price
+# bandit leaves it out (model.bandit_stats).
+FALLBACK_GRADES = ("A", "B")
+
+
 def wants_lower(text, g):
     """The buyer asks for the lower grade g: "refurbished", "cheaper one", "grade C" (LOWER_OK) or names g."""
     named = {next(x for x in m.groups() if x).upper() for m in NAMED_GRADE.finditer(text or "")}
@@ -634,6 +643,30 @@ class Seller(AgentExecutor):
         log(f"[task {task_id[:8]}] unit {u['unit']} was taken meanwhile; offering {alt['unit']}")
         return True
 
+    def c_fallback(self, task_id, deal, key, m, offer):
+        """The C unit to offer once at the buyer's offer, or None (FALLBACK_GRADES): the price of an A or B goods
+        unit is final, the offer is under what closes, the buyer never named a grade, and a C unit of the SKU not in
+        another talk has a floor the offer meets. It goes into the talk as option "C", asking the offer, final."""
+        o = deal["opts"].get(key)
+        if (o is None or deal.get("fb_done") or deal.get("named") or offer is None or m["close"] or not m["final"]
+                or o["unit"].get("kind", "goods") != "goods" or o["unit"].get("grade") not in FALLBACK_GRADES
+                or offer >= close_floor(o)):
+            return None
+        held = self.held(task_id)
+        u = o["unit"]
+        cs = [x for x in inventory().get("units", []) if x["sku"] == u["sku"] and x.get("grade") == "C"
+              and x["unit"] not in held]
+        if not cs:
+            return None
+        c = min(cs, key=lambda x: (x.get("supplied_at") or 0))          # the one held longest
+        c = dict(c, _pool_cost=sum(x["cost"] for x in cs) / len(cs))
+        co = option(c, policy.load(), deal["arm"])
+        if offer < close_floor(co):
+            return None
+        co["ask"], co["step"] = max(round(offer), co["floor"]), deal["steps"]
+        deal["fb_done"] = True
+        return co
+
     async def opening(self, task_id, text, up, say):
         by_grade, inv = find_units(text, self.held())
         if not by_grade:
@@ -663,6 +696,7 @@ class Seller(AgentExecutor):
                                      # a clearance price is not the arm's: the bandit must not learn from it
                                      "log_arm": "clearance" if opts[g]["clearance"] else arm,
                                      "steps": int(p["max_concessions"]), "lines": [], "t0": time.time(),
+                                     "named": bool(NAMED_GRADE.search(text or "")),
                                      "pv": p.get("version"), "bv": policy.load_playbook().get("version")}
         for k, o in opts.items():
             u = o["unit"]
@@ -692,6 +726,18 @@ class Seller(AgentExecutor):
                  for k, o in opts.items()}
         history = "\n".join(deal["lines"][-8:])
         how = {}
+        fb = deal.pop("fallback", None)          # the C offered at the buyer's price on the last reply (c_fallback)
+        if fb and fb in opts:
+            if (accepts(text) or wants_lower(text, fb)) and self.swap_if_taken(task_id, deal, fb) is not False:
+                moves[fb] = {"close": True, "price": opts[fb]["ask"], "step": opts[fb]["step"], "final": True}
+                opts = deal["opts"] = {fb: opts[fb]}
+                cur = deal["cur"] = fb
+                deal["fallback_deal"] = True
+                log(f"[task {task_id[:8]}] the buyer took the C unit at {opts[fb]['ask']}")
+            else:
+                del opts[fb]
+                moves.pop(fb, None)
+        deal["named"] = deal.get("named") or bool(NAMED_GRADE.search(text or ""))
         alt = deal.get("alt") if deal.get("alt") in opts else None
         if alt:
             # the lower grade only for a buyer who asks for it; anyone else stays on the best grade
@@ -746,12 +792,26 @@ class Seller(AgentExecutor):
             deal["best_offer"] = max(offer, deal.get("best_offer", -1))
         for k, o in opts.items():
             o["ask"], o["step"] = moves[k]["price"], moves[k]["step"]
+        fbo = None if opening else self.c_fallback(task_id, deal, key, moves[key], offer)
+        if fbo:
+            cu = fbo["unit"]
+            deal["opts"]["C"], deal["fallback"] = fbo, "C"
+            sit = (f"the buyer offered {offer}; the shop cannot go lower on this {opts[key]['unit'].get('grade')} unit and "
+                   f"says so politely without naming its price. Then offer, in one or two short sentences, a "
+                   f"{LOWER_WORDS['C']} unit of the same item at the buyer's own price of {fbo['ask']}, and ask the "
+                   "buyer to reply yes if they want it.")
+            tmpl = (f"{cu['name']}: we cannot go lower on this one. We also have a {LOWER_WORDS['C']} unit of it: "
+                    f"{facts(cu, cu.get('_warranty'))}. It is yours at your offer if you reply yes. Price {fbo['ask']}")
+            reply = await asyncio.to_thread(write_reply, cu, fbo["ask"], sit, history, text, tmpl, how, False)
+            log(f"[task {task_id[:8]}] offered C {cu['unit']} at {fbo['ask']} (floor {fbo['floor']}, cost {cu['cost']}) "
+                f"after a final {moves[key]['price']} on {opts[key]['unit'].get('grade')}")
         deal["lines"].append(f"shop: {reply}")
         u, m = opts[key]["unit"], moves[key]
         append(TURNS, {"ts": time.time(), "task": task_id, "buyer": text[:600], "shop": reply[:600], "unit": key,
                        "grade": u.get("grade"), "sku": u["sku"], "price": m["price"], "close": bool(m["close"]),
                        "template": reply == template(u, m),
                        "tries": how.get("tries"), "failed": how.get("failed"),
+                       "c_fallback": fbo["ask"] if fbo else None,
                        "policy": deal["pv"], "playbook": deal["bv"]})
         if opening:
             append(NEGOTIATIONS, {"ts": time.time(), "task": task_id, "outcome": "open", "sku": u["sku"],
@@ -784,7 +844,8 @@ class Seller(AgentExecutor):
         append(NEGOTIATIONS, {"ts": time.time(), "task": task_id, "outcome": "deal", "sku": u["sku"],
                               "unit": u["unit"], "kind": u.get("kind"), "grade": u.get("grade"), "arm": deal.get("log_arm", deal["arm"]),
                               "list_price": u["list_price"], "cost": u["cost"], "price": price,
-                              "step": o["step"], "chose": deal["cur"], "seconds": round(time.time() - deal["t0"], 1)})
+                              "step": o["step"], "chose": deal["cur"], "seconds": round(time.time() - deal["t0"], 1),
+                              "fallback": bool(deal.get("fallback_deal")), "fallback_offered": bool(deal.get("fb_done"))})
         log(f"[task {task_id[:8]}] DEAL {deal['cur']} {u['sku']} {u.get('grade')} at {price} "
             f"(cost {u['cost']}, step {o['step']})")
         self.sold[u["unit"]] = time.time()
@@ -797,7 +858,8 @@ class Seller(AgentExecutor):
         if deal:
             o = deal["opts"][deal["cur"] or next(iter(deal["opts"]))]
             append(NEGOTIATIONS, {"ts": time.time(), "task": task.id, "outcome": "cancel",
-                                  "kind": o["unit"].get("kind"), "arm": deal.get("log_arm", deal["arm"]), "last_ask": o["ask"]})
+                                  "kind": o["unit"].get("kind"), "arm": deal.get("log_arm", deal["arm"]), "last_ask": o["ask"],
+                                  "fallback_offered": bool(deal.get("fb_done"))})
         await TaskUpdater(event_queue=event_queue, task_id=task.id, context_id=task.context_id).cancel()
 
 

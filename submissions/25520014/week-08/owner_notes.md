@@ -115,6 +115,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   of 97 buyers told of a cheaper C took it; under the 1 h cover a fresh C took the place of an A or B (에비뉴엘
   G8adbc159: 9 units held, 4 of them C). C stays on sale and goes to clearance at 6 h. A larger C count next to A and
   B is this rule, on purpose.
+- 11-04 19:39 seller C fallback (c_fallback): when the price of an A or B goods unit is final and the buyer's offer is
+  still under what closes, a C unit of the SKU whose floor the offer meets is offered once, at the buyer's offer,
+  with its grade and certificate said; only the buyer who then says yes (or asks for the refurbished one) gets it,
+  anyone else stays on A or B. Never to a buyer who named a grade. 13-19 h: 164 goods talks ended that way with a C
+  held and the buyer's best at or over its floor, and with A or B held no C of those SKUs sold. C deals at the
+  buyer's offer, logged "fallback", are this rule, on purpose; the price bandit leaves them out. The owner judges it
+  by fallback offers against C deals; do not change it from one hour's numbers.
 
 ## buyer
 

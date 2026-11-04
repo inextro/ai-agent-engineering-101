@@ -604,8 +604,8 @@ def bandit_stats(path=NEGOTIATIONS, since=0, now=None, paid=..., stars=...):
         if end is None and now - rec["ts"] < 600:
             continue
         key = (rec.get("kind"), rec.get("arm"))
-        if key not in stats:
-            continue
+        if key not in stats or (end and end.get("fallback")):   # a C sold at the buyer's offer (seller.c_fallback)
+            continue                                              # is not the arm's price
         r = 0.0
         if end and end.get("outcome") == "deal":
             if paid is not None and task not in paid and now - end["ts"] < PAY_WAIT:
