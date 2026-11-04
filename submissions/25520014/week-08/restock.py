@@ -76,6 +76,14 @@ CAP_HOURS = (1.0, 2.0)                          # a SKU's units: its demand to u
 # than it gained (owner, 11-04 19:09).
 FAST_RATE = 3.0                                 # demand to us per hour (sku_demand)
 FAST_COVER_H = 1.0
+GRADE_CAP = False                               # a goods SKU's B and C count only up to their share of its cap
+GRADE_SHARE_H = 6                               # our goods settles this recent give the grade shares
+# 11-04 21:15, offline only, not deployed (off): the seller sells the best grade first, so the cap filled with B and C left no room for A: 자코모 4인
+# G8ec51935 held 13 A, 36 B, 32 C against a cap of 49 and its A sales fell 55 -> 24 -> 9 an hour (17-21 h), gross
+# 35M -> 20-25M an hour. Buyers of a SKU take B and C about as often as our goods settles do (6 h: A 81%, B 13%, C 5%),
+# so a B or C unit beyond that share of the cap is not stock an A buyer can use. The B and C fallbacks sell them.
+# Rejected offline (6 h, 3 seeds, live restock.decide with grades): A of 자코모 4인 34 -> 38 an hour, but every
+# line bought for A brings 28% B and C, so stock 124-140M -> 222-224M and board +158M -> +62M.
 
 
 def window_shut(inv, now):
@@ -186,6 +194,16 @@ def old_c(u, cat, now):
             and now - (u.get("supplied_at") or now) >= OLD_C_H * 3600)
 
 
+def grade_shares(est, cat, now):
+    """{grade: its share of our goods settles over GRADE_SHARE_H}, B and C at least 0.02 (a SKU's cap keeps one)."""
+    c = Counter()
+    for ts, d in model.entries(est.db, "settle", now - GRADE_SHARE_H * 3600):
+        if d.get("shop") in est.mine and cat.get(d.get("sku"), {}).get("kind") == "goods":
+            c[d.get("grade")] += 1
+    n = sum(c[g] for g in "ABC")
+    return {g: max(c[g] / n if n else 0.0, 0.02) for g in "BC"}
+
+
 def candidates(inv, cat, demand, est, p, now):
     """What each SKU's units are worth, before the horizon: {sku: facts}. Each SKU is its own demand (buyers order
     a SKU, and those of a quilt are not those of a sheet): its rate is our posterior for it (model.own_sku_posterior,
@@ -200,6 +218,11 @@ def candidates(inv, cat, demand, est, p, now):
     # on C were cancelled by buyers who take only A or B). A goods C unit held OLD_C_H hours is still on sale but
     # does not count toward a SKU's units.
     count_sku = Counter(u.get("sku") for u in units if not old_c(u, cat, now))
+    by_grade = {}
+    for u in units:
+        if not old_c(u, cat, now):
+            by_grade.setdefault(u.get("sku"), Counter())[u.get("grade")] += 1
+    share = grade_shares(est, cat, now) if GRADE_CAP else None
     median = {d["category"]: d["median_price"] for d in demand}
     by_cat = {}
     for sku, x in cat.items():
@@ -226,7 +249,11 @@ def candidates(inv, cat, demand, est, p, now):
         cap = math.ceil(rate * (min(cap_h, FAST_COVER_H) if fast else cap_h) - 1e-9)
         if asked:
             cap = max(cap, 1)                           # a buyer asked us for it
-        room = min(cap - count_sku.get(s, 0), MAX_QTY)
+        have = count_sku.get(s, 0)
+        if share and kind == "goods":
+            g = by_grade.get(s, Counter())
+            have = g["A"] + sum(min(g[k], math.ceil(cap * share[k] - 1e-9)) for k in "BC")
+        room = min(cap - have, MAX_QTY)
         if room <= 0:
             continue
         price, cost = est.price_ratio(c) * lp, COST_SHARE[kind] * lp
@@ -237,7 +264,7 @@ def candidates(inv, cat, demand, est, p, now):
         a += (rate - est.own_sku_rate(s)) * b           # the missed requests, at the same weight
         out[s] = {"kind": kind, "category": c, "lp": lp, "cost": cost, "worst": WORST_COST * lp, "cu": cu,
                   "life": FOOD_LIFE * (x.get("shelf_hours") or 24) if kind == "food" else None,
-                  "have": count_sku.get(s, 0), "room": room, "a": a, "b": b}
+                  "have": have, "room": room, "a": a, "b": b}
         if fast:
             out[s]["h"] = FAST_COVER_H                  # ranked: P_k over this, not the refill cycle
     return out, units, have_sku, by_cat, median, skip
