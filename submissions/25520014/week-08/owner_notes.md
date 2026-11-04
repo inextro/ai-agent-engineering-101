@@ -183,6 +183,17 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   pays for the units we add. Backtest on the Round 3 ledger (1,081 SKU-windows): factor now MAE 2.26%p, +1.65%p
   too low; forecast 1.28%p, -0.08%p. Archive older than 2 min: inventory.json `surge` as before. Lower values
   for surged SKUs are this rule, on purpose (owner, 11-04 23:30).
+- 11-04 23:56 restock + clearance (owner: buy only what sells above our floor; what we already hold and cannot
+  sell, sell it all, even at a small loss; run as designed from here). model.market_grade_prices: other shops'
+  median paid / list per goods SKU and grade (2 h, or the day with under 5 settles). restock skips a goods SKU
+  whose A sells in the market under the floor an A at our mean A cost would have (0.66 x list x the forecast surge
+  of our next unit x 1.08 + the A break premium), and prices it at most at the market's grade prices over the
+  supply mix (A 60, B 24, C 16%): 43 of 593 candidates dropped, 49 priced lower. clearance: a goods unit whose
+  usual floor is over the market's price for its SKU and grade is "underwater": it opens 1% under that price, floor
+  0.95 x the ask, never under 0.85 x its cost; stuck/stale/underwater together take the lowest floor. 52 units
+  (37.6M at cost) at 23:50, e.g. 자코모 4인 A floor 0.846 -> 0.756 of list against the market's 0.804. Cause:
+  22-23 h 자코모 4인 A floor 0.86-0.93, the market's A 0.80-0.81, 92 talks and 4 deals, and restock bought A again
+  at 23:05 and 23:22 at its own category price (0.82). Lower prices on these units are this rule, on purpose.
 
 ## buyer
 
