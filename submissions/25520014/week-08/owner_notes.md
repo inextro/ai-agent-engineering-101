@@ -110,6 +110,11 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   of the fast sofas, and new high-end SKUs after 19:40 are this rule, on purpose; a fast SKU out of stock for part of
   a window is the price of it (offline: 0.9M margin lost against 15M gained over 6 h). The owner watches board profit
   against dae-yangkim and stock at cost; do not answer it with restock skips.
+- 11-04 19:22 restock: a goods unit of grade C does not count toward its SKU's units from the moment it arrives
+  (OLD_C_H 3 -> 0). With A or B held the seller offers the best grade, so no C of those SKUs sold 16:31-19:03 and none
+  of 97 buyers told of a cheaper C took it; under the 1 h cover a fresh C took the place of an A or B (에비뉴엘
+  G8adbc159: 9 units held, 4 of them C). C stays on sale and goes to clearance at 6 h. A larger C count next to A and
+  B is this rule, on purpose.
 
 ## buyer
 
