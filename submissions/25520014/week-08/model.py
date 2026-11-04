@@ -79,6 +79,7 @@ SKU_SHARE_MIN_W = 2.0
 SKU_NEW_MIN_H = 0.5             # a SKU new to the market counts at least this many hours (sku_rate): 1 sale in 5 min is not 12/h
 SKU_NEW_AFTER_H = 1.0           # a SKU first supplied this long after the window opens is new to the market
 SKU_NEW_MIN_SALES = 5          # market settles a SKU new to the market needs before restock enters it
+ASKED_RECENT_H = 2.0            # a request we missed lets restock buy a SKU nobody else buys only this long (asked_recent)
 SKU_PRIOR_H = 2.0               # hours the market-based guess of our own sales of a SKU is worth (own_sku_rate)
 
 
@@ -221,6 +222,9 @@ class Estimates:
         as ours, so share() lets them raise our share in that category. Food asked to last longer than the SKU's
         whole shelf life could never have been served and does not count."""
         self.asked_w, self.asked_sku = defaultdict(float), defaultdict(float)
+        self.asked_recent = set()      # SKUs asked of us in the last ASKED_RECENT_H: restock's at-least-one rule.
+        # The weights above fade over the 24 h half-life, so one request kept a SKU in at least one unit all day
+        # (bed G6a08354d: 2 requests at 04 h, no market sale for 8 h, 3 bought at 13 h; owner 11-04 14 h).
         self.asked_rate, self.p_close = {}, P_CLOSE_DEFAULT
         if watched <= 0:
             return
@@ -235,6 +239,8 @@ class Estimates:
             wt = 0.5 ** ((self.now - r["ts"]) / hl)
             self.asked_w[x["category"]] += wt
             self.asked_sku[m.group(0)] += wt
+            if self.now - r["ts"] <= ASKED_RECENT_H * 3600:
+                self.asked_recent.add(m.group(0))
         self.asked_rate = {c: w / watched for c, w in self.asked_w.items()}
         negs = read_jsonl(NEGOTIATIONS, self.now - 6 * 3600)
         opened = sum(1 for r in negs if r.get("outcome") == "open")

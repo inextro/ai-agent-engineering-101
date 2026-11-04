@@ -204,8 +204,14 @@ def offer_grade(text, opts):
 
 def find_units(text, taken):
     """One unit per grade of what the buyer named, the one to clear first within the grade (food closest to its
-    date, goods held longest): {grade: unit}, empty when there is none. Food that would not last the hours the
-    buyer asks for (need_hours) is left out."""
+    date, goods the cheapest): {grade: unit}, empty when there is none. Food that would not last the hours the
+    buyer asks for (need_hours) is left out.
+    A goods unit carries _pool_cost, the mean cost of the units of its SKU and grade we hold (not in another talk),
+    and its floor is priced on that (floor_price). Units of one SKU and grade cost different amounts (Ultima A
+    159k, 196k, 201k on 11-04), and until 11-04 14 h the one held longest was offered on its own cost: the 201k unit
+    every time, a floor of 230k against a market at 210k. Cheapest first on the mean cost keeps the whole SKU and
+    grade above cost x (1 + min_margin): what is left after the cheap unit costs more on average, so the next
+    floor rises (8 h of 11-04 talks: 49 lost ones had a buyer at or above that floor, 171만 of margin)."""
     inv = inventory()
     if inv.get("round", 0) < 3:
         return {}, inv
@@ -221,8 +227,13 @@ def find_units(text, taken):
     if not named:
         named = [u for u in units if (u.get("category") or "").split(">")[-1].lower() in want]
     by_grade = {}
-    for u in sorted(named, key=lambda u: (u.get("expires_at") or 0, u.get("supplied_at") or 0)):
+    for u in sorted(named, key=lambda u: (u.get("expires_at") or 0,
+                                          u["cost"] if u.get("kind") == "goods" else 0, u.get("supplied_at") or 0)):
         by_grade.setdefault(u["grade"], u)
+    for g, u in by_grade.items():
+        if u.get("kind") == "goods":
+            same = [x["cost"] for x in named if x["sku"] == u["sku"] and x["grade"] == g]
+            by_grade[g] = dict(u, _pool_cost=sum(same) / len(same))
     return by_grade, inv
 
 
@@ -416,7 +427,7 @@ def close_floor(o):
     """The lowest offer that closes once the price is final: the floor less FLOOR_TOL, but never under the cost (a
     floor already at or under the cost, for clearance or the last hours, stays as it is)."""
     lo = o["floor"] * (1 - FLOOR_TOL)
-    return o["floor"] if lo < o["unit"]["cost"] else lo
+    return o["floor"] if lo < (o["unit"].get("_pool_cost") or o["unit"]["cost"]) else lo
 
 
 def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, stalls=0, frozen=False,
@@ -505,7 +516,7 @@ def bare(text):
 
 
 def floor_price(u, p, warranty, est_price):
-    cost = u["cost"]
+    cost = u.get("_pool_cost") or u["cost"]          # goods: the mean cost of the SKU and grade held (find_units)
     premium = BREAK.get(u.get("grade"), max(BREAK.values())) * est_price if warranty else 0
     floor = cost * (1 + p["min_margin"]) + premium
     left = policy.hours_left()
@@ -691,6 +702,7 @@ class Seller(AgentExecutor):
             append(NEGOTIATIONS, {"ts": time.time(), "task": task_id, "outcome": "open", "sku": u["sku"],
                                   "unit": u["unit"], "kind": u.get("kind"), "grade": u.get("grade"),
                                   "arm": deal.get("log_arm", deal["arm"]), "list_price": u["list_price"], "cost": u["cost"],
+                                  "pool_cost": round(u["_pool_cost"]) if u.get("_pool_cost") else None,
                                   "ask": opts[key]["ask"], "floor": opts[key]["floor"], "chose": key,
                                   "options": {k: o["unit"].get("grade") for k, o in opts.items()},
                                   "policy": deal["pv"], "playbook": deal["bv"]})

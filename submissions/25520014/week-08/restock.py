@@ -192,14 +192,14 @@ def candidates(inv, cat, demand, est, p, now):
         c, lp, kind = x["category"], x["list_price"], x["kind"]
         if c in skip or WORST_COST * lp > unit_cap:
             continue
-        asked = est.asked_sku.get(s, 0.0)
-        if est.sku_rate(s) <= 0 and asked <= 0:
+        asked = s in est.asked_recent                   # a request we missed in the last 2 h (model.ASKED_RECENT_H)
+        if est.sku_rate(s) <= 0 and not asked:
             continue                                    # nobody buys it (11-04: 255 of 415 fruit sales one box)
-        if asked <= 0 and not have_sku.get(s) and est.unproven(s):
+        if not asked and not have_sku.get(s) and est.unproven(s):
             continue                                    # new to the market: wait for its first sales
         rate = sku_demand(est, s)
         cap = math.ceil(rate * cap_h - 1e-9)
-        if asked > 0:
+        if asked:
             cap = max(cap, 1)                           # a buyer asked us for it
         room = min(cap - have_sku.get(s, 0), MAX_QTY)
         if room <= 0:
