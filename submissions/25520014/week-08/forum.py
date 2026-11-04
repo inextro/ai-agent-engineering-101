@@ -311,7 +311,9 @@ def one_pass(md, st, now):
             return
         reply = str(a["reply"]).strip()[:800]
         queue_post(md, {"post": reply, "refs": list(records), "thread": post["id"], "as": "shop"})
-        if a.get("complaint"):
+        # a post in our thread may be about another shop (4 of 14 open complaints on 11-04 named only others):
+        # only a post that names us or cites one of our settles goes on the complaint list the manager reads
+        if a.get("complaint") and (records or any(n in (post.get("text") or "").lower() for n in NAMES)):
             st["complaints"][str(post["id"])] = {"ts": now, "issue": str(a.get("issue", ""))[:120],
                                                  "text": (post.get("text") or "")[:300], "version": p["version"]}
         st["last_post"] = now
