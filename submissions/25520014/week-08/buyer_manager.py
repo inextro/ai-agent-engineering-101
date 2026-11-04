@@ -172,11 +172,56 @@ def forum_alerts(db, now, us):
     seen = [p for p in (our_forum(b, us)[1] for b in snaps) if p is not None]
     if pct is not None and seen and max(seen) - pct > 0.15:
         out.append(f"순위 하락: forum 백분위 {pct:.2f}, 최근 6시간 최고 {max(seen):.2f}에서 {max(seen) - pct:.2f} 떨어졌습니다")
-    # 5. posting stopped: no buyer post for 30 min (the three shapes ran out of material, or buyer_forum is down)
+    # 6. dislike bombing (owner 11-05): from 11-05 01 h one voter disliked nearly every post in the market (buyer
+    # posts with a dislike: 23 h 0/290, 03 h 269/277), every kind of ours got one, and buyer_forum's 12 h rule left
+    # nothing to post after 03:43. The owner holds our posts while it lasts and wants to hear when it fades.
+    storm = dislike_share(db, now, us, votes)
     last = max((r.get("ts", 0) for r in jsonl(POSTS, now - 6 * 3600)), default=0)
-    if now - last > 1800:
+    # buyer_forum posts again once one kind's newest disliked post is FORUM_VOTES_H old: the earliest kind decides
+    hit = {}
+    for i, t, x in db.execute("SELECT id, ts, text FROM forum_posts WHERE role='buyer' AND lower(author) = ? AND ts > ?",
+                              (us.lower(), now - (FORUM_VOTES_H + 1) * 3600)):
+        if votes.get(i, (0, 0))[1] > 0 and post_kind(x) in MAIN_TAGS:
+            hit[post_kind(x)] = max(hit.get(post_kind(x), 0), t)
+    resume = time.strftime("%H:%M", time.localtime(min(hit.values()) + FORUM_VOTES_H * 3600)) if hit else None
+    on = storm and storm[0]["share"] is not None and storm[0]["share"] >= STORM_ON
+    was = any(s["share"] is not None and s["share"] >= STORM_ON for s in storm[1:])
+    if on:
+        hours = next((k for k, s in enumerate(storm) if s["share"] is None or s["share"] < STORM_ON), len(storm))
+        out.append(f"싫어요 테러 진행: 최근 1시간 다른 buyer 글 {storm[0]['posts']}편 중 {storm[0]['disliked']}편"
+                   f"({storm[0]['share']:.0%})이 싫어요를 받았습니다, {hours}시간째. 우리 buyer 글은 "
+                   + (f"{(now - last) / 60:.0f}분째 대기(의도)" if now - last > 1800 else "나가고 있습니다")
+                   + (f", 지금 규칙의 자동 재개는 {resume} 이후" if resume else ""))
+    elif was and storm[0]["share"] is not None and storm[0]["share"] < STORM_OFF:
+        out.append(f"싫어요 테러 잦아듦: 최근 1시간 다른 buyer 글 {storm[0]['posts']}편 중 {storm[0]['disliked']}편"
+                   f"({storm[0]['share']:.0%})만 싫어요. 우리 buyer 글 재개를 owner가 판단할 때입니다"
+                   + (f" (지금 규칙의 자동 재개는 {resume} 이후)" if resume else ""))
+    # 5. posting stopped: no buyer post for 30 min (the three shapes ran out of material, or buyer_forum is down);
+    # during the bombing the pause is the owner's, line 6 says so
+    if now - last > 1800 and not on:
         out.append("글 멈춤: 마지막 buyer 글이 " + (f"{(now - last) / 60:.0f}분 전" if last else "6시간 넘게 전") + "입니다")
-    return {"alerts": out, "forum_score": score, "forum_percentile": None if pct is None else round(pct, 2)}
+    return {"alerts": out, "forum_score": score, "forum_percentile": None if pct is None else round(pct, 2),
+            "market_dislike_share_by_hour_newest_first": storm}
+
+
+STORM_ON, STORM_OFF = 0.30, 0.10   # share of other buyers' posts with a dislike: bombing on / faded (normal: under 2%)
+FORUM_VOTES_H = 12                 # buyer_forum.VOTES_H: a kind with a disliked post waits this long (not imported: its loop)
+MAIN_TAGS = ("가격 동향", "상품 시세", "구매 후기")   # the tags of buyer_forum.MAIN, the only kinds it posts (ONLY_MAIN)
+
+
+def dislike_share(db, now, us, votes, hours=12):
+    """Per hour (newest first), other buyers' posts 10-70 min old in that hour and how many got a dislike. An hour
+    with under 20 posts is None (too few to tell)."""
+    rows = db.execute("SELECT id, ts FROM forum_posts WHERE role='buyer' AND lower(author) != ? AND ts > ?",
+                      (us.lower(), now - (hours + 1) * 3600)).fetchall()
+    out = []
+    for h in range(hours):
+        hi, lo = now - 600 - h * 3600, now - 600 - (h + 1) * 3600
+        ids = [i for i, t in rows if lo < t <= hi]
+        d = sum(1 for i in ids if votes.get(i, (0, 0))[1] > 0)
+        out.append({"hours_ago": h, "posts": len(ids), "disliked": d,
+                    "share": round(d / len(ids), 2) if len(ids) >= 20 else None})
+    return out
 
 
 def recent_decisions(now, n=6):
@@ -284,9 +329,12 @@ Review, in this order:
 2. Anything wrong: deals far under the orders, many orders ending the same way, template messages, posts without
    votes or with dislikes, too few deals for the 20 needed.
    "forum_strategy_checks" holds code checks that the forum strategy's premises broke (a dislike, new posts under
-   the average, votes stopped, the percentile fell, posting stopped). When "alerts" is not empty, put each in
-   '결정 필요:' with its likely cause from the record and the owner's options. Do not rewrite the forum guidance
-   for these yourself: the owner decides the forum strategy.
+   the average, votes stopped, the percentile fell, posting stopped, dislike bombing on the whole market). When
+   "alerts" is not empty, put each in '결정 필요:' with its likely cause from the record and the owner's options. Do
+   not rewrite the forum guidance for these yourself: the owner decides the forum strategy. Watch the dislike
+   bombing every hour: "market_dislike_share_by_hour_newest_first" is the share of other buyers' posts that got a
+   dislike, hour by hour (under 2% before 11-05 01 h). Say in one line whether it is rising, steady or fading, and
+   whether our buyer posts are paused or going out.
 3. What to change: numbers, playbook, or nothing. Change only for a reason in the record; no change is a fine answer.
    Mind the trade: lower offers raise surplus per deal but lose deals.
 Answer with one JSON object only:
