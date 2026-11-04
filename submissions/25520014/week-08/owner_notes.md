@@ -176,3 +176,8 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   to 34-44M, gross 0-9M lower. Fast SKUs running out of A between windows, B and C offered when A is gone, and fewer
   supply lines are this rule, on purpose. The owner judges it at 22 h; it goes back to 0.5 h if gross falls under
   15M an hour. Do not answer it with restock skips.
+- 11-04 22:55 restock: a SKU's expected cost now carries the market's surge factor (inventory.json `surge`, rule from
+  21:27: past 50 units of a SKU in the market's last hour each unit adds 0.2% to its cost, up to +50%). Costs were
+  list x 0.59 for goods, so a surged SKU looked cheaper than it was (지누스 그린티 x1.23). From 21:27 to 22:40 we paid
+  0.91M over the plain price, 0.86M of it on 자코모 4인. Fewer units of surged SKUs, or none once the factor eats the
+  margin, are this rule, on purpose. Do not answer it with restock skips.

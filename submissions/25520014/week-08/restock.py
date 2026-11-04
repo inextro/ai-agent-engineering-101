@@ -238,10 +238,15 @@ def candidates(inv, cat, demand, est, p, now):
     if p["warranty_hours"] > 0:
         rates = [est.break_rate[g] for g in "ABC" if p[f"warranty_{g}"]]
         warranty_rate = sum(rates) / len(rates) if rates else 0.0
+    # 11-04 21:27 rule: past 50 units of a SKU in the market's last hour, each unit adds 0.2% to its cost, up to +50%
+    # (inventory.json `surge`). Costs here were list x COST_SHARE, so a surged SKU looked cheaper than it was
+    # (지누스 그린티 x1.23 makes an A cost about its market price, 0.73 of list).
+    surge = {x["sku"]: x["factor"] for x in (inv.get("surge") or []) if x.get("factor")}
     out = {}
     for s, x in cat.items():
         c, lp, kind = x["category"], x["list_price"], x["kind"]
-        if c in skip or WORST_COST * lp > unit_cap:
+        f = surge.get(s, 1.0)
+        if c in skip or WORST_COST * lp * f > unit_cap:
             continue
         asked = s in est.asked_recent                   # a request we missed in the last 2 h (model.ASKED_RECENT_H)
         if est.sku_rate(s) <= 0 and not asked:
@@ -260,13 +265,13 @@ def candidates(inv, cat, demand, est, p, now):
         room = min(cap - have, MAX_QTY)
         if room <= 0:
             continue
-        price, cost = est.price_ratio(c) * lp, COST_SHARE[kind] * lp
+        price, cost = est.price_ratio(c) * lp, COST_SHARE[kind] * lp * f
         cu = price - cost - (warranty_rate * price if kind == "goods" else 0.0)
         if cu <= 0:
             continue
         a, b = est.own_sku_posterior(s)
         a += (rate - est.own_sku_rate(s)) * b           # the missed requests, at the same weight
-        out[s] = {"kind": kind, "category": c, "lp": lp, "cost": cost, "worst": WORST_COST * lp, "cu": cu,
+        out[s] = {"kind": kind, "category": c, "lp": lp, "cost": cost, "worst": WORST_COST * lp * f, "cu": cu,
                   "life": FOOD_LIFE * (x.get("shelf_hours") or 24) if kind == "food" else None,
                   "have": have, "room": room, "a": a, "b": b}
         if fast:
