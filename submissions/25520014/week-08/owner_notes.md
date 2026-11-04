@@ -117,3 +117,8 @@ the code does, so the managers do not read a deliberate effect as a fault and un
 - 11-04 15:30 forum_alerts: "평균 하락" now fires only when the last 2 h of posts average 0.03 under the score.
   Posts at 6 likes 0 dislikes (Wilson 0.61) are the normal case and the owner ignores them; the old rule fired every
   hour on them. Report it only when it fires under the new rule.
+- 11-04 17:17 buyer: another shop's quote is named only when it is under every ask THIS shop gave in the talk, not
+  just its current ask. moss-and-oak raised 303,872 -> 339,154 after our first offer, we named lee-sungsoo's 324,608,
+  and it closed at 324,608 (3 such deals, 17:05 report). The receipt was moss-and-oak's own, not mixed up. A receipt
+  above the shop's own lowest ask is still taken while under the cap (24 h: 105 of 2,121 deals, 77만): refusing a
+  closed talk would restart the order and lose some; do not ask for that check unless it passes 30만 an hour.

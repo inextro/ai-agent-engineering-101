@@ -392,6 +392,7 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
     offer = None
     history = [f"Me: I want to buy {c['name']}.", f"Shop: {buyer.status_text(task)[:400]}"]
     last, stalls = None, 0
+    first = len(rec["asks"])             # rec["asks"] holds every shop of the order; this shop's asks start here
     for n in range(ROUNDS + 1):
         state = task["status"]["state"]
         if state == "TASK_STATE_COMPLETED":
@@ -446,7 +447,10 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
         nxt = min(max(nxt, (offer or 0) + 1), goal)       # always a raise, never past the cap or the ask
         offer = nxt
         rec["offers"].append(offer)
-        text = write_message(c, offer, ask, other if other and other["ask"] < ask else None, "\n".join(history),
+        # name another shop's quote only when it is under every ask this shop gave (11-04 17:05: moss-and-oak raised
+        # 303872 -> 339154 after our first offer, we named lee-sungsoo's 324608, and it closed at 324608)
+        low = min(rec["asks"][first:])
+        text = write_message(c, offer, ask, other if other and other["ask"] < low else None, "\n".join(history),
                              f"{c['shop']} round {n + 1}")
         history.append(f"Me: {text}")
         task = buyer.send(rpc_url, text, task["id"])
