@@ -242,6 +242,10 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   11-04 we held such SKUs in 29% of their short hours against 95% of saturated hours, and entered 라클라우드 퀸,
   시몬스 퀸, 에이스 BMA 7-8 h after they went short; dragonash took 48-77% of such mid-price bedding SKUs. A short
   hour was followed by a saturated one 0% of the time. Surge cost and the market A price check still apply.
+- 11-05 01:29 clearance + model + seller (kit restarted). Stale and stuck units ask just under the market's price
+  for their own SKU and grade (the all-grade SKU median had put A at C-mixed prices: G1515d951 A sold at 0.70 of list
+  against the market's A 0.86, under cost); underwater clearance starts only after a unit has been held 1 h; our
+  last-hour sales rate counts per hour held. Found by a review of tonight's deploys.
 
 ## buyer
 
