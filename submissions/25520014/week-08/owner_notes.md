@@ -186,3 +186,7 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   its cost (owner: sell what we hold but cannot sell a little cheaper). 20:40-22:40: 지누스 그린티 sold 379 in the
   market at a median 0.73, ours 0 of 68 in 42 talks, our floor 0.78 with a buyer stopped at 0.75. These talks are
   logged with arm "clearance". Sales of stuck SKUs at about the market median are this rule, on purpose.
+- 11-04 23:00 seller: a daemon thread runs rule_watch.py every 2 minutes and appends any change of the market's rules
+  page, inventory.json fields or catalog SKUs to data/alerts.md (owner: detect new rules in real time, report only).
+  The surge rule went live at 21:27 and the shop manager first named it at 22:01. Read data/alerts.md at each review
+  and name what is new there; it changes nothing by itself.

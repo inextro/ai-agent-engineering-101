@@ -919,4 +919,20 @@ if __name__ == "__main__":
     ap.add_argument("--port", type=int, default=9999)
     args = ap.parse_args()
     log(f"{SHOP} on http://127.0.0.1:{args.port}/ (stock from {MARKET_DIR}, replies by {REPLY_MODEL} {REPLY_EFFORT})")
+
+    def watch_rules():
+        """rule_watch.py every WATCH_S in a daemon thread (owner, 11-04 23 h): a market change is in data/alerts.md
+        within minutes, not at the next hourly review. It reports only; a failure is logged and never stops a talk."""
+        import threading
+        import rule_watch
+
+        def loop():
+            while True:
+                try:
+                    rule_watch.main()
+                except Exception as e:
+                    log(f"[rule_watch] {type(e).__name__}: {str(e)[:160]}")
+                time.sleep(120)
+        threading.Thread(target=loop, name="rule_watch", daemon=True).start()
+    watch_rules()
     uvicorn.run(build_app(args.port), host="127.0.0.1", port=args.port, log_level="warning")
