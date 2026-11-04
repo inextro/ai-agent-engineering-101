@@ -204,6 +204,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   11-04 5 talks lost that way (3.5M; e8dec12d 다우닝 3인, the 00:01 report's case).
 - 11-05 00:10 answer to the 23:01 and 00:01 reports: the 22:28 post on G03d0199f (warranty 3.0 h) is
   dae-yangkim's settle, not ours. Nothing to fix on our side.
+- 11-05 00:22 seller + model + policy (owner: let the bandit price what we actually ask). Goods open at
+  min(list, floor x (1 + x)), x from policy.GOODS_ARMS (0.0, 0.04, 0.08, 0.15); food keeps the list-share arms
+  0.7-1.0. With list x arm, the floor overrode the arm in half the goods talks (arm 0.7: 76%), so the goods bandit
+  learned the floor's results. Goods talks before 00:22 are left out of its counts (their arms meant something
+  else): every goods arm starts at Beta(1, 1), expect some exploring in the first hour. 11-03's rule "leave the
+  arms to the bandit" is changed by the owner for this. Revert if the goods deal rate falls over 5%p or profit
+  per talk falls in the first hour.
 
 ## buyer
 
