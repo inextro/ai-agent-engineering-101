@@ -152,3 +152,10 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   and it closed at 324,608 (3 such deals, 17:05 report). The receipt was moss-and-oak's own, not mixed up. A receipt
   above the shop's own lowest ask is still taken while under the cap (24 h: 105 of 2,121 deals, 77만): refusing a
   closed talk would restart the order and lose some; do not ask for that check unless it passes 30만 an hour.
+- 11-04 20:32 seller B first (B_FIRST): a goods SKU holding B opens on B to a buyer who names no grade and asks for
+  no lower one; a buyer who names a grade gets it as before, food is unchanged, C comes by asking or the fallback.
+  72% of goods supply is A and best-first left B behind it (자코모 4인 G8ec51935 at 20:11: 13 A, 36 B). Per list
+  price B earns 0.14 after refunds against A's 0.07; goods talks opened on B closed 62% against A's 49% (13-20 h, B
+  then held without A); B paid 89%, A 94% (18-20 h). Offline 6 h with OLD_C_H 3: +10-25M gross. Only 5 of 3,968
+  talks asked for A after a first message naming no grade. More B deals and an A count that grows is this rule, on
+  purpose; the owner judges it at 21 and 22 h by talks opened on B (close and paid share) and stars.

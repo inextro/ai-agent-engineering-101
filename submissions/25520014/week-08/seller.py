@@ -189,13 +189,22 @@ def need_hours(text):
 
 
 NAMED_GRADE = re.compile(r"\bgrade\s*([abc])\b|\b([abc])[ -]grade\b|([ABC])\s*등급|등급\s*([ABC])", re.I)
+# 11-04 20:32: a goods B held is offered before A to a buyer who names no grade. 72% of goods supply is A and the
+# best-first rule left B behind it (자코모 4인 G8ec51935 at 20:11: 13 A, 36 B); per list price a B earns 0.14 after
+# refunds against A's 0.07, a goods talk opened on B closed 62% against A's 49% (13-20 h), and B was paid 89% against
+# A's 94% (18-20 h). Offline 6 h: +10-25M gross with OLD_C_H 3. C still comes only by asking or the fallback.
+B_FIRST = True
 
 
 def offer_grade(text, opts):
     """The one grade to offer: the best held, unless the buyer asks for a lower one (LOWER_OK). Then the lowest
-    grade the buyer named that we hold, else the lowest grade at or above the lowest named, else our lowest."""
+    grade the buyer named that we hold, else the lowest grade at or above the lowest named, else our lowest.
+    Goods B goes first (B_FIRST) to a buyer who names no grade and asks for no lower one."""
     held = sorted(opts, key=RANK.get)                    # lowest first
     if not LOWER_OK.search(text or ""):
+        if (B_FIRST and "B" in opts and opts["B"]["unit"].get("kind", "goods") == "goods"
+                and not NAMED_GRADE.search(text or "")):
+            return "B"
         return held[-1]
     named = {next(x for x in m.groups() if x).upper() for m in NAMED_GRADE.finditer(text)}
     named = {g for g in named if g in RANK}
