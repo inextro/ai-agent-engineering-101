@@ -406,6 +406,17 @@ SMALL_GAP = 0.02   # an offer at or above the floor and this close to the price 
 OVER_RAISE = 1.2
 STALLS_FINAL = 3   # this many messages in a row without a higher offer and the current price becomes final
 HOLD_GAP = 0.05    # when the price would be (or is) final, an offer at or above the floor this close to it closes
+# once the price is final, an offer this far under the floor still closes (never under the cost): 11-03 21:00 to
+# 11-04 13:00, 22 talks walked within 1% under the floor (59만 margin lost), and only 30 deals at the floor had an
+# earlier offer in that band (4만 given up). The floor is cost x 1.08 + the warranty refund, so 1% under it still pays
+FLOOR_TOL = 0.01
+
+
+def close_floor(o):
+    """The lowest offer that closes once the price is final: the floor less FLOOR_TOL, but never under the cost (a
+    floor already at or under the cost, for clearance or the last hours, stays as it is)."""
+    lo = o["floor"] * (1 - FLOOR_TOL)
+    return o["floor"] if lo < o["unit"]["cost"] else lo
 
 
 def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, stalls=0, frozen=False,
@@ -425,7 +436,7 @@ def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, s
         return {"close": False, "price": o["ask"], "step": 0, "final": False, "opening": True}
     if offer is None and accepted:
         return {"close": True, "price": o["ask"], "step": o["step"], "final": True}
-    if offer is not None and (offer >= o["ask"] or (o["step"] >= steps and offer >= o["floor"])):
+    if offer is not None and (offer >= o["ask"] or (o["step"] >= steps and offer >= close_floor(o))):
         # never above the ask: an offer over it is a misreading ("2 for 50000" read as 50000 for one)
         return {"close": True, "price": min(offer, o["ask"]), "step": o["step"], "final": True}
     if offer is not None and offer >= o["floor"] and o["ask"] - offer <= SMALL_GAP * o["ask"]:
@@ -438,7 +449,7 @@ def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, s
                 "offer": offer, "first": True}
     if not moved or frozen:
         final = frozen or o["step"] >= steps or (offer is not None and stalls + 1 >= STALLS_FINAL)
-        if final and offer is not None and offer >= o["floor"] and o["ask"] - offer <= HOLD_GAP * o["ask"]:
+        if final and offer is not None and offer >= close_floor(o) and o["ask"] - offer <= HOLD_GAP * o["ask"]:
             # a buyer who kept raising a little is at its limit: 07:18-09:54 two such talks walked at 3.7% under a
             # held final (218k profit lost) and holding there won 0 deals of 810, so close at the offer instead
             return {"close": True, "price": offer, "step": o["step"], "final": True}
@@ -451,8 +462,8 @@ def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, s
         step = o["step"] + 1
         if step >= steps or ask == o["floor"]:
             ask, step = o["floor"], steps
-    if offer is not None and offer >= ask:
-        return {"close": True, "price": offer, "step": step, "final": True}
+    if offer is not None and (offer >= ask or (step >= steps and offer >= close_floor(o))):
+        return {"close": True, "price": min(offer, ask), "step": step, "final": True}
     return {"close": False, "price": ask, "step": step, "final": step >= steps, "offer": offer}
 
 

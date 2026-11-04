@@ -114,6 +114,12 @@ def ref_seqs(post):
     return out
 
 
+def names_other(db, text):
+    """Whether a post's text (lowercased) names a shop other than ours, by its join name (4+ characters)."""
+    return any(len(n) >= 4 and n.lower() in text
+               for (n,) in db.execute("SELECT name FROM shops WHERE name != ?", (model.SHOP_NAME,)))
+
+
 def about_us(post, mine, our_seqs):
     text = (post.get("text") or "").lower()
     return (any(n in text for n in NAMES) or post.get("thread") in mine
@@ -312,8 +318,10 @@ def one_pass(md, st, now):
         reply = str(a["reply"]).strip()[:800]
         queue_post(md, {"post": reply, "refs": list(records), "thread": post["id"], "as": "shop"})
         # a post in our thread may be about another shop (4 of 14 open complaints on 11-04 named only others):
-        # only a post that names us or cites one of our settles goes on the complaint list the manager reads
-        if a.get("complaint") and (records or any(n in (post.get("text") or "").lower() for n in NAMES)):
+        # only a post that names us, or cites one of our settles and names no other shop, goes on the complaint
+        # list the manager reads (post 3967 cited 4 settles, one ours, and complained of dragonash's 3 h warranty)
+        text = (post.get("text") or "").lower()
+        if a.get("complaint") and (any(n in text for n in NAMES) or (records and not names_other(db, text))):
             st["complaints"][str(post["id"])] = {"ts": now, "issue": str(a.get("issue", ""))[:120],
                                                  "text": (post.get("text") or "")[:300], "version": p["version"]}
         st["last_post"] = now
