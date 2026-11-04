@@ -56,6 +56,8 @@ STUCK_FLOOR = 0.95        # its floor as a share of its ask (the SKU's market me
 UW_UNDER = 0.01           # an underwater unit opens this far under the market's price for its SKU and grade
 UW_FLOOR = 0.95           # its floor as a share of that ask
 UW_FLOOR_COST = 0.85      # ... never under this share of its cost (owner: a small loss, not any loss)
+UW_HELD_H = 1             # ... and only once held this long (11-05 01:40 review: 66 of 124 underwater opens were
+                          # units under 3 h old, some 0.01 h; a fresh unit gets an hour at its usual floor first)
 REFRESH = 600
 DAY = 86400
 PATH = policy.DATA / "clearance.json"
@@ -145,18 +147,24 @@ def terms(u, now=None, c_discount=0.0, floor=None):
     cost = u.get("_pool_cost") or u["cost"]
     goods = u.get("kind", "goods") == "goods" and u.get("grade") != "expired"
     out = []
-    share = _stale["sku"].get(u.get("sku"))
+    # the market's price for this SKU and grade when it has one, else the SKU's (all grades) median: 11-05 01:40, the
+    # SKU median (0.75 with B and C in it) put G1515d951 A at 0.70 against the market's A 0.85, 7 sales under cost
+    m = _stale["grade"].get(u.get("sku"), {}).get(u.get("grade")) if goods else None
+    share = m or _stale["sku"].get(u.get("sku"))
     if (u.get("sku") in _stale["stuck"] and share and goods
             and now - (u.get("supplied_at") or now) >= STUCK_HELD_H * 3600):
         ask = u["list_price"] * share * ((1 - c_discount) if u.get("grade") == "C" else 1)
         out.append({"ask": ask, "floor": max(cost, STUCK_FLOOR * ask)})
-    m = _stale["grade"].get(u.get("sku"), {}).get(u.get("grade")) if goods else None
-    if m and floor and floor > m * u["list_price"]:
+    if (m and floor and floor > m * u["list_price"]
+            and now - (u.get("supplied_at") or now) >= UW_HELD_H * 3600):
         ask = m * u["list_price"] * (1 - UW_UNDER)
         out.append({"ask": ask, "floor": max(UW_FLOOR_COST * cost, UW_FLOOR * ask)})
     if stale(u, now):
         share = _stale["sku"].get(u.get("sku")) or _stale["category"].get(u.get("category"))
-        ask = u["list_price"] * max(share - ASK_UNDER, 0.05) if share else NO_DATA_ASK * u["cost"]
+        if m:     # just under the market's price for its grade, as underwater (with m - ASK_UNDER a C asked 0.61 of
+            ask = m * u["list_price"] * (1 - UW_UNDER)      # list where the market paid C 0.72)
+        else:
+            ask = u["list_price"] * max(share - ASK_UNDER, 0.05) if share else NO_DATA_ASK * u["cost"]
         if u.get("grade") == "C":
             ask *= 1 - c_discount
         out.append({"ask": ask, "floor": max(FLOOR_COST * cost, STALE_FLOOR * ask)})

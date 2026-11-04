@@ -340,7 +340,9 @@ class Estimates:
         if RECENT_W and self.n1_all.get(sku, 0) >= RECENT_MIN:
             held = sum(max(0.0, min(y, self.now) - max(x, self.now - 3600)) for x, y in spans) / 3600
             if held >= 0.5:                       # the same spread (b), its mean moved toward the last hour
-                a = (RECENT_W * self.n1_ours.get(sku, 0) + (1 - RECENT_W) * a / b) * b
+                # per hour held, like a / b (11-05 01:40 review: settles per clock hour undercounted a SKU out
+                # of stock part of the hour)
+                a = (RECENT_W * self.n1_ours.get(sku, 0) / held + (1 - RECENT_W) * a / b) * b
         return a, b
 
     def shortage(self):

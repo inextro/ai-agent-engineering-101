@@ -396,7 +396,7 @@ def write_reply(u, price, situation, history, buyer_text, template, how=None, cl
         "facts (delivery dates, returns, freebies, a manufacture date), say plainly that the shop cannot promise it. "
         "Never invent facts. Unless the shop's move says the price is final, do not call it final, best or lowest. "
         f"The price is {price}: write it exactly once, as digits, as the last thing in the message. Write no "
-        "other digits (except the hours of shelf life left, exactly as the facts give them, when the buyer asks "
+        "other digits (except the warranty's hours and the hours of shelf life left, exactly as the facts give them, when the buyer asks "
         "how long it keeps or says how long it must last) and no other amounts, not even in words. "
         "Reply with the message text only.")
     reply = ask_checked(prompt, lambda a: (a, check_reply(a, u, price, buyer_text)), "reply", how)
@@ -426,7 +426,7 @@ Answer with one JSON object only: {{"unit": one of {keys}, "reply": "<at most th
 language (English when it is unclear), stating only facts of that unit; if they ask for something not in the
 facts, say the shop cannot promise it; unless that unit's move says the price is final, do not call it final, best
 or lowest; the price of that unit exactly once, as digits, as the last thing; no other digits except that unit's
-hours of shelf life left exactly as its facts give them, when the buyer asks how long it keeps or says how long it
+warranty hours and its hours of shelf life left exactly as its facts give them, when the buyer asks how long it keeps or says how long it
 must last>"}}"""
 
 
@@ -756,8 +756,9 @@ class Seller(AgentExecutor):
         await asyncio.to_thread(refresh_break_rates)       # both read whole files: off the event loop
         await asyncio.to_thread(clearance.table)           # rebuilt from the ledger every 10 min: off the loop too
         # (the warm thread rebuilds both and the bandit counts first, so a talk rarely waits for them)
-        arm = await asyncio.to_thread(model.pick_arm, next(iter(by_grade.values())).get("kind", "goods"),
-                                      bandit_stats_cached())
+        kind = next(iter(by_grade.values())).get("kind", "goods")
+        arm = await asyncio.to_thread(lambda: model.pick_arm(kind, bandit_stats_cached()))   # a stale cache reads
+        # the whole negotiations file: in the thread, not on the event loop (11-05 01:40 review)
         wants_w = bool(WANTS_WARRANTY.search(text or ""))
         opts = {g: option(u, p, arm, wants_w) for g, u in by_grade.items()}
         if len(opts) > 1:
