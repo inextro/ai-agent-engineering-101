@@ -161,6 +161,12 @@ def inventory():
 
 
 RANK = {"C": 0, "B": 1, "A": 2}
+# 11-04 16:50: a lower goods grade held this long, and cheaper than the best by this much, is mentioned on the
+# first reply (no price); the buyer who asks for it gets it, everyone else stays on the best grade. 13-16 h, 221
+# talks came for SKUs where old C sat behind A or B, and only 20 of 2,338 buyers asked for a lower grade unasked.
+MENTION_H = 3
+MENTION_CHEAPER = 0.95
+LOWER_WORDS = {"B": "box-damaged (grade B, the item is fine)", "C": "refurbished (grade C)"}
 SOLD_HOLD = 6 * 60    # a unit sold stays out of offers this long (inventory.json drops it at the checkout; the kit
                       # pays within its 300 s order, so an unpaid close frees the unit soon after)
 ABANDONED = 10 * 60   # a talk this old is over (the kit stops a buyer at 300 s, often without a CancelTask)
@@ -202,6 +208,26 @@ def offer_grade(text, opts):
     return next((g for g in held if RANK[g] >= RANK[least]), held[-1])
 
 
+def mention_alt(g, opts):
+    """The lower goods grade to mention next to grade g: the lowest held MENTION_H hours or more and priced at most
+    MENTION_CHEAPER x g's ask; None when there is none (or g is already the lowest, or the item is food)."""
+    now = time.time()
+    for k in sorted(opts, key=RANK.get):
+        u = opts[k]["unit"]
+        if RANK[k] >= RANK[g]:
+            return None
+        if (u.get("kind", "goods") == "goods" and now - (u.get("supplied_at") or now) >= MENTION_H * 3600
+                and opts[k]["ask"] <= MENTION_CHEAPER * opts[g]["ask"]):
+            return k
+    return None
+
+
+def wants_lower(text, g):
+    """The buyer asks for the lower grade g: "refurbished", "cheaper one", "grade C" (LOWER_OK) or names g."""
+    named = {next(x for x in m.groups() if x).upper() for m in NAMED_GRADE.finditer(text or "")}
+    return bool(LOWER_OK.search(text or "")) or g in named
+
+
 def find_units(text, taken):
     """One unit per grade of what the buyer named, the one to clear first within the grade (food closest to its
     date, goods the cheapest): {grade: unit}, empty when there is none. Food that would not last the hours the
@@ -211,7 +237,8 @@ def find_units(text, taken):
     159k, 196k, 201k on 11-04), and until 11-04 14 h the one held longest was offered on its own cost: the 201k unit
     every time, a floor of 230k against a market at 210k. Cheapest first on the mean cost keeps the whole SKU and
     grade above cost x (1 + min_margin): what is left after the cheap unit costs more on average, so the next
-    floor rises (8 h of 11-04 talks: 49 lost ones had a buyer at or above that floor, 171만 of margin)."""
+    floor rises (8 h of 11-04 talks: 49 lost ones had a buyer at or above that floor, 171만 of margin).
+    A goods unit held clearance.STALE_H hours goes before the cheapest (since 11-04 16:50): it is the one on sale."""
     inv = inventory()
     if inv.get("round", 0) < 3:
         return {}, inv
@@ -227,7 +254,8 @@ def find_units(text, taken):
     if not named:
         named = [u for u in units if (u.get("category") or "").split(">")[-1].lower() in want]
     by_grade = {}
-    for u in sorted(named, key=lambda u: (u.get("expires_at") or 0,
+    now = time.time()                    # a goods unit held clearance.STALE_H hours goes first (11-04 16:50)
+    for u in sorted(named, key=lambda u: (u.get("expires_at") or 0, not clearance.stale(u, now),
                                           u["cost"] if u.get("kind") == "goods" else 0, u.get("supplied_at") or 0)):
         by_grade.setdefault(u["grade"], u)
     for g, u in by_grade.items():
@@ -402,7 +430,8 @@ def option(u, p, arm):
     warranty = int(p["warranty_hours"]) if kind == "goods" and p.get(f"warranty_{u.get('grade')}") else 0
     u = dict(u, _warranty=warranty)
     ask = u["list_price"] * arm * ((1 - p["c_discount"]) if u.get("grade") == "C" else 1)
-    clear = clearance.terms(u)          # bought before the demand fix, in a category the market buys: cheaper now
+    clear = clearance.terms(u, c_discount=p["c_discount"])   # bought before the demand fix in a category the market
+    #                                     buys, or goods held clearance.STALE_H hours: cheaper now
     if clear:
         ask = min(ask, clear["ask"])
     floor = floor_price(u, p, warranty, ask)
@@ -625,10 +654,14 @@ class Seller(AgentExecutor):
             # unless the buyer asks for a lower one: then the lowest grade it named that we hold ("grade C is fine"
             # gets C, not a choice of B and C; owner 11-04 01:40), or our lowest for "refurbished", "cheapest"
             g = offer_grade(text, opts)
-            opts = {g: opts[g]}
-        deal = self.open[task_id] = {"opts": opts, "cur": next(iter(opts)) if len(opts) == 1 else None, "arm": arm,
+            # no mention to a buyer who named a grade: it said what it wants
+            alt = None if NAMED_GRADE.search(text or "") else mention_alt(g, opts)
+            opts = {g: opts[g], **({alt: opts[alt]} if alt else {})}
+        else:
+            g, alt = next(iter(opts)), None
+        deal = self.open[task_id] = {"opts": opts, "cur": g, "alt": alt, "arm": arm,
                                      # a clearance price is not the arm's: the bandit must not learn from it
-                                     "log_arm": "clearance" if any(o["clearance"] for o in opts.values()) else arm,
+                                     "log_arm": "clearance" if opts[g]["clearance"] else arm,
                                      "steps": int(p["max_concessions"]), "lines": [], "t0": time.time(),
                                      "pv": p.get("version"), "bv": policy.load_playbook().get("version")}
         for k, o in opts.items():
@@ -659,7 +692,29 @@ class Seller(AgentExecutor):
                  for k, o in opts.items()}
         history = "\n".join(deal["lines"][-8:])
         how = {}
-        if len(opts) == 1 or (cur and bare(text)):
+        alt = deal.get("alt") if deal.get("alt") in opts else None
+        if alt:
+            # the lower grade only for a buyer who asks for it; anyone else stays on the best grade
+            key = alt if not opening and wants_lower(text, alt) else cur   # the first message chose cur already
+            if key == alt and self.swap_if_taken(task_id, deal, alt) is False:
+                key = cur                    # the old unit was sold meanwhile: stay on the best
+            if key == alt or not opening:    # chosen, or not asked for on the first reply: the talk has one unit
+                opts = deal["opts"] = {key: opts[key]}
+                deal["alt"] = None
+                deal["log_arm"] = "clearance" if opts[key]["clearance"] else deal["arm"]
+            u, m = opts[key]["unit"], moves[key]
+            sit, tmpl = situation(m), template(u, m)
+            if key == alt and not m["close"]:      # the first price of the lower unit, not a held one
+                sit = (f"the buyer asked for the {LOWER_WORDS[u['grade']]} unit; its asking price is {m['price']}; "
+                       "ask for the buyer's offer as a number.")
+                tmpl = f"{u['name']}: {facts(u, u.get('_warranty'))}. Send your offer as a number. Asking {m['price']}"
+            if opening and key != alt and alt in opts and not m["close"]:
+                words = LOWER_WORDS[opts[alt]["unit"]["grade"]]
+                sit += (f" Also say, in one short sentence with no price and no number, that the shop has a cheaper "
+                        f"{words} unit of the same item if the buyer prefers it.")
+                tmpl = tmpl.replace(". Send your offer", f". We also have a cheaper {words} one if you prefer. Send your offer")
+            reply = await asyncio.to_thread(write_reply, u, m["price"], sit, history, text, tmpl, how, m["close"])
+        elif len(opts) == 1 or (cur and bare(text)):
             key = cur or next(iter(opts))
             u, m = opts[key]["unit"], moves[key]
             reply = await asyncio.to_thread(write_reply, u, m["price"], situation(m), history, text, template(u, m),
@@ -705,6 +760,7 @@ class Seller(AgentExecutor):
                                   "pool_cost": round(u["_pool_cost"]) if u.get("_pool_cost") else None,
                                   "ask": opts[key]["ask"], "floor": opts[key]["floor"], "chose": key,
                                   "options": {k: o["unit"].get("grade") for k, o in opts.items()},
+                                  "mentioned": deal.get("alt"), "clearance": bool(opts[key]["clearance"]),
                                   "policy": deal["pv"], "playbook": deal["bv"]})
         if m["close"]:
             await self.close(task_id, deal, m["price"], reply, up, say)

@@ -93,6 +93,16 @@ the code does, so the managers do not read a deliberate effect as a fault and un
 - 11-04 16:30 FLOOR_TOL stays 1%. 13:24-16:30: 8 talks walked 1-2% under the floor (82만, 71만 of it two sofa
   talks), while 62 deals had an earlier offer in that band (up to 93만 given up at 2%). Do not ask again unless the
   walks in that band pass the deals that had such an offer.
+- 11-04 16:50 clearance: any goods unit held 6 h or more (clearance.STALE_H), whenever bought, opens at the market's
+  median share of the list price for its SKU over the last day less 5% (grade C less c_discount too), floor 0.9 x
+  that ask, never under 0.9 x cost; the seller offers such a unit before the cheapest of its grade. The owner's call:
+  unsold goods only cost storage. Deals of old goods under the usual floor, logged with arm "clearance", are this rule,
+  on purpose; restock does not buy those SKUs again (first unit 624th-748th of 752 by value per won).
+- 11-04 16:50 seller: when we hold a lower goods grade of the SKU 3 h or more and at least 5% cheaper, the first reply
+  on the best grade adds one sentence, no price, that a cheaper box-damaged (B) / refurbished (C) one is there. The
+  buyer who asks for it ("refurbished", "cheaper one", "grade C") gets it on its next message; anyone else stays on the
+  best grade. No mention to a buyer who named a grade. The open record has "mentioned". The owner judges both rules
+  with tests/stale_check.py; do not change them from one hour's numbers.
 
 ## buyer
 
