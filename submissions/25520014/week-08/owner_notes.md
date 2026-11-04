@@ -269,6 +269,11 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   bandit had settled on it (00:22-07:08: 24.2% closed, 39.5k profit a talk, stars 4.73; the others 19-20%, 29.8-40.5k,
   4.45-4.63). The board weighs book 0.5, revenue 0.3, stars 0.2 and we lead the first two, so stars matter most now.
   Goods talks under other arms before 08:00 are history; do not propose bringing the arms back without new data.
+- 11-05 08:15 (restock, no restart: restock runs fresh each window). SKU_PRIOR_H 2.0 -> 0.5: the market-based
+  guess of our sales of a SKU counts as 0.5 h of our own in-stock sales, not 2 h, so a SKU we sell above our
+  category share gets more units sooner and one we sell below it fewer. Backtest: next-hour sales predicted better
+  (log score -1.526 -> -1.445). 6 h offline: book +3~6M, end stock the same. Expect restock lines to lean further
+  toward SKUs we already sell well.
 
 ## buyer
 

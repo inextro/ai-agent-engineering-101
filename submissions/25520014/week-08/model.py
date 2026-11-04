@@ -80,7 +80,10 @@ SKU_NEW_MIN_H = 0.5             # a SKU new to the market counts at least this m
 SKU_NEW_AFTER_H = 1.0           # a SKU first supplied this long after the window opens is new to the market
 SKU_NEW_MIN_SALES = 5          # market settles a SKU new to the market needs before restock enters it
 ASKED_RECENT_H = 2.0            # a request we missed lets restock buy a SKU nobody else buys only this long (asked_recent)
-SKU_PRIOR_H = 2.0               # hours the market-based guess of our own sales of a SKU is worth (own_sku_rate)
+SKU_PRIOR_H = 0.5               # hours the market-based guess of our own sales of a SKU is worth (own_sku_rate).
+# 2.0 until 11-05 08:15. Backtest (12 h, 24 times, 2,012 SKU-hours, NB log score of our next-hour sales): 2.0 -1.526,
+# 0.5 -1.445, 0.25 -1.431 (short SKUs -4.33 / -3.38 / -3.14). 6 h offline, 10 seeds, book: 0.5 beat 2.0 by +3.1M,
+# +3.7M and +6.5M with true demand at 0.5 / 0.25 / 2.0, the same end stock (57-61M).
 OWN_HALF_LIFE_H = 1.0           # own_sku_rate's memory, its sales and its in-stock hours (11-04 23:28; 1.0 from 11-05 00:45). With the
 # policy's half_life_h (24 h) the 자코모 4인 rate read 44 an hour at 22 h when we sold 13: our share fell from 80% to
 # 13% after 19 h (A ran short, kimauve came in cheaper) and 24 h kept the afternoon. Backtest 11-04 12-22 h, next
