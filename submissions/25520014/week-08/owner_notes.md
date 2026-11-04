@@ -211,6 +211,15 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   else): every goods arm starts at Beta(1, 1), expect some exploring in the first hour. 11-03's rule "leave the
   arms to the bandit" is changed by the owner for this. Revert if the goods deal rate falls over 5%p or profit
   per talk falls in the first hour.
+- 11-05 00:32 seller + clearance + restock (owner: no warranty where buyers do not pay for it). Goods B and C carry
+  the 6 h warranty only when the buyer's first message asks for one (warranty / guarantee / 보증; seller
+  WARRANTY_ON_ASK), A always. Market 11-04, per sale as a share of list after the break window: C without a
+  warranty paid 0.676 and refunded nothing, with one 0.681 and 0.203 refunded; B 0.721 / 0 against 0.727 / 0.069.
+  Stars come at the sale, before any break. 8% (C) and 13% (B) of our first messages ask. Do not turn
+  warranty_B / warranty_C off or on to change this: the flags stay true and the rule is in the code. A goods ask now
+  starts from max(floor, 0.95 x the market's price for its SKU and grade) x (1 + arm): without the warranty a C's
+  floor is ~0.37 of list while the market pays 0.68. restock counts the warranty cost of B and C at the share of
+  buyers who ask.
 
 ## buyer
 
