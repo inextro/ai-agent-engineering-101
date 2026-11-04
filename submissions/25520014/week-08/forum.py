@@ -115,9 +115,15 @@ def ref_seqs(post):
 
 
 def names_other(db, text):
-    """Whether a post's text (lowercased) names a shop other than ours, by its join name (4+ characters)."""
-    return any(len(n) >= 4 and n.lower() in text
-               for (n,) in db.execute("SELECT name FROM shops WHERE name != ?", (model.SHOP_NAME,)))
+    """How many shops other than ours a post's text (lowercased) names, by join name (4+ characters)."""
+    return sum(1 for (n,) in db.execute("SELECT name FROM shops WHERE name != ?", (model.SHOP_NAME,))
+               if len(n) >= 4 and n.lower() in text)
+
+
+# A post naming this many other shops is a market roundup, not a complaint about us: totato2203-r3's
+# "[시세·가게 분석 | tomato&potato]" names 74-148 shops every half hour with a line on our biggest buyer and was 38 of
+# the 61 complaints on the list by 11-05 07 h. The real complaints so far name at most 12 (dragonash's receipt, 9469).
+ROUNDUP_SHOPS = 20
 
 
 def about_us(post, mine, our_seqs):
@@ -325,7 +331,8 @@ def one_pass(md, st, now):
         # the 17 complaints so far, this drops 4596 only.
         text = (post.get("text") or "").lower()
         us, other = any(n in text for n in NAMES), names_other(db, text)
-        if a.get("complaint") and (us or records) and (not other or (us and records)):
+        if (a.get("complaint") and (us or records) and (not other or (us and records))
+                and other < ROUNDUP_SHOPS):
             st["complaints"][str(post["id"])] = {"ts": now, "issue": str(a.get("issue", ""))[:120],
                                                  "text": (post.get("text") or "")[:300], "version": p["version"]}
         st["last_post"] = now

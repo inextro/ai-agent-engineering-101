@@ -163,10 +163,11 @@ def signals(m):
             and t["market_deals_1h"] >= HELD * t["market_deals_base_h"]):
         out.append(("talks", f"buyers opened {t['ours_1h']} talks with us in the last hour against {t['ours_base_h']:.0f}/h "
                     f"the 3 h before; market deals {t['market_deals_1h']} against {t['market_deals_base_h']:.0f}/h"))
-    for p in m["price"][:3]:
-        out.append((f"price_{p['sku']}", f"price: {p['sku']} {p['name']} other shops sold A at {p['market_a']} of list "
-                    f"({p['market_n']} sales), our A ask {p['our_ask']}, floor {p['our_floor']}"))
-    if m["top"] and out and not all(k.startswith("price_") for k, _ in out):
+    if m["price"]:      # one line an hour for all of them (11-05 01-06 h: one per SKU, 26 of 31 alerts)
+        out.append(("price", f"price: {len(m['price'])} SKUs where our A floor is over what other shops sold A at; "
+                    + "; ".join(f"{p['sku']} {p['name']} market A {p['market_a']} ({p['market_n']} sales), our ask "
+                                f"{p['our_ask']}, floor {p['our_floor']}" for p in m["price"][:3])))
+    if m["top"] and out and not all(k.startswith("price") for k, _ in out):
         show = "; ".join(f"{x['sku']} {x['name']} {x['market_1h'] / 1e6:.0f}M ours {x['share']:.0%} "
                          f"stock {x['stock']} talks {x['talks']} deals {x['deals']}" for x in m["top"][:5])
         out.append(("top", f"top SKUs under {TOP_SHARE:.0%} ours: {show}"))

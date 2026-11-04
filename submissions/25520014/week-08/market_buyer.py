@@ -565,8 +565,11 @@ def main():
                 ask = (buyer.receipt(task) or {}).get("price")
             live.append((c, rpc_url, task, ask))
         rec["rounds_of_quotes"] = rec.get("rounds_of_quotes", 0) + 1
-    # where to haggle: the most surplus at the ask we heard (no ask: the expected price)
-    live.sort(key=lambda t: -(t[0]["value"] - (t[3] if t[3] is not None else t[0]["expect"])))
+    # where to haggle: an ask within our cap first, then the most surplus at the ask we heard (no ask: the expected
+    # price). 11-04 19 h to 11-05 07 h: 29 orders haggled first with a shop asking over our cap while another asked
+    # under it; 20 closed (69%) against 1,278 of 1,334 (96%) that started under the cap.
+    live.sort(key=lambda t: (t[3] is not None and t[3] > t[0]["cap"],
+                             -(t[0]["value"] - (t[3] if t[3] is not None else t[0]["expect"]))))
     for c, rpc_url, task, ask in live[1:]:      # in the background: a slow shop must not hold up the haggle
         if task["status"]["state"] == "TASK_STATE_INPUT_REQUIRED":
             threading.Thread(target=buyer.walk_away, args=(rpc_url, task["id"], "bought elsewhere"),

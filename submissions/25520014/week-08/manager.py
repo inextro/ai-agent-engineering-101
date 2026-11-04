@@ -142,6 +142,25 @@ def recent_decisions(now, n=6):
     return out
 
 
+ALERTS = policy.DATA / "alerts.md"   # rule_watch.py and share_watch.py append here, one "- MM-DD HH:MM ..." line each
+
+
+def recent_alerts(now, hours=1, limit=12):
+    """The alerts.md lines of the last `hours` (KST stamps), newest last, at most `limit`."""
+    try:
+        lines = ALERTS.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    cut = time.strftime("%m-%d %H:%M", time.gmtime(now + 9 * 3600 - hours * 3600))
+    out, keep = [], False
+    for line in lines:
+        if line.startswith("- "):
+            keep = line[2:13] >= cut          # same year: "MM-DD HH:MM" sorts by time
+        if keep:
+            out.append(line[:400])
+    return out[-limit:]
+
+
 def health(md, now, p, b):
     """When each process last wrote, the reply quality of the last hour, whether the code runs on the current
     policy and playbook, and the alerts the code raises by itself."""
@@ -156,7 +175,9 @@ def health(md, now, p, b):
     opens = [r for r in jsonl(model.NEGOTIATIONS, now - 3600) if r["outcome"] == "open"]
     alerts = [f"{k} has not written for {m} minutes" for k, m in seen.items()
               if k.split()[0] in STALE and (m is None or m * 60 > STALE[k.split()[0]])]
-    tmpl = sum(1 for t in turns if t.get("template"))
+    # first replies are templates on purpose since 11-05 01:10 (seller.FAST_OPENING, "fast" in turns.jsonl): only the
+    # others are haiku failing (01-06 h the alert counted the fast ones, 294-430 a run, all false)
+    tmpl = sum(1 for t in turns if t.get("template") and not t.get("fast"))
     if turns and tmpl / len(turns) > 0.3:
         alerts.append(f"{tmpl} of {len(turns)} replies in the last hour were templates (haiku failing)")
     stale_pol = sum(1 for r in opens if r.get("policy") not in (None, p.get("version")))
@@ -255,6 +276,10 @@ def summary(md, now):
         "hours_left_in_round": round(policy.hours_left(now), 1),
         "balance": inv.get("balance"), "start": inv.get("start"), "injected": inv.get("injected"),
         "profit_so_far": (inv.get("balance") or 0) - (inv.get("start") or 0) - (inv.get("injected") or 0),
+        # the board's ALL scores book since 11-05 03:45: cash (profit_so_far) + what the unsold units cost
+        "book_so_far": (inv.get("balance") or 0) - (inv.get("start") or 0) - (inv.get("injected") or 0)
+                       + round(sum(u.get("cost", 0) for u in units)),
+        "alerts_last_hour": recent_alerts(now),
         "stock": {"units": len(units), "food_units": sum(u.get("kind") == "food" for u in units),
                   "goods_units": sum(u.get("kind") == "goods" for u in units),
                   "at_cost": round(sum(u.get("cost", 0) for u in units)),
@@ -318,8 +343,9 @@ warranty refunds we may still owe + refund_sd standard deviations) runs out; cat
 are not held. restock_plan in the record shows the plan beside what is actually held. You do not trade. Once an hour you review the last hour and set what the code runs on next. The
 owner does not watch; they read your report afterwards and correct you when needed.
 
-Score (percentiles among shops): 0.5 x profit (balance - 5,000,000 - bankruptcy money; unsold stock counts as a
-loss) + 0.3 x revenue + 0.2 x stars. Food rots (thrown away at cost); goods pay 1% of cost a day in storage and a
+Score (percentiles among shops): 0.5 x book (cash = balance - 5,000,000 - bankruptcy money, plus what the unsold
+units cost; since 11-05 03:45, before that cash alone) + 0.3 x revenue + 0.2 x stars. A sale under cost lowers book
+by the gap; an unsold unit keeps its cost in book. Food rots (thrown away at cost); goods pay 1% of cost a day in storage and a
 hidden share breaks within 6 h of the sale (a warranty refunds the full price from our balance). Buyers see only
 shops that hold stock in the ordered category. Our claims are always true and certificates always shown.
 

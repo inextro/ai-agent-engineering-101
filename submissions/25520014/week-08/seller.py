@@ -902,7 +902,7 @@ class Seller(AgentExecutor):
         u, m = opts[key]["unit"], moves[key]
         append(TURNS, {"ts": time.time(), "task": task_id, "buyer": text[:600], "shop": reply[:600], "unit": key,
                        "grade": u.get("grade"), "sku": u["sku"], "price": m["price"], "close": bool(m["close"]),
-                       "template": reply == template(u, m),
+                       "template": reply == template(u, m), "fast": bool(how.get("fast")),
                        "tries": how.get("tries"), "failed": how.get("failed"),
                        "c_fallback": fbo["ask"] if fbo else None,
                        "fallback_grade": fbo["unit"].get("grade") if fbo else None,
