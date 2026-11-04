@@ -228,6 +228,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   +142.8M -> +161.2M, stock 56.6M -> 44.6M, fewest stockouts. Judge us against the whole market (our share of its
   revenue and of its top SKUs), not against the first-placed shop: 23-00 h the market held while our share fell
   from 26% (16 h) to 7%, Kiro729 0.7% -> 11-19%.
+- 11-05 01:10 seller (kit restarted). First replies go out from the template without haiku (the price is the
+  bandit arm's as before; haiku writes from the buyer's first counter on), the bandit counts are cached 60 s and a
+  thread refreshes break rates, the clearance table and the counts every 30 s, and the warranty is written as digits
+  ("a 6 h warranty"). Buyers ask several shops at once and buy from the first fit: of our 137 high-end talks left
+  after our first reply, 121 had the SKU settle elsewhere (median 1.9 s after our reply). Our first reply took 9.9 s;
+  walkaways 46% at 4-8 s, 60% at 8-12 s, 79% over 12 s. Not a price or star problem: 자코모 4인 A cleared at market
+  price (0.80 of list, cost 0.78) and still lost 9 of 10. Do not dump 자코모 A or C below cost: A sells 56/h in the market.
 
 ## buyer
 
