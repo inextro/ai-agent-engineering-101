@@ -53,6 +53,12 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   units, mostly fast sellers. More SKUs per category and a higher stock at cost after 11:28 are this change, on
   purpose; the owner watches it (back out if gross profit per hour does not rise while stock passes 34M at cost, or
   stock over 2 h old passes 35%). Do not answer it with restock skips; report what the record shows.
+  13:08 check: kept (gross profit 4.88M -> 7.64M/h, stock 46.3M, 29% over 2 h old).
+- 11-04 13:12 restock: a SKU that first appeared in the market more than 1 h after the round start counts its
+  market sales per hour since its own first supply (at least 0.5 h), not over the whole window, and becomes a
+  candidate only after 5 market settles (unless a buyer asked us for it or we hold it). High-end furniture (cost
+  0.7M to 1.6M, from 11:02) was undercounted 6 to 10 times and we sold 3 of it in 3 h against dae-yangkim's 57.
+  More high-priced SKUs and a larger stock at cost after 13:12 are this change, on purpose; the owner watches it.
 - 11-04 11:16 seller: when the unit is swapped for another (taken by a parallel talk) the reply keeps the opening
   wording, or says "this unit's price"; "we came down" on a first reply (5ffb5c63) is fixed.
 
