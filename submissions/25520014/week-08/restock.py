@@ -64,6 +64,13 @@ WANTED_H = 2                                    # wanted posts this recent are w
 WINDOW_LEAD = 45                                # print the plan when a window opens within this many seconds
 CAP_HOURS = (1.0, 2.0)                          # a SKU's units: its demand to us over the last plan's refill cycle,
                                                 # within these hours (owner, 11-04 07:20; before, 1 h of our sales)
+# A SKU this fast to us gets a line in every window (about 20 min apart, 16-24 min over 24 h on 11-04), so its stock
+# only has to last FAST_COVER_H, not the refill cycle of all SKUs (about 2 h): its cap and its P_k horizon. 11-04 19 h:
+# sofa G8ec51935 was bought in each of 24 runs and held 69 units (94M at cost) for 2 h; offline over 6 h a 1 h cover
+# held half the stock and sold more of the high-end SKUs we never stocked (gross +5%), while 0.5 h ran out more
+# than it gained (owner, 11-04 19:09).
+FAST_RATE = 3.0                                 # demand to us per hour (sku_demand)
+FAST_COVER_H = 1.0
 
 
 def window_shut(inv, now):
@@ -210,7 +217,8 @@ def candidates(inv, cat, demand, est, p, now):
         if not asked and not have_sku.get(s) and est.unproven(s):
             continue                                    # new to the market: wait for its first sales
         rate = sku_demand(est, s)
-        cap = math.ceil(rate * cap_h - 1e-9)
+        fast = rate >= FAST_RATE
+        cap = math.ceil(rate * (min(cap_h, FAST_COVER_H) if fast else cap_h) - 1e-9)
         if asked:
             cap = max(cap, 1)                           # a buyer asked us for it
         room = min(cap - count_sku.get(s, 0), MAX_QTY)
@@ -225,6 +233,8 @@ def candidates(inv, cat, demand, est, p, now):
         out[s] = {"kind": kind, "category": c, "lp": lp, "cost": cost, "worst": WORST_COST * lp, "cu": cu,
                   "life": FOOD_LIFE * (x.get("shelf_hours") or 24) if kind == "food" else None,
                   "have": count_sku.get(s, 0), "room": room, "a": a, "b": b}
+        if fast:
+            out[s]["h"] = FAST_COVER_H                  # ranked: P_k over this, not the refill cycle
     return out, units, have_sku, by_cat, median, skip
 
 
@@ -242,7 +252,7 @@ def ranked(cands, p, hours, left):
             co = x["cost"] * min(1.0, h / max(x["life"], 0.1))   # it ages; past its usable life it is lost
         else:
             co = 0.01 * x["cost"] * h / 24                       # storage
-        tail = model.nb_tail(x["a"], x["b"], h, kmax=x["have"] + x["room"])
+        tail = model.nb_tail(x["a"], x["b"], min(h, x.get("h", h)), kmax=x["have"] + x["room"])
         for k in range(x["have"] + 1, x["have"] + x["room"] + 1):
             pk = tail[k - 1]
             value = pk * x["cu"] - (1 - pk) * co

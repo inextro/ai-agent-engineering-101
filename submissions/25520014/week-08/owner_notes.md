@@ -103,6 +103,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   buyer who asks for it ("refurbished", "cheaper one", "grade C") gets it on its next message; anyone else stays on the
   best grade. No mention to a buyer who named a grade. The open record has "mentioned". The owner judges both rules
   with tests/stale_check.py; do not change them from one hour's numbers.
+- 11-04 19:09 restock: a SKU whose demand to us is 3 an hour or more (FAST_RATE) keeps 1 h of stock (FAST_COVER_H),
+  not the refill cycle of all SKUs (about 2 h): it gets a line in every supply window (20 min, 16-24 min apart), so
+  sofa G8ec51935, bought in each of 24 runs, held 69 units (94M at cost). The cash goes to the next SKUs, among them
+  high-end ones we never stocked (라클라우드 G03d0199f, 시몬스 Gb5d0dde7, 헬렌스타인). Lower stock at cost, fewer units
+  of the fast sofas, and new high-end SKUs after 19:40 are this rule, on purpose; a fast SKU out of stock for part of
+  a window is the price of it (offline: 0.9M margin lost against 15M gained over 6 h). The owner watches board profit
+  against dae-yangkim and stock at cost; do not answer it with restock skips.
 
 ## buyer
 
