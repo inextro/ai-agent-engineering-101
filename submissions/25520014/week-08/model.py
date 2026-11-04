@@ -481,6 +481,44 @@ def amount_of(d):
     return a if isinstance(a, (int, float)) and a > 0 else None
 
 
+MKT_GRADE_H = (2, 24)    # market_grade_prices: the recent window, then the day when it has too few settles
+MKT_GRADE_MIN = 5        # other shops' settles of a SKU and grade needed for its median
+
+
+def market_grade_prices(db=None, now=None, cat=None):
+    """{sku: {grade: median paid / list}} of goods other shops settled: over the last MKT_GRADE_H[0] hours, or the
+    last MKT_GRADE_H[1] when the recent window has under MKT_GRADE_MIN of that SKU and grade. What a unit of ours
+    can sell for now: 11-04 22-23 h 자코모 4인 A sold at 0.80-0.81 of list in the market while our floor (cost x
+    1.08 + warranty, the A units bought at 0.75-0.81 with the surge) sat at 0.86-0.93: 92 talks, 4 deals, and
+    restock still bought A at 23:05 and 23:22 (owner, 11-04 23:50)."""
+    db = db or connect()
+    now = now or time.time()
+    cat = cat or catalog(db)
+    ours = our_urls(db)
+    recent, day = {}, {}
+    for ts, d in entries(db, "settle", now - MKT_GRADE_H[1] * 3600):
+        s, price = sku_of(d), amount_of(d)
+        x = cat.get(s) or {}
+        if d.get("shop") in ours or not price or not x.get("list_price") or x.get("kind", "goods") != "goods":
+            continue
+        g = d.get("grade")
+        if g not in ("A", "B", "C"):
+            continue
+        r = price / x["list_price"]
+        day.setdefault(s, {}).setdefault(g, []).append(r)
+        if ts >= now - MKT_GRADE_H[0] * 3600:
+            recent.setdefault(s, {}).setdefault(g, []).append(r)
+    med = lambda v: sorted(v)[len(v) // 2]
+    out = {}
+    for s, by in day.items():
+        for g, v in by.items():
+            rv = recent.get(s, {}).get(g, [])
+            use = rv if len(rv) >= MKT_GRADE_MIN else v if len(v) >= MKT_GRADE_MIN else None
+            if use:
+                out.setdefault(s, {})[g] = round(med(use), 4)
+    return out
+
+
 class Prices:
     def __init__(self, db=None, cat=None, now=None, half_life_h=24, us=SHOP_NAME):
         """us: our buyer's name on the ledger (settle `buyer`). Shops are named as in shops.json (`name`)."""

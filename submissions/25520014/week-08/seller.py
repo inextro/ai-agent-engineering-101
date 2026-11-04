@@ -453,8 +453,9 @@ def option(u, p, arm):
     warranty = int(p["warranty_hours"]) if kind == "goods" and p.get(f"warranty_{u.get('grade')}") else 0
     u = dict(u, _warranty=warranty)
     ask = u["list_price"] * arm * ((1 - p["c_discount"]) if u.get("grade") == "C" else 1)
-    clear = clearance.terms(u, c_discount=p["c_discount"])   # bought before the demand fix in a category the market
-    #                                     buys, or goods held clearance.STALE_H hours: cheaper now
+    clear = clearance.terms(u, c_discount=p["c_discount"], floor=floor_price(u, p, warranty, ask))
+    #   bought before the demand fix in a category the market buys, stuck, underwater (its usual floor over the
+    #   market's price for its SKU and grade, 11-04 23:50), or goods held clearance.STALE_H hours: cheaper now
     if clear:
         ask = min(ask, clear["ask"])
     floor = floor_price(u, p, warranty, ask)

@@ -95,6 +95,15 @@ GRADE_SHARE_H = 6                               # our goods settles this recent 
 # what other shops bought in the previous window over the same seconds; the j-th new unit pays factor(U + j).
 # Backtest on the Round 3 ledger (1,081 SKU-windows, a purchase 83 s into the window, owner 11-04 23:30):
 # factor now MAE 2.26%p, bias +1.65%p (too low); this forecast MAE 1.28%p, bias -0.08%p.
+# Market check (owner, 11-04 23:50): a goods unit sells only above its floor (seller.floor_price: cost x (1 + min_margin)
+# + warranty break premium), so a SKU whose A sells in the market under the floor of an A at our mean A cost is not
+# bought, and its price is at most the market's grade prices over the supply mix. 22-23 h 자코모 4인 A sold at
+# 0.80-0.81 of list in the market, our A floor 0.86-0.93 (units bought at 0.75-0.81 with the surge): 92 talks, 4
+# deals, yet bought again at 23:05 and 23:22, priced at our own category price (0.82).
+MARKET_CHECK = True
+A_COST = 0.66                                   # mean cost / list of a goods A unit (828 supplied before 21:27: 0.55-0.75)
+SUPPLY_MIX = {"A": 0.60, "B": 0.24, "C": 0.16}  # goods grades as supplied to us (1,378 units before 21:27)
+GRADE_REL = {"A": 1.0, "B": 0.87, "C": 0.75}    # a grade the market has too few sales of: this x its A price
 SURGE_FREE, SURGE_STEP, SURGE_MAX = 50, 0.002, 1.5
 SURGE_WINDOW = 3600
 SUPPLY_OPEN_S = 180                             # a window stays open 3 minutes
@@ -318,6 +327,13 @@ def candidates(inv, cat, demand, est, p, now):
     # cost about its market price, 0.73 of list). 22:41: x inventory.json `surge` now; 11-04 23:30: each new unit at
     # the forecast count at our purchase (surge_counts, unit_cost), so a surged unit is bought when it still pays.
     counts = surge_counts(inv, now, getattr(est, "db", None))
+    mkt = {}
+    if MARKET_CHECK:
+        try:
+            mkt = model.market_grade_prices(getattr(est, "db", None), now, est.cat or None)
+        except Exception as e:                          # no market prices: buy as before
+            print(f"[restock] market grade prices unavailable: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
+    premium_a = est.break_rate.get("A", 0.0) if p["warranty_hours"] > 0 and p.get("warranty_A") else 0.0
     out = {}
     for s, x in cat.items():
         c, lp, kind = x["category"], x["list_price"], x["kind"]
@@ -343,6 +359,12 @@ def candidates(inv, cat, demand, est, p, now):
         if room <= 0:
             continue
         price = est.price_ratio(c) * lp
+        m = mkt.get(s) if kind == "goods" else None
+        if m and "A" in m:
+            # f is the forecast factor of our next unit (surge_counts), not the factor now
+            if A_COST * lp * f * (1 + p["min_margin"]) + premium_a * m["A"] * lp > m["A"] * lp:
+                continue                                # an A of it would not sell above its floor
+            price = min(price, lp * sum(w * m.get(g, m["A"] * GRADE_REL[g]) for g, w in SUPPLY_MIX.items()))
         warranty = warranty_rate * price if kind == "goods" else 0.0
         cost = COST_SHARE[kind] * lp * f
         cu = price - cost - warranty

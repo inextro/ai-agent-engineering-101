@@ -23,6 +23,12 @@ ours 0 of 68 held in 42 talks, our floor 0.78 (a buyer stopped at 0.75); 다우�
 35 / 0 of 19, 헬렌스타인 구스 35 / 0 of 9.
 Negotiations that offer a clearance unit are logged with arm "clearance", so the price bandit (model.bandit_stats)
 leaves them out.
+Since 11-04 23:50 (owner: what we bought and cannot sell, sell it all, even at a small loss; run as designed from
+here) a goods unit whose usual floor (seller.floor_price) is above what the market pays for its SKU and grade
+(model.market_grade_prices: other shops' median over 2 h, or the day) is "underwater": it opens UW_UNDER under that
+price with its floor UW_FLOOR x the ask, never under UW_FLOOR_COST x its cost. When it is also stuck or stale, the
+terms with the lower floor apply. 22-23 h: 자코모 4인 A floor 0.86-0.93 of list against the market's 0.80-0.81, 92
+talks and 4 deals.
 
 The table is rebuilt from the collector's ledger at most every REFRESH seconds and written to data/clearance.json
 for the managers and the owner.
@@ -47,12 +53,15 @@ STUCK_MKT = 20            # ... or more and we settled under STUCK_SHARE of thei
 STUCK_SHARE = 0.05        # sale of a 6 h stale unit put the other 66 지누스 back on the usual 0.78 floor)
 STUCK_HELD_H = 1          # a unit of a stuck SKU held this long goes on clearance
 STUCK_FLOOR = 0.95        # its floor as a share of its ask (the SKU's market median), never under its cost
+UW_UNDER = 0.01           # an underwater unit opens this far under the market's price for its SKU and grade
+UW_FLOOR = 0.95           # its floor as a share of that ask
+UW_FLOOR_COST = 0.85      # ... never under this share of its cost (owner: a small loss, not any loss)
 REFRESH = 600
 DAY = 86400
 PATH = policy.DATA / "clearance.json"
 
 _table, _built = {}, 0.0
-_stale = {"sku": {}, "category": {}, "stuck": set()}
+_stale = {"sku": {}, "category": {}, "stuck": set(), "grade": {}}
 
 
 def build(now=None):
@@ -84,7 +93,8 @@ def build(now=None):
     med = lambda v: sorted(v)[len(v) // 2]
     _stale = {"sku": {k: round(med(v), 3) for k, v in by_sku.items() if len(v) >= MIN_SKU_SETTLES},
               "category": {c: round(med(v), 3) for c, v in pct.items()},
-              "stuck": {k for k, v in recent_mkt.items() if v >= STUCK_MKT and recent_ours.get(k, 0) < STUCK_SHARE * v}}
+              "stuck": {k for k, v in recent_mkt.items() if v >= STUCK_MKT and recent_ours.get(k, 0) < STUCK_SHARE * v},
+              "grade": model.market_grade_prices(db, now, cat)}
     out = {}
     for c, k in n.items():
         if MIN_RATE <= k / hours <= MAX_RATE:
@@ -101,7 +111,8 @@ def table():
             _table = build(now)
             PATH.write_text(json.dumps({"ts": now, "fix_ts": FIX_TS, "min_rate": MIN_RATE, "max_rate": MAX_RATE, "ask_under": ASK_UNDER,
                                         "floor_cost": FLOOR_COST, "categories": _table, "stale_h": STALE_H,
-                                        "stale_median_sku": _stale["sku"], "stuck": sorted(_stale["stuck"])},
+                                        "stale_median_sku": _stale["sku"], "stuck": sorted(_stale["stuck"]),
+                                        "grade_prices": _stale["grade"]},
                                        ensure_ascii=False),
                             encoding="utf-8")
         except Exception as e:             # a failed rebuild keeps the last table; the seller must never stop on it
@@ -116,23 +127,31 @@ def stale(u, now=None):
             and (now or time.time()) - (u.get("supplied_at") or now or time.time()) >= STALE_H * 3600)
 
 
-def terms(u, now=None, c_discount=0.0):
-    """{"ask": price, "floor": price} for a clearance unit, None for any other."""
+def terms(u, now=None, c_discount=0.0, floor=None):
+    """{"ask": price, "floor": price} for a clearance unit, None for any other. floor: the unit's usual floor
+    (seller.floor_price), for the underwater test."""
     if (u.get("supplied_at") or FIX_TS) < FIX_TS:
         t = table().get(u.get("category"))
         if t:
             return {"ask": u["list_price"] * max(t["median"] - ASK_UNDER, 0.05), "floor": FLOOR_COST * u["cost"]}
     table()
     now = now or time.time()
+    cost = u.get("_pool_cost") or u["cost"]
+    goods = u.get("kind", "goods") == "goods" and u.get("grade") != "expired"
+    out = []
     share = _stale["sku"].get(u.get("sku"))
-    if (u.get("sku") in _stale["stuck"] and share and u.get("kind", "goods") == "goods" and u.get("grade") != "expired"
+    if (u.get("sku") in _stale["stuck"] and share and goods
             and now - (u.get("supplied_at") or now) >= STUCK_HELD_H * 3600):
         ask = u["list_price"] * share * ((1 - c_discount) if u.get("grade") == "C" else 1)
-        return {"ask": ask, "floor": max(u.get("_pool_cost") or u["cost"], STUCK_FLOOR * ask)}
-    if not stale(u, now):
-        return None
-    share = _stale["sku"].get(u.get("sku")) or _stale["category"].get(u.get("category"))
-    ask = u["list_price"] * max(share - ASK_UNDER, 0.05) if share else NO_DATA_ASK * u["cost"]
-    if u.get("grade") == "C":
-        ask *= 1 - c_discount
-    return {"ask": ask, "floor": max(FLOOR_COST * (u.get("_pool_cost") or u["cost"]), STALE_FLOOR * ask)}
+        out.append({"ask": ask, "floor": max(cost, STUCK_FLOOR * ask)})
+    m = _stale["grade"].get(u.get("sku"), {}).get(u.get("grade")) if goods else None
+    if m and floor and floor > m * u["list_price"]:
+        ask = m * u["list_price"] * (1 - UW_UNDER)
+        out.append({"ask": ask, "floor": max(UW_FLOOR_COST * cost, UW_FLOOR * ask)})
+    if stale(u, now):
+        share = _stale["sku"].get(u.get("sku")) or _stale["category"].get(u.get("category"))
+        ask = u["list_price"] * max(share - ASK_UNDER, 0.05) if share else NO_DATA_ASK * u["cost"]
+        if u.get("grade") == "C":
+            ask *= 1 - c_discount
+        out.append({"ask": ask, "floor": max(FLOOR_COST * cost, STALE_FLOOR * ask)})
+    return min(out, key=lambda x: x["floor"]) if out else None
