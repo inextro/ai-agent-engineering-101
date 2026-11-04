@@ -58,9 +58,12 @@ FOOD_LIFE = 0.20                                # expected share of shelf life a
 MAX_LINES = 10                                  # the kit's lines per run
 MAX_QTY = 20                                    # the kit's units per line
 RUN_GAP = 300                                   # runs further apart than this are in different windows
-OLD_C_H = 0                                     # a goods unit of grade C held this long is not counted as stock
-# 0 since 11-04 19:22 (3 h from 16:31): with A or B held the seller never offers C, so no C of those SKUs sold
-# 16:31-19:03, and none of 97 buyers told of a cheaper C took it; with the 1 h cover a fresh C took a place of A or B
+OLD_C_H = 3                                     # a goods unit of grade C held this long is not counted as stock
+# 3 h from 16:31, 0 from 19:22 (with A or B held the seller never offered C, and under the 1 h cover a fresh C took
+# a place of A or B), 3 again from 11-04 20:27: 72% of goods supply is A and the seller sells A first, so B and C
+# pile up behind it; uncounted, every C was bought over again in A and B (자코모 4인 G8ec51935 at 20:11: 13 A, 36 B,
+# 32 C, 92M at cost; stock 175M -> 192M from 19:04). Offline, 6 h with grades, paid shares and the C fallback:
+# counting C again adds 29-50M to the board in each of 4 cases (A-only buyers 20/40%, C paid 55/35%)
 WINDOW_MIN, RUNS_PER_WINDOW = 20, 2             # until three windows are measured (agent.md; 11-03 logs)
 WANTED_H = 2                                    # wanted posts this recent are worth one unit (wanted.py)
 WINDOW_LEAD = 45                                # print the plan when a window opens within this many seconds

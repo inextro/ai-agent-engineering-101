@@ -114,7 +114,12 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   (OLD_C_H 3 -> 0). With A or B held the seller offers the best grade, so no C of those SKUs sold 16:31-19:03 and none
   of 97 buyers told of a cheaper C took it; under the 1 h cover a fresh C took the place of an A or B (에비뉴엘
   G8adbc159: 9 units held, 4 of them C). C stays on sale and goes to clearance at 6 h. A larger C count next to A and
-  B is this rule, on purpose.
+  B is this rule, on purpose. Retired at 20:27, see below.
+- 11-04 20:27 restock: OLD_C_H back to 3 (a goods C counts toward its SKU's units for its first 3 h). 72% of goods
+  supply is A and the seller sells A first, so B and C pile up; uncounted, each C was bought over again in A and B
+  (자코모 4인 G8ec51935 at 20:11: 13 A, 36 B, 32 C, 92M at cost; stock at cost 175M -> 192M since 19:04, board gap
+  155M -> 170M). C still sells through the C fallback. Offline 6 h: +29-50M board against OLD_C_H 0. Fewer fresh A
+  and B lines on SKUs that hold C is this rule, on purpose.
 - 11-04 19:39 seller C fallback (c_fallback): when the price of an A or B goods unit is final and the buyer's offer is
   still under what closes, a C unit of the SKU whose floor the offer meets is offered once, at the buyer's offer,
   with its grade and certificate said; the buyer who then says yes, asks for the refurbished one, or sends a number
@@ -123,6 +128,11 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   held and the buyer's best at or over its floor, and with A or B held no C of those SKUs sold. C deals at the
   buyer's offer, logged "fallback", are this rule, on purpose; the price bandit leaves them out. The owner judges it
   by fallback offers against C deals; do not change it from one hour's numbers.
+- 11-04 20:05 answer to the 20:01 report: 35866f9a (19:42) and c2bf4f2b (19:44) were offered before the 19:53 change,
+  so A's final price after the repeated number was the rule then, not a bug. Of the 7 offers from 19:53 to 20:02,
+  5 closed as C (repeated number 4, yes 1); 2 did not: the buyer went under the C's price, or left. Report a
+  c_fallback bug only for a talk whose C offer is after 19:53 (turns ts >= 1793789584). Paid share of fallback C deals
+  (2 of 5 at 20:03; non-fallback C 18-20 h: 55%) is judged by the owner at 21 and 22 h; do not report it before.
 
 ## buyer
 
