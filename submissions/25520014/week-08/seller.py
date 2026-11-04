@@ -405,6 +405,7 @@ SMALL_GAP = 0.02   # an offer at or above the floor and this close to the price 
 # 11-04: 4 deals in 24 h were lost when a raise past the ask came on the last turn and the shop asked to confirm
 OVER_RAISE = 1.2
 STALLS_FINAL = 3   # this many messages in a row without a higher offer and the current price becomes final
+HOLD_GAP = 0.05    # when the price would be (or is) final, an offer at or above the floor this close to it closes
 
 
 def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, stalls=0, frozen=False,
@@ -436,8 +437,12 @@ def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, s
         return {"close": False, "price": o["ask"], "step": o["step"], "final": False, "opening": True,
                 "offer": offer, "first": True}
     if not moved or frozen:
-        return {"close": False, "price": o["ask"], "step": o["step"], "offer": offer, "hold": True,
-                "final": frozen or o["step"] >= steps or (offer is not None and stalls + 1 >= STALLS_FINAL)}
+        final = frozen or o["step"] >= steps or (offer is not None and stalls + 1 >= STALLS_FINAL)
+        if final and offer is not None and offer >= o["floor"] and o["ask"] - offer <= HOLD_GAP * o["ask"]:
+            # a buyer who kept raising a little is at its limit: 07:18-09:54 two such talks walked at 3.7% under a
+            # held final (218k profit lost) and holding there won 0 deals of 810, so close at the offer instead
+            return {"close": True, "price": offer, "step": o["step"], "final": True}
+        return {"close": False, "price": o["ask"], "step": o["step"], "offer": offer, "hold": True, "final": final}
     left = steps - o["step"]
     if left <= 0:
         ask, step = o["floor"], steps

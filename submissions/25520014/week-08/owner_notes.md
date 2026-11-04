@@ -37,10 +37,19 @@ the code does, so the managers do not read a deliberate effect as a fault and un
 - 11-04 09:54 the owner put the hours back into the negotiation playbook (version 10): food shelf life is said as the
   facts give it ("at least N hours", code eee8656), the warranty in words ("six-hour"). The 09:47 retries came from
   the warranty written as "6" and amounts in words, not from food hours; do not take the hours out again.
+- 11-04 10:23 seller (HOLD_GAP 0.05): when the price would become final (or is final) because the buyer only raised
+  a little, an offer at or above the floor within 5% of that price closes at the offer. 07:18-09:54 two such talks
+  walked at 3.7% under a held final (218k profit lost), and holding there won 0 of 810 deals. SMALL_GAP stays 2%
+  for the rest of the talk. Deals closing a few % under the last ask after small raises are this rule, on purpose;
+  do not ask to widen SMALL_GAP for them. A buyer whose best offer is under the floor still gets no deal.
 
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
   for 6 h. 409 counts over a 6 h window include hours before this change until 13:18.
+- 11-04 10:23 the owner keeps dae-yangkim G6b9db161 (unit u-c3faaaa21dd8) at the end of the list, not skipped: its
+  409s (36 of 42 in 6 h) come only on orders where every other shop gave no quote, so those orders had no other deal,
+  and the pair still paid 11 in 12 h. More 409s in an hour mean more orders ran out of other shops, not a broken
+  rule; do not ask to skip it again. Ask only if it stops paying entirely for 6 h.
 - 11-04 07:29 forum_alerts: "평균 하락" right after a post is usually the newest posts not having their votes yet;
   the owner reads it and decides (11-04: ignore it when it is that).
