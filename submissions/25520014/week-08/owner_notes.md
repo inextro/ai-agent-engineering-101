@@ -301,3 +301,6 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   with the hours it has run and when buyer_forum would post again by itself (13:20 now); "싫어요 테러 잦아듦" fires
   once it falls under 10% after being on, so the owner decides when to resume. "글 멈춤" is left out while it is on:
   the pause is the owner's. Each hour say in one line whether the share is rising, steady or fading.
+- 11-05 08:10 (buyer_forum, buyer_manager restarted). The owner stopped buyer posts until the dislike bombing is seen
+  to end (buyer_forum.POSTING_PAUSED): there is no automatic resume at 13:20 any more. Report "싫어요 테러 잦아듦"
+  with the numbers so the owner can decide; do not ask to restart buyer_forum or report the pause as a fault.

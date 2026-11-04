@@ -70,6 +70,10 @@ LIKE_TARGET = 7.0         # owner 11-04: aim at 7+ likes; an untried kind starts
 MAIN = ("trend", "price check", "purchases")   # the three shapes of 11-04's 8+ like posts go first (owner 11-04);
                                                # the other kinds only when these have nothing new
 ONLY_MAIN = True          # owner 11-04 01:4x: for now only those three shapes, nothing else
+# Owner 11-05 08:10: no buyer posts at all until the owner has seen the dislike bombing end (totato2203, about every
+# forum post since 02 h, ours stopped 03:39 when each MAIN kind had a dislike). Without this the kinds came back by
+# themselves once their disliked posts were VOTES_H old (13:20). buyer_manager reports when the bombing fades.
+POSTING_PAUSED = True
 LIKE_PRIOR_W = 2          # posts' worth of weight on LIKE_TARGET in a kind's expected likes
 
 
@@ -591,7 +595,7 @@ def one_pass(md, st, now):
     (kind_order). The topic and text checks keep a kind from saying the same thing twice."""
     st["replied"] = {k: v for k, v in st["replied"].items() if now - v < DAY}
     st["topics"] = {k: v for k, v in st["topics"].items() if now - v < DAY}
-    if now - st["last_post"] < POST_EVERY_S:
+    if POSTING_PAUSED or now - st["last_post"] < POST_EVERY_S:
         return
     db = model.connect()
     order, score, off = kind_order(db, now)

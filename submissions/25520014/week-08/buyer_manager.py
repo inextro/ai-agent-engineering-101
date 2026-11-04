@@ -184,6 +184,8 @@ def forum_alerts(db, now, us):
         if votes.get(i, (0, 0))[1] > 0 and post_kind(x) in MAIN_TAGS:
             hit[post_kind(x)] = max(hit.get(post_kind(x), 0), t)
     resume = time.strftime("%H:%M", time.localtime(min(hit.values()) + FORUM_VOTES_H * 3600)) if hit else None
+    if FORUM_PAUSED:                    # no automatic resume: the owner restarts posts after the bombing ends
+        resume = None
     on = storm and storm[0]["share"] is not None and storm[0]["share"] >= STORM_ON
     was = any(s["share"] is not None and s["share"] >= STORM_ON for s in storm[1:])
     if on:
@@ -191,6 +193,7 @@ def forum_alerts(db, now, us):
         out.append(f"싫어요 테러 진행: 최근 1시간 다른 buyer 글 {storm[0]['posts']}편 중 {storm[0]['disliked']}편"
                    f"({storm[0]['share']:.0%})이 싫어요를 받았습니다, {hours}시간째. 우리 buyer 글은 "
                    + (f"{(now - last) / 60:.0f}분째 대기(의도)" if now - last > 1800 else "나가고 있습니다")
+                   + (", 소유자 지시로 무기한 정지(테러가 끝난 게 확인될 때까지)" if FORUM_PAUSED else "")
                    + (f", 지금 규칙의 자동 재개는 {resume} 이후" if resume else ""))
     elif was and storm[0]["share"] is not None and storm[0]["share"] < STORM_OFF:
         out.append(f"싫어요 테러 잦아듦: 최근 1시간 다른 buyer 글 {storm[0]['posts']}편 중 {storm[0]['disliked']}편"
@@ -198,7 +201,10 @@ def forum_alerts(db, now, us):
                    + (f" (지금 규칙의 자동 재개는 {resume} 이후)" if resume else ""))
     # 5. posting stopped: no buyer post for 30 min (the three shapes ran out of material, or buyer_forum is down);
     # during the bombing the pause is the owner's, line 6 says so
-    if now - last > 1800 and not on:
+    if now - last > 1800 and not on and FORUM_PAUSED:
+        out.append("글 정지(소유자 지시, 의도): 마지막 buyer 글이 " + (f"{(now - last) / 60:.0f}분 전" if last else "6시간 넘게 전")
+                   + "입니다. 재개는 소유자가 정합니다")
+    elif now - last > 1800 and not on:
         out.append("글 멈춤: 마지막 buyer 글이 " + (f"{(now - last) / 60:.0f}분 전" if last else "6시간 넘게 전") + "입니다")
     return {"alerts": out, "forum_score": score, "forum_percentile": None if pct is None else round(pct, 2),
             "market_dislike_share_by_hour_newest_first": storm}
@@ -206,6 +212,7 @@ def forum_alerts(db, now, us):
 
 STORM_ON, STORM_OFF = 0.30, 0.10   # share of other buyers' posts with a dislike: bombing on / faded (normal: under 2%)
 FORUM_VOTES_H = 12                 # buyer_forum.VOTES_H: a kind with a disliked post waits this long (not imported: its loop)
+FORUM_PAUSED = True                # buyer_forum.POSTING_PAUSED (owner 11-05 08:10: no posts until the bombing is seen to end)
 MAIN_TAGS = ("가격 동향", "상품 시세", "구매 후기")   # the tags of buyer_forum.MAIN, the only kinds it posts (ONLY_MAIN)
 
 
