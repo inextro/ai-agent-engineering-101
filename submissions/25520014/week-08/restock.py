@@ -90,6 +90,26 @@ CAP_FLOOR = 3                                   # units a SKU may hold below the
 SHORTAGE_ENTRY = True                           # model.shortage(): enter without the unproven wait, demand floor
 SHORT_W_H = model.SHORT_W_H                     # sku_demand: an equal share of the last hour among its suppliers + us
 SHORT_COVER_H = 1.0                             # a short SKU's cap: this many hours of its demand to us
+# The caps above (CAP_FLOOR, FAST_COVER_H, CAP_HOURS, SHORT_COVER_H) were set while an unsold unit was a loss: cash
+# scored, everything at cost in the last liquidate_hours. Since 11-05 03:45 the board scores book (cash + unsold
+# units at cost), so a goods unit that does not sell by its next refill costs storage, 1% of its cost a day
+# (ranked's Co), and the newsvendor alone sets the units: P_k x Cu > (1 - P_k) x Co, up to a line (MAX_QTY). Cash
+# still binds through allocate (value per won) once it runs short; lines go to the SKUs whose units are worth most.
+# Off, not deployed (owner, 11-05 07:40): with Co one cycle's storage (about 0.08% of cost) a unit is bought once
+# P_k passes about 0.3%, so every line goes to MAX_QTY whatever the demand, and the high predictions it leans on are
+# the least reliable (4c backtest 00-07 h: predicted 4-8 units, 5.5 predicted against 3.95 sold). Offline 6 h it
+# added 21M of book but held 347M of stock (56M) and 323 B/C units (64). A SKU that sells well refills itself from
+# its sales record; only a short SKU's demand is hidden by its supply, so only that cap moves (SHORT_OWN).
+BOOK_NEWSVENDOR = False
+# A short goods SKU's demand is our own sales of it over the hours we held it in the last hour (owner, 11-05 07:50):
+# while we hold units the buyers who want it are not cut off, only once we run out. The market's sales split among
+# its suppliers (the floor) and the gamma's prior (category share x market rate) both come from sales the supply cut
+# short, so they read it low (our 77 short units sold 92%, median 13 min). With fewer than SHORT_OWN_MIN of our sales
+# in the hour the floor stays. Its cap is that rate x the time to the next refill (one window, cadence). Short goods
+# stock at cost is held under SHORT_STOCK_MAX.
+SHORT_OWN = False                               # off (owner, 11-05 08h): 56 replay of 33 short SKU-hours, 1 h of our rate +0.5M (a third of it over 10 h) for 30M more stock; one window -2.3M
+SHORT_OWN_MIN = 3
+SHORT_STOCK_MAX = 40e6
 GRADE_CAP = False                               # a goods SKU's B and C count only up to their share of its cap
 GRADE_SHARE_H = 6                               # our goods settles this recent give the grade shares
 # 11-04 21:15, offline only, not deployed (off): the seller sells the best grade first, so the cap filled with B and C left no room for A: 자코모 4인
@@ -216,12 +236,26 @@ def sku_demand(est, sku):
     asked = est.asked_sku.get(sku, 0.0) / est.watched if est.watched > 0 else 0.0
     rate = est.own_sku_rate(sku) + asked * est.p_close
     short = est.shortage().get(sku) if SHORTAGE_ENTRY else None
+    own = short_own_rate(est, sku) if short and est.cat.get(sku, {}).get("kind") == "goods" else None
+    if own is not None:
+        return own                              # our in-stock rate, not the floor or the prior (SHORT_OWN)
     if short:
         # sells as fast as it arrives (model.shortage): an equal share of the last hour's sales among the shops
         # that supplied it and us, at least. A SKU we never held reads only its prior (category share x market
         # rate over 24 h), 라클라우드 퀸 0.1 x 15 an hour while it sold 70 (11-04 20 h)
         rate = max(rate, short["sold"] / (short["shops"] + 1) / SHORT_W_H)
     return rate
+
+
+def short_own_rate(est, sku):
+    """Our settles of a short SKU in the last hour per hour we held it then (SHORT_OWN), or None with fewer than
+    SHORT_OWN_MIN of them (or under 3 minutes held)."""
+    if not SHORT_OWN or est.n1_ours.get(sku, 0) < SHORT_OWN_MIN:
+        return None
+    if est._spans is None:
+        est._spans = est._stock_spans()
+    held = sum(max(0.0, min(y, est.now) - max(x, est.now - 3600)) for x, y in est._spans.get(sku, [])) / 3600
+    return est.n1_ours[sku] / held if held >= 0.05 else None
 
 
 def cap_hours():
@@ -377,11 +411,17 @@ def candidates(inv, cat, demand, est, p, now):
         if SHORTAGE_ENTRY and s in est.shortage():
             # sells as it arrives: an hour of its demand to us (11-04 top 30: a short SKU-hour was followed by a
             # saturated one 0% of the time, by another short one 72%)
-            cap = max(cap, math.ceil(rate * SHORT_COVER_H - 1e-9))
+            own = short_own_rate(est, s) if kind == "goods" else None
+            if own is not None:                         # our in-stock rate x the time to the next refill
+                cap = max(cap, math.ceil(own * cadence(now)[1] / 60 - 1e-9))
+            else:
+                cap = max(cap, math.ceil(rate * SHORT_COVER_H - 1e-9))
         have = count_sku.get(s, 0)
         if share and kind == "goods":
             g = by_grade.get(s, Counter())
             have = g["A"] + sum(min(g[k], math.ceil(cap * share[k] - 1e-9)) for k in "BC")
+        if BOOK_NEWSVENDOR and kind == "goods":        # food past its date is lost: its caps stay
+            cap = have + MAX_QTY                      # the units are where value_k turns negative (ranked)
         room = min(cap - have, MAX_QTY)
         if room <= 0:
             continue
@@ -481,18 +521,22 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
         if k - cands[s]["have"] <= target[s]:
             value[s] += v
     buy, spent = {}, 0.0
+    short_g = {s for s in est.shortage() if cat.get(s, {}).get("kind") == "goods"} if SHORTAGE_ENTRY else set()
+    short_room = SHORT_STOCK_MAX - sum(u.get("cost") or 0 for u in units if u.get("sku") in short_g)
     for s in sorted(target, key=lambda s: -value[s]):
         if len(buy) >= MAX_LINES:
             break
         x = cands[s]
-        qty, top = 0, 0.0                                   # units at their top cost, each with its own surge
+        qty, top, exp = 0, 0.0, 0.0                         # units at their top cost, each with its own surge
         while qty < target[s]:
-            w = unit_cost(x, qty + 1)[1]
-            if spent + top + w > room:
+            c, w, _ = unit_cost(x, qty + 1)
+            if spent + top + w > room or (s in short_g and exp + c > short_room):
                 break
-            qty, top = qty + 1, top + w
+            qty, top, exp = qty + 1, top + w, exp + c
         if qty <= 0:
             continue
+        if s in short_g:
+            short_room -= exp                               # short goods stock at expected cost (SHORT_STOCK_MAX)
         buy[s] = {"sku": s, "qty": qty, "kind": x["kind"], "category": x["category"], "worst_cost": round(top / qty),
                   "k_first": x["have"] + 1, "value": round(value[s] * qty / target[s]),
                   "surge_u": x["surge_u"], "surge_last": round(surge_factor(x["surge_u"] + qty), 3)}
