@@ -46,6 +46,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   hour since its first supply: buyers only ask shops whose offers list the SKU, so empty hours show no demand. Caps
   of SKUs that sell out fast rise (sofa G5e3784e6 6.8 -> 9.9 an hour); category totals do not change, so the stock
   at cost should not grow from this. More units of a few fast SKUs in a category is this rule, on purpose.
+- 11-04 11:28 restock works per SKU, not per category: each SKU's k-th unit is worth P(it sells by the next
+  refill, from our own in-stock rate of that SKU) x its own margin, ranked by value per won (turnover counts). A
+  category no longer has one count shared by its SKUs, so a second SKU (quilt G5cd4ffbc behind sheet Ge62449c9)
+  gets its own units. Offline it spent more of the cash at the same return (0.29 per won) and held about 27% more
+  units, mostly fast sellers. More SKUs per category and a higher stock at cost after 11:28 are this change, on
+  purpose; the owner watches it (back out if gross profit per hour does not rise while stock passes 34M at cost, or
+  stock over 2 h old passes 35%). Do not answer it with restock skips; report what the record shows.
 - 11-04 11:16 seller: when the unit is swapped for another (taken by a parallel talk) the reply keeps the opening
   wording, or says "this unit's price"; "we came down" on a first reply (5ffb5c63) is fixed.
 

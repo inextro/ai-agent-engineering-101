@@ -7,26 +7,28 @@ stock bought in a window has to last until the next one. Outside a window this h
 does not wait 90 s per line for a window that is not coming. The kit buys at most 10 lines a run (a line is one SKU,
 up to 20 units), and about two runs fit in a window.
 
-One rule decides both whether to hold a category and how many units (11-03 23 h; before, a hold test over 48 h and a
-base stock over 25 minutes disagreed, every line bought one unit, and 101 of 138 held categories sat empty). The k-th
-unit of category c, counting the units we already hold there, is worth
-    value_k = P_k x Cu - (1 - P_k) x Co,     P_k = P(we sell at least k in c within T)  (model.tail)
-    Cu = expected price - expected cost - warranty premium    (expected price: model.price_ratio, from the ledger)
+One rule decides whether to hold a SKU and how many units (11-03 23 h per category, 11-04 11 h per SKU). The k-th
+unit of SKU s, counting the units of it we already hold, is worth
+    value_k = P_k x Cu - (1 - P_k) x Co,     P_k = P(we sell at least k of s within T)  (model.nb_tail)
+    Cu = expected price - expected cost - warranty premium, of s itself  (expected price: model.price_ratio)
     Co = what an unsold unit costs over T: goods 1% of cost a day; food the share of its usable life T uses up
          (all of the cost when T is longer); everything at cost once the round's last liquidate_hours begin
-T is the refill cycle: how long until this category gets a line again. With H categories to keep and L lines a
-window, a category is refilled about every ceil(H / L) windows, so T = ceil(H / L) x the time between windows; L and
-that time are measured from our own runs (data/restock.jsonl). H depends on what the money buys, so T is found by
-repeating the allocation a few times.
+P_k comes from our own sales rate of s: a gamma over the hours we held it in stock, around the market's sales of s
+times our share (model.own_sku_posterior), plus the requests for it we missed times our close rate. Buyers order a
+SKU, so each SKU is its own demand; until 11-04 11 h a category had one count of units priced at its best seller,
+and a second SKU got only what the first left (quilt G5cd4ffbc, 34k a unit, none behind a 15k sheet).
+T is the refill cycle: how long until this SKU gets a line again. With H SKUs to keep and L lines a window, a SKU is
+refilled about every ceil(H / L) windows, so T = ceil(H / L) x the time between windows; L and that time are
+measured from our own runs (data/restock.jsonl). H depends on what the money buys, so T is found by repeating the
+allocation a few times.
 
-Every unit with a positive value, in all categories, is ranked by value / cost, and units are taken from the top
-while the money lasts: the cash above the reserve (the bankruptcy line plus the warranty refunds we may still owe,
-model.refund_exposure), each unit counted at the top of its cost range, no unit above unit_cap_frac of the balance.
-A category whose first unit does not make the cut is not held. Within a category the units go to the SKUs the market
-buys most (model.sku_rate), each SKU at most its demand to us over the refill cycle (sku_demand: our paid sales of
-it plus the requests for it we missed times our close rate, over the last plan's cycle within CAP_HOURS), and a SKU nobody bought gets none unless a buyer asked us for it (11-04: buyers settle on
-few SKUs, 255 of 415 fresh fruit sales one apple box, and the median-priced box we bought sold none). Units of SKUs
-nobody buys do not count as stock of their category. This
+Every unit with a positive value is ranked by value / cost (the profit a won tied up in it earns per cycle: a unit
+that would sell late is worth less, so turnover counts), and units are taken from the top while the money lasts: the
+cash above the reserve (the bankruptcy line plus the warranty refunds we may still owe, model.refund_exposure), each
+unit counted at the top of its cost range, no unit above unit_cap_frac of the balance. Each SKU takes at most its
+demand to us over the refill cycle (sku_demand x the last plan's cycle within CAP_HOURS), and a SKU nobody bought
+gets none unless a buyer asked us for it (11-04: buyers settle on few SKUs, 255 of 415 fresh fruit sales one apple
+box). The lines worth most go first; this
 run buys the best of those within the kit's 10 lines. A category a forum post asked for in the last two hours
 (wanted.py) gets one unit when we hold none and a line is left. Categories the manager's playbook skips (at most
 24 h each) are not bought; their stock stays on sale. Bankruptcy only when the balance is under the line and nothing
@@ -55,7 +57,6 @@ WORST_COST = 0.75                               # grade A at the top of its rang
 FOOD_LIFE = 0.20                                # expected share of shelf life a fresh supply has before grade C
 MAX_LINES = 10                                  # the kit's lines per run
 MAX_QTY = 20                                    # the kit's units per line
-UNITS_MAX = 40                                  # units of one category the plan looks at
 RUN_GAP = 300                                   # runs further apart than this are in different windows
 WINDOW_MIN, RUNS_PER_WINDOW = 20, 2             # until three windows are measured (agent.md; 11-03 logs)
 WANTED_H = 2                                    # wanted posts this recent are worth one unit (wanted.py)
@@ -166,87 +167,85 @@ def cap_hours():
     return min(max((cyc or 60) / 60, CAP_HOURS[0]), CAP_HOURS[1])
 
 
-def categories(inv, cat, demand, est, p, now):
-    """What each category's units are worth, before the horizon: {category: facts}, and the stock per SKU."""
+def candidates(inv, cat, demand, est, p, now):
+    """What each SKU's units are worth, before the horizon: {sku: facts}. Each SKU is its own demand (buyers order
+    a SKU, and those of a quilt are not those of a sheet): its rate is our posterior for it (model.own_sku_posterior,
+    in-stock hours) plus the requests for it we missed times our close rate, and its unit pays its own margin.
+    Until 11-04 11 h a category had one count of units, priced at its best-selling SKU, so a second SKU only got
+    what the first left: quilt G5cd4ffbc (34k a unit, 3.6 an hour) got none behind sheet Ge62449c9 (15k)."""
     balance = inv.get("balance") or 0
     units = [u for u in inv.get("units", []) if u.get("grade") != "expired"]
-    have_cat, have_sku = Counter(u.get("category") for u in units), Counter(u.get("sku") for u in units)
+    have_sku = Counter(u.get("sku") for u in units)
     median = {d["category"]: d["median_price"] for d in demand}
     by_cat = {}
     for sku, x in cat.items():
         by_cat.setdefault(x["category"], []).append((sku, x))
     skip = policy.skipped(policy.load_playbook(), now)   # the manager's playbook: leave these alone for now
     unit_cap = p["unit_cap_frac"] * balance
-    sold = {k for k in have_sku if est.sku_rate(k) > 0 or est.asked_sku.get(k, 0.0) > 0}
     cap_h = cap_hours()
+    warranty_rate = 0.0
+    if p["warranty_hours"] > 0:
+        rates = [est.break_rate[g] for g in "ABC" if p[f"warranty_{g}"]]
+        warranty_rate = sum(rates) / len(rates) if rates else 0.0
     out = {}
-    for c, skus in by_cat.items():
-        if c in skip:
+    for s, x in cat.items():
+        c, lp, kind = x["category"], x["list_price"], x["kind"]
+        if c in skip or WORST_COST * lp > unit_cap:
             continue
-        kind = skus[0][1]["kind"]
-        m = median.get(c) or sorted(x["list_price"] for _, x in skus)[len(skus) // 2]
-        share = est.sku_share(c)
-        room = {}                                       # SKU -> units we may still add: its demand over a cycle
-        for s, x in skus:
-            if WORST_COST * x["list_price"] > unit_cap:
-                continue
-            cap = math.ceil(sku_demand(est, s) * cap_h - 1e-9)
-            if est.asked_sku.get(s, 0.0) > 0:
-                cap = max(cap, 1)                       # a buyer asked us for it
-            if cap > have_sku.get(s, 0):
-                room[s] = cap - have_sku.get(s, 0)
-        fit = sorted((s for s in skus if s[0] in room),
-                     key=lambda s: (-sku_demand(est, s[0]),                 # the SKU buyers want most from us,
-                                    -est.sku_rate(s[0]),                    # then the one the market buys most,
-                                    -est.asked_sku.get(s[0], 0.0),          # then the one buyers asked us for,
-                                    abs(math.log(s[1]["list_price"] / m)))) # then the one nearest the median price
-        if not fit:
+        asked = est.asked_sku.get(s, 0.0)
+        if est.sku_rate(s) <= 0 and asked <= 0:
+            continue                                    # nobody buys it (11-04: 255 of 415 fruit sales one box)
+        rate = sku_demand(est, s)
+        cap = math.ceil(rate * cap_h - 1e-9)
+        if asked > 0:
+            cap = max(cap, 1)                           # a buyer asked us for it
+        room = min(cap - have_sku.get(s, 0), MAX_QTY)
+        if room <= 0:
             continue
-        live = sum(n for k, n in have_sku.items() if k in sold and cat.get(k, {}).get("category") == c)
-        lp = fit[0][1]["list_price"]
         price, cost = est.price_ratio(c) * lp, COST_SHARE[kind] * lp
-        premium = 0.0
-        if kind == "goods" and p["warranty_hours"] > 0:
-            rates = [est.break_rate[g] for g in "ABC" if p[f"warranty_{g}"]]
-            premium = (sum(rates) / len(rates) if rates else 0) * price
-        cu = price - cost - premium
+        cu = price - cost - (warranty_rate * price if kind == "goods" else 0.0)
         if cu <= 0:
             continue
-        life = FOOD_LIFE * (fit[0][1].get("shelf_hours") or 24) if kind == "food" else None
-        out[c] = {"kind": kind, "skus": fit, "lp": lp, "cost": cost, "worst": WORST_COST * lp, "cu": cu,
-                  "life": life, "have": live, "room": {k: room[k] for k, _ in fit}}
+        a, b = est.own_sku_posterior(s)
+        a += (rate - est.own_sku_rate(s)) * b           # the missed requests, at the same weight
+        out[s] = {"kind": kind, "category": c, "lp": lp, "cost": cost, "worst": WORST_COST * lp, "cu": cu,
+                  "life": FOOD_LIFE * (x.get("shelf_hours") or 24) if kind == "food" else None,
+                  "have": have_sku.get(s, 0), "room": room, "a": a, "b": b}
     return out, units, have_sku, by_cat, median, skip
 
 
-def ranked(cands, est, p, hours, left):
-    """Every unit with a positive value over a refill cycle of `hours`: [(value per won, value, category, k)]."""
+def ranked(cands, p, hours, left):
+    """Every unit with a positive value over a refill cycle of `hours`: [(value per won, value, sku, k)]. The k-th
+    unit of a SKU is worth P(it sells by the next refill) x its margin - P(not) x what holding it costs, per won of
+    its cost: the profit a won tied up in it earns per cycle, so a unit that sells late (slow turnover) is worth less
+    than one that sells at once."""
     h = min(hours, left)
     out = []
-    for c, x in cands.items():
+    for s, x in cands.items():
         if left < p["liquidate_hours"]:
             co = x["cost"]                                       # it may not sell before the round ends
         elif x["kind"] == "food":
             co = x["cost"] * min(1.0, h / max(x["life"], 0.1))   # it ages; past its usable life it is lost
         else:
             co = 0.01 * x["cost"] * h / 24                       # storage
-        tail = est.tail(c, h, kmax=x["have"] + min(UNITS_MAX, sum(x["room"].values())))
-        for k in range(x["have"] + 1, len(tail) + 1):
+        tail = model.nb_tail(x["a"], x["b"], h, kmax=x["have"] + x["room"])
+        for k in range(x["have"] + 1, x["have"] + x["room"] + 1):
             pk = tail[k - 1]
             value = pk * x["cu"] - (1 - pk) * co
             if value <= 0:                                       # P_k only falls with k: the rest are worse
                 break
-            out.append((value / x["cost"], value, c, k))
+            out.append((value / x["cost"], value, s, k))
     out.sort(key=lambda u: -u[0])
     return out
 
 
 def allocate(units, cands, room):
-    """Take units from the top while `room` (cash, at the top cost) lasts: {category: new units}."""
+    """Take units from the top while `room` (cash, at the top cost) lasts: {sku: new units}."""
     target = Counter()
-    for _, _, c, _ in units:
-        if cands[c]["worst"] <= room:
-            room -= cands[c]["worst"]
-            target[c] += 1
+    for _, _, s, _ in units:
+        if cands[s]["worst"] <= room:
+            room -= cands[s]["worst"]
+            target[s] += 1
     return target
 
 
@@ -262,50 +261,55 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
             "refunds_expected": round(refunds[0]), "refunds_sd": round(refunds[1]), "cash_to_spend": round(room)}
     if left < policy.LAST_HOURS_BELOW_COST or room <= 0:   # the last hours sell below cost: buy nothing
         return [], dict(plan, target={}, cycle_minutes=None)
-    cands, units, have_sku, by_cat, median, skip = categories(inv, cat, demand, est, p, now)
+    cands, units, have_sku, by_cat, median, skip = candidates(inv, cat, demand, est, p, now)
+    sold = {k for k in have_sku if est.sku_rate(k) > 0 or est.asked_sku.get(k, 0.0) > 0}
     cycle = every_min                                       # refill cycle: start at one window, then settle
+    # P_k looks at most CAP_HOURS[1] ahead: with a line per SKU the mean cycle over all SKUs kept passed 3.5 h
+    # (11-04 11 h, 200 SKUs over 20 lines a window), but the lines go to the best SKUs first, so those are refilled
+    # every window or two; over 3.7 h slow units looked sure to sell and the plan held 37% more units
+    horizon = lambda cyc: min(cyc, 60 * CAP_HOURS[1]) / 60
     for _ in range(5):
-        order = ranked(cands, est, p, cycle / 60, left)
+        order = ranked(cands, p, horizon(cycle), left)
         target = allocate(order, cands, room)
-        keep = len(set(target) | {c for c, x in cands.items() if x["have"]})
+        keep = len(set(target) | sold)                      # a line is one SKU: SKUs to keep refilled
         nxt = math.ceil(max(keep, 1) / lines_w) * every_min
         if nxt == cycle:
             break
         cycle = nxt
     else:                                                   # did not settle: rank once more on the last cycle
-        order = ranked(cands, est, p, cycle / 60, left)
+        order = ranked(cands, p, horizon(cycle), left)
         target = allocate(order, cands, room)
-    # this run: money chose the target (value per won); lines are what this run is short of, so the target's units
-    # go into lines, one SKU each (a category's units spread over its first SKUs), and the lines worth most go first
-    value = {(c, k): v for _, v, c, k in order}
-    lines = {}
-    for c, n in target.items():
-        x = cands[c]
-        slots = [s for s, _ in x["skus"] for _ in range(min(x["room"][s], MAX_QTY))]   # best-selling SKU first
-        for i in range(min(n, len(slots))):
-            k = x["have"] + i + 1
-            sku = slots[i]
-            line = lines.setdefault(sku, {"sku": sku, "qty": 0, "kind": x["kind"], "category": c,
-                                          "worst_cost": x["worst"], "k_first": k, "value": 0.0})
-            line["qty"] += 1
-            line["value"] += value[(c, k)]
+    # this run: money chose the target (value per won); lines are what this run is short of, so the lines worth
+    # most go first
+    value = Counter()
+    for _, v, s, k in order:
+        if k - cands[s]["have"] <= target[s]:
+            value[s] += v
     buy, spent = {}, 0.0
-    for line in sorted(lines.values(), key=lambda l: -l["value"]):
+    for s in sorted(target, key=lambda s: -value[s]):
         if len(buy) >= MAX_LINES:
             break
-        qty = min(line["qty"], int((room - spent) // line["worst_cost"]))
+        x = cands[s]
+        qty = min(target[s], int((room - spent) // x["worst"]))
         if qty <= 0:
             continue
-        buy[line["sku"]] = dict(line, qty=qty, value=round(line["value"] * qty / line["qty"]))
-        spent += qty * line["worst_cost"]
+        buy[s] = {"sku": s, "qty": qty, "kind": x["kind"], "category": x["category"], "worst_cost": x["worst"],
+                  "k_first": x["have"] + 1, "value": round(value[s] * qty / target[s])}
+        spent += qty * x["worst"]
     if left >= p["liquidate_hours"]:
         for w in asked(units, by_cat, median, skip, p, balance, cat, demand, now):
             if len(buy) < MAX_LINES and w["sku"] not in buy and spent + w["worst_cost"] <= room:
                 buy[w["sku"]] = w
                 spent += w["worst_cost"]
-    plan.update(cycle_minutes=round(cycle, 1), target={c: x["have"] + target[c] for c, x in cands.items()
-                                             if x["have"] + target[c] > 0},
-                stocked_categories=sum(1 for x in cands.values() if x["have"]),
+    by_c = Counter()                                        # the manager reads the target per category
+    for k, n in have_sku.items():
+        if k in sold:
+            by_c[cat.get(k, {}).get("category")] += n
+    for s, n in target.items():
+        by_c[cands[s]["category"]] += n
+    by_c.pop(None, None)
+    plan.update(cycle_minutes=round(cycle, 1), target=dict(by_c), target_skus=len(set(target) | sold),
+                stocked_categories=len({u.get("category") for u in units if u.get("sku") in sold}),
                 price_ours_factor=round(est.price_ours, 3), price_market_ratio=round(est.price_market, 3),
                 asked_of_us_per_h={c.split(">")[-1]: round(r, 2) for c, r in sorted(
                     est.asked_rate.items(), key=lambda t: -t[1])[:10]}, close_rate=round(est.p_close, 3),

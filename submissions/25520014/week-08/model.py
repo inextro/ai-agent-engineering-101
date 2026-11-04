@@ -131,6 +131,21 @@ def settled(d):
     return d.get("verified", True) is not False and sku_of(d)
 
 
+def nb_tail(alpha, beta, hours, kmax=40):
+    """[P(at least k sales within `hours`) for k = 1..kmax] when the rate is gamma(alpha, beta per hour): the
+    negative binomial predictive."""
+    if alpha <= 0:
+        return [0.0] * kmax
+    q = beta / (beta + hours)
+    pmf = q ** alpha
+    cdf, out = pmf, []
+    for k in range(kmax):
+        out.append(max(0.0, 1 - cdf))
+        pmf *= (k + alpha) / (k + 1) * (1 - q)
+        cdf += pmf
+    return out
+
+
 class Estimates:
     def __init__(self, db=None, pol=None, now=None, competitors=None, cat=None):
         """competitors: {category: number of other shops holding stock in it}, from GET /api/shops. cat: the kit's
@@ -240,17 +255,23 @@ class Estimates:
         12 h. A SKU we never held has shown nothing and stays at the guess (a1's check, 11-04). Where we sell a SKU
         above our share of its category its cap rises, where below it falls (owner, 11-04 01:30). Settles, not
         agreed talks: of our food deals in 6 h only 125 of 187 were paid."""
+        a, b = self.own_sku_posterior(sku)
+        return a / b
+
+    def own_sku_posterior(self, sku):
+        """(alpha, beta) of own_sku_rate's gamma: alpha discounted settles (plus the guess's), beta hours in stock
+        (plus the guess's SKU_PRIOR_H). restock prices the k-th unit of a SKU with its negative binomial."""
         c = self.cat.get(sku, {}).get("category")
         prior = self.sku_share(c) * self.sku_rate(sku) if c else 0.0
         if self._spans is None:
             self._spans = self._stock_spans()
         spans = self._spans.get(sku)
         if not spans:
-            return prior
+            return SKU_PRIOR_H * prior, SKU_PRIOR_H
         hl = self.p["half_life_h"] * 3600
         exposed = sum(hl / math.log(2) * (0.5 ** ((self.now - b) / hl) - 0.5 ** ((self.now - a) / hl))
                       for a, b in spans) / 3600
-        return (self.w_sku_ours.get(sku, 0.0) + SKU_PRIOR_H * prior) / (exposed + SKU_PRIOR_H)
+        return self.w_sku_ours.get(sku, 0.0) + SKU_PRIOR_H * prior, exposed + SKU_PRIOR_H
 
     def _stock_spans(self):
         """SKU -> the merged time spans we held at least one unit of it: each unit from its supply to its settle or
@@ -329,14 +350,7 @@ class Estimates:
 
     def tail(self, c, hours, kmax=40):
         """[P(we sell at least k in c within `hours`) for k = 1..kmax]: the negative binomial predictive."""
-        r, q = self.alpha[c], self.beta / (self.beta + self.share(c) * hours)
-        pmf = q ** r
-        cdf, out = pmf, []
-        for k in range(kmax):
-            out.append(max(0.0, 1 - cdf))
-            pmf *= (k + r) / (k + 1) * (1 - q)
-            cdf += pmf
-        return out
+        return nb_tail(self.alpha[c], self.beta / self.share(c) if self.share(c) > 0 else 1e12, hours, kmax)
 
     # --- sale prices: the market's ratio per category, times our shop's factor
 
