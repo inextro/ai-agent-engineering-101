@@ -474,7 +474,7 @@ def template(u, m):
     if m.get("opening"):
         return f"{u['name']}: {facts(u, u.get('_warranty'))}. Send your offer as a number. Asking {p}"
     word = "final price" if m["final"] else "we can do better if you raise your offer" if m.get("hold") \
-        else "we can come down"
+        else "we came down"
     return f"{u['name']}: {word}. Asking {p}"
 
 
