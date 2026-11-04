@@ -190,3 +190,8 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   page, inventory.json fields or catalog SKUs to data/alerts.md (owner: detect new rules in real time, report only).
   The surge rule went live at 21:27 and the shop manager first named it at 22:01. Read data/alerts.md at each review
   and name what is new there; it changes nothing by itself.
+- 11-04 23:28 model: our own sales rate per SKU (own_sku_posterior, restock's caps and P_k) forgets with a 1.5 h
+  half-life (OWN_HALF_LIFE_H), not the policy's 24 h; the category share and market rates keep half_life_h. 자코모 4인
+  read 44 an hour at 22 h when we sold 13 (our share fell from 80% to 13% after 19 h). Backtest 12-22 h: deviance
+  2551 -> 2189, predicted 2627 -> 2178 against 2154 sold. Caps that follow the last hours, up and down, are this
+  rule, on purpose.

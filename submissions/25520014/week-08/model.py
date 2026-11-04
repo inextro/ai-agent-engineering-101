@@ -81,6 +81,11 @@ SKU_NEW_AFTER_H = 1.0           # a SKU first supplied this long after the windo
 SKU_NEW_MIN_SALES = 5          # market settles a SKU new to the market needs before restock enters it
 ASKED_RECENT_H = 2.0            # a request we missed lets restock buy a SKU nobody else buys only this long (asked_recent)
 SKU_PRIOR_H = 2.0               # hours the market-based guess of our own sales of a SKU is worth (own_sku_rate)
+OWN_HALF_LIFE_H = 1.5           # own_sku_rate's memory, its sales and its in-stock hours (11-04 23:28). With the
+# policy's half_life_h (24 h) the 자코모 4인 rate read 44 an hour at 22 h when we sold 13: our share fell from 80% to
+# 13% after 19 h (A ran short, kimauve came in cheaper) and 24 h kept the afternoon. Backtest 11-04 12-22 h, next
+# hour of our sales of our top 40 SKUs, prior unchanged: Poisson deviance 2551 at 24 h, 2256 at 3, 2189 at 1.5, 2249
+# at 1; predicted 2627 / 2178 against 2154 sold. The category share and the market rates keep half_life_h.
 
 
 def read_jsonl(path, since):
@@ -176,6 +181,7 @@ class Estimates:
         self.w = defaultdict(float)                           # category -> discounted deals (everyone)
         self.w_ours = defaultdict(float)
         self.w_sku, self.w_sku_ours = defaultdict(float), defaultdict(float)   # the same per SKU (restock's caps)
+        self.w_sku_fast = defaultdict(float)                  # our settles per SKU at OWN_HALF_LIFE_H (own_sku_rate)
         self.watched = watched
         self._spans = None                                     # SKU -> spans we held a unit of it (own_sku_rate)
         self.sales = []                                       # (ts, data) for the manager's summary
@@ -191,6 +197,7 @@ class Estimates:
             if d.get("shop") in mine:
                 self.w_ours[c] += wt
                 self.w_sku_ours[sku_of(d)] += wt
+                self.w_sku_fast[sku_of(d)] += 0.5 ** ((self.now - ts) / (OWN_HALF_LIFE_H * 3600))
             self.sales.append((ts, d))
         # when each SKU first reached the market in the window: a SKU new to the market sold only since then.
         # Supplies before the window leave the SKU at the whole window (sku_rate).
@@ -307,10 +314,10 @@ class Estimates:
         spans = self._spans.get(sku)
         if not spans:
             return SKU_PRIOR_H * prior, SKU_PRIOR_H
-        hl = self.p["half_life_h"] * 3600
+        hl = OWN_HALF_LIFE_H * 3600
         exposed = sum(hl / math.log(2) * (0.5 ** ((self.now - b) / hl) - 0.5 ** ((self.now - a) / hl))
                       for a, b in spans) / 3600
-        return self.w_sku_ours.get(sku, 0.0) + SKU_PRIOR_H * prior, exposed + SKU_PRIOR_H
+        return self.w_sku_fast.get(sku, 0.0) + SKU_PRIOR_H * prior, exposed + SKU_PRIOR_H
 
     def _stock_spans(self):
         """SKU -> the merged time spans we held at least one unit of it: each unit from its supply to its settle or
