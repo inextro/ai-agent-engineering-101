@@ -194,6 +194,16 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   (37.6M at cost) at 23:50, e.g. 자코모 4인 A floor 0.846 -> 0.756 of list against the market's 0.804. Cause:
   22-23 h 자코모 4인 A floor 0.86-0.93, the market's A 0.80-0.81, 92 talks and 4 deals, and restock bought A again
   at 23:05 and 23:22 at its own category price (0.82). Lower prices on these units are this rule, on purpose.
+- 11-05 00:10 model + seller (owner: sell C when we can, at least at cost). Break rates: a break names its unit;
+  model._breaks matched it to the last sale of its (buyer, SKU), so they read A 0.063, B 0.094, C 0.135; matched by
+  unit they are A 0.029, B 0.121, C 0.34 (the market's 11-04 rates: A 0.03, B 0.12, C 0.34). A floors drop about 1%
+  of list, B and C floors under warranty rise (C 0.12 -> 0.24 of list over cost), so more C goes on underwater
+  clearance at the market's price; refunds expected over 6 h 6.4M -> 16.2M, the cash reserve 10.5M -> 23.2M.
+  restock's warranty cost is the supply-mix weighted rate (0.101), not a plain mean of A, B, C. Fallback: a B/C
+  offer the buyer let lapse comes back once when the buyer's number is again at or over it (FALLBACK_MAX 2):
+  11-04 5 talks lost that way (3.5M; e8dec12d 다우닝 3인, the 00:01 report's case).
+- 11-05 00:10 answer to the 23:01 and 00:01 reports: the 22:28 post on G03d0199f (warranty 3.0 h) is
+  dae-yangkim's settle, not ours. Nothing to fix on our side.
 
 ## buyer
 
