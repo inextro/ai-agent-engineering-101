@@ -274,6 +274,14 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   category share gets more units sooner and one we sell below it fewer. Backtest: next-hour sales predicted better
   (log score -1.526 -> -1.445). 6 h offline: book +3~6M, end stock the same. Expect restock lines to lean further
   toward SKUs we already sell well.
+- 11-05 08:40 (no code change). The 08:08 question on Gc1297f36, G8095ddd6, Gb5d0dde7 (market A under our A floor,
+  talks lost 2-3% under the floor): restock bought them as usual candidates, not through the missed-request rule
+  (21 buys in 3 h, none "asked"). Its A cost guess is right on average (A_COST 0.66; A units cost 0.664 of list in
+  the last 6 h) but one A unit costs 0.55-0.78, and the dear ones get a floor over the market's median. That is fine:
+  of 235 goods units with a floor over the market's price on arrival (12 h), 147 sold in their first hour at the
+  usual floor (14.0M more than at 0.97 x market), 54 in 1-3 h, 11 later, 23 held; the market price is a median,
+  so many buyers pay over it. After UW_HELD_H the underwater terms sell at market, never under cost. Keep it; talks
+  lost a little under the floor in a unit's first hour are expected, do not report them.
 
 ## buyer
 
