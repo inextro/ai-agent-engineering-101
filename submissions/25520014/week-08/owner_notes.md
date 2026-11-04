@@ -133,25 +133,6 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   5 closed as C (repeated number 4, yes 1); 2 did not: the buyer went under the C's price, or left. Report a
   c_fallback bug only for a talk whose C offer is after 19:53 (turns ts >= 1793789584). Paid share of fallback C deals
   (2 of 5 at 20:03; non-fallback C 18-20 h: 55%) is judged by the owner at 21 and 22 h; do not report it before.
-
-## buyer
-
-- 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
-  for 6 h. 409 counts over a 6 h window include hours before this change until 13:18.
-- 11-04 10:23 the owner keeps dae-yangkim G6b9db161 (unit u-c3faaaa21dd8) at the end of the list, not skipped: its
-  409s (36 of 42 in 6 h) come only on orders where every other shop gave no quote, so those orders had no other deal,
-  and the pair still paid 11 in 12 h. More 409s in an hour mean more orders ran out of other shops, not a broken
-  rule; do not ask to skip it again. Ask only if it stops paying entirely for 6 h.
-- 11-04 07:29 forum_alerts: "평균 하락" right after a post is usually the newest posts not having their votes yet;
-  the owner reads it and decides (11-04: ignore it when it is that).
-- 11-04 15:30 forum_alerts: "평균 하락" now fires only when the last 2 h of posts average 0.03 under the score.
-  Posts at 6 likes 0 dislikes (Wilson 0.61) are the normal case and the owner ignores them; the old rule fired every
-  hour on them. Report it only when it fires under the new rule.
-- 11-04 17:17 buyer: another shop's quote is named only when it is under every ask THIS shop gave in the talk, not
-  just its current ask. moss-and-oak raised 303,872 -> 339,154 after our first offer, we named lee-sungsoo's 324,608,
-  and it closed at 324,608 (3 such deals, 17:05 report). The receipt was moss-and-oak's own, not mixed up. A receipt
-  above the shop's own lowest ask is still taken while under the cap (24 h: 105 of 2,121 deals, 77만): refusing a
-  closed talk would restart the order and lose some; do not ask for that check unless it passes 30만 an hour.
 - 11-04 20:32 seller B first (B_FIRST): a goods SKU holding B opens on B to a buyer who names no grade and asks for
   no lower one; a buyer who names a grade gets it as before, food is unchanged, C comes by asking or the fallback.
   72% of goods supply is A and best-first left B behind it (자코모 4인 G8ec51935 at 20:11: 13 A, 36 B). Per list
@@ -195,3 +176,29 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   read 44 an hour at 22 h when we sold 13 (our share fell from 80% to 13% after 19 h). Backtest 12-22 h: deviance
   2551 -> 2189, predicted 2627 -> 2178 against 2154 sold. Caps that follow the last hours, up and down, are this
   rule, on purpose.
+- 11-04 23:30 restock: each new unit is priced at the surge it will pay, not the factor now. surge_counts forecasts
+  a SKU's market units in the hour at our purchase (83 s into the window): the ledger's units still in the hour
+  then, plus what other shops bought in the previous window over the same seconds; the j-th new unit costs
+  factor(U + j) (unit_cost), so a surged unit is bought when its value per won still ranks, and a SKU just under 50
+  pays for the units we add. Backtest on the Round 3 ledger (1,081 SKU-windows): factor now MAE 2.26%p, +1.65%p
+  too low; forecast 1.28%p, -0.08%p. Archive older than 2 min: inventory.json `surge` as before. Lower values
+  for surged SKUs are this rule, on purpose (owner, 11-04 23:30).
+
+## buyer
+
+- 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
+  for 6 h. 409 counts over a 6 h window include hours before this change until 13:18.
+- 11-04 10:23 the owner keeps dae-yangkim G6b9db161 (unit u-c3faaaa21dd8) at the end of the list, not skipped: its
+  409s (36 of 42 in 6 h) come only on orders where every other shop gave no quote, so those orders had no other deal,
+  and the pair still paid 11 in 12 h. More 409s in an hour mean more orders ran out of other shops, not a broken
+  rule; do not ask to skip it again. Ask only if it stops paying entirely for 6 h.
+- 11-04 07:29 forum_alerts: "평균 하락" right after a post is usually the newest posts not having their votes yet;
+  the owner reads it and decides (11-04: ignore it when it is that).
+- 11-04 15:30 forum_alerts: "평균 하락" now fires only when the last 2 h of posts average 0.03 under the score.
+  Posts at 6 likes 0 dislikes (Wilson 0.61) are the normal case and the owner ignores them; the old rule fired every
+  hour on them. Report it only when it fires under the new rule.
+- 11-04 17:17 buyer: another shop's quote is named only when it is under every ask THIS shop gave in the talk, not
+  just its current ask. moss-and-oak raised 303,872 -> 339,154 after our first offer, we named lee-sungsoo's 324,608,
+  and it closed at 324,608 (3 such deals, 17:05 report). The receipt was moss-and-oak's own, not mixed up. A receipt
+  above the shop's own lowest ask is still taken while under the cap (24 h: 105 of 2,121 deals, 77만): refusing a
+  closed talk would restart the order and lose some; do not ask for that check unless it passes 30만 an hour.
