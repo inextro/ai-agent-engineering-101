@@ -1,7 +1,7 @@
 """Week 08 clearance: stock bought before the demand fix goes cheaper now, where the market buys it.
 
 Restock bought on a flat demand prior until 11-03 23:55 KST (5b66120) and filled the shelf with categories that hardly
-sell. Unsold stock counts as a total loss at the end and costs 1% of its cost a day in storage, so (owner, 11-04):
+sell. Unsold stock counted as a total loss at the end and costs 1% of its cost a day in storage, so (owner, 11-04):
   - a unit supplied before FIX_TS whose category other shops sell MIN_RATE to MAX_RATE times an hour (real demand,
     competitors to win it from, but not so much that it sells anyway at the usual price) opens at the market's median share of the list price for that category less
     ASK_UNDER, and its floor drops to FLOOR_COST x cost: the next order of that category should find us cheapest;
@@ -43,7 +43,7 @@ FIX_TS = 1793717700       # 11-03 23:55 KST, the demand prior fix went live
 MIN_RATE = 1.0            # other shops' settles per hour in the category: below this, no clearance
 MAX_RATE = 10.0           # above this the category sells anyway at the usual price: no clearance (owner, 11-04)
 ASK_UNDER = 0.05          # open this far under the market's median share of the list price
-FLOOR_COST = 0.90         # floor as a share of the unit's cost
+FLOOR_COST = 1.00         # floor as a share of the unit's cost (0.90 until 11-05, see below)
 STALE_H = 6               # a goods unit held this long is clearance (11-04 16:50)
 MIN_SKU_SETTLES = 3       # other shops' settles of the SKU in the last day for its own median; else the category's
 NO_DATA_ASK = 1.10        # opening ask as a share of cost when nobody sold the SKU or its category in a day
@@ -55,9 +55,13 @@ STUCK_HELD_H = 1          # a unit of a stuck SKU held this long goes on clearan
 STUCK_FLOOR = 0.95        # its floor as a share of its ask (the SKU's market median), never under its cost
 UW_UNDER = 0.01           # an underwater unit opens this far under the market's price for its SKU and grade
 UW_FLOOR = 0.95           # its floor as a share of that ask
-UW_FLOOR_COST = 0.85      # ... never under this share of its cost (owner: a small loss, not any loss)
+UW_FLOOR_COST = 1.00      # ... never under this share of its cost (0.85 until 11-05: a small loss then, a loss in book now)
 UW_HELD_H = 1             # ... and only once held this long (11-05 01:40 review: 66 of 124 underwater opens were
                           # units under 3 h old, some 0.01 h; a fresh unit gets an hour at its usual floor first)
+# 11-05 03:45 KST the board's ALL moved from cash to book (cash + cost of unsold units): a sale under cost now lowers
+# the score by the gap, while an unsold goods unit costs only 1% of its cost a day. FLOOR_COST and UW_FLOOR_COST went
+# 0.90 / 0.85 -> 1.0 (owner, 11-05): clearance still sells cheaper than the usual floor, never under the cost. Food
+# close to its date keeps seller.floor_price's half cost (past its date it leaves the book at its cost).
 REFRESH = 600
 DAY = 86400
 PATH = policy.DATA / "clearance.json"

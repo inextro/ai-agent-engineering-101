@@ -55,7 +55,10 @@ GOODS_ARMS = (0.0, 0.04, 0.08, 0.15)   # 0.0: open at the floor, the old behavio
 def arms(kind):
     """The bandit's arms for a kind: food a share of list (ARMS), goods a premium over the floor (GOODS_ARMS)."""
     return GOODS_ARMS if kind == "goods" else ARMS
-LAST_HOURS_BELOW_COST = 6       # in the last hours the floor may go to half the cost: unsold stock is a total loss
+LAST_HOURS_BELOW_COST = 6       # in the last hours the floor is the cost and restock buys nothing (no margin left to earn).
+# The name is from before 11-05 03:45 KST, when the floor fell to half the cost here: the board's ALL then used cash
+# and unsold stock was a total loss. Since then ALL uses book (cash + cost of unsold units), so a sale under cost
+# lowers the score by the gap and an unsold unit costs only its storage (food: its cost once past its date).
 
 
 def defaults():

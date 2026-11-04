@@ -12,7 +12,8 @@ unit of SKU s, counting the units of it we already hold, is worth
     value_k = P_k x Cu - (1 - P_k) x Co,     P_k = P(we sell at least k of s within T)  (model.nb_tail)
     Cu = expected price - expected cost - warranty premium, of s itself  (expected price: model.price_ratio)
     Co = what an unsold unit costs over T: goods 1% of cost a day; food the share of its usable life T uses up
-         (all of the cost when T is longer); everything at cost once the round's last liquidate_hours begin
+         (all of the cost when T is longer). Until 11-05 03:45 everything was at cost in the round's last
+         liquidate_hours (unsold stock was a total loss); the board now scores book, which keeps unsold units at cost
 P_k comes from our own sales rate of s: a gamma over the hours we held it in stock, around the market's sales of s
 times our share (model.own_sku_posterior), plus the requests for it we missed times our close rate. Buyers order a
 SKU, so each SKU is its own demand; until 11-04 11 h a category had one count of units priced at its best seller,
@@ -419,9 +420,7 @@ def ranked(cands, p, hours, left):
         tail = model.nb_tail(x["a"], x["b"], min(h, x.get("h", h)), kmax=x["have"] + x["room"])
         for k in range(x["have"] + 1, x["have"] + x["room"] + 1):
             cost, _, cu = unit_cost(x, k - x["have"])
-            if left < p["liquidate_hours"]:
-                co = cost                                        # it may not sell before the round ends
-            elif x["kind"] == "food":
+            if x["kind"] == "food":
                 co = cost * min(1.0, h / max(x["life"], 0.1))    # it ages; past its usable life it is lost
             else:
                 co = 0.01 * cost * h / 24                        # storage
@@ -455,7 +454,7 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
     room = balance - reserve
     plan = {"lines_per_window": lines_w, "window_minutes": round(every_min, 1), "reserve": round(reserve),
             "refunds_expected": round(refunds[0]), "refunds_sd": round(refunds[1]), "cash_to_spend": round(room)}
-    if left < policy.LAST_HOURS_BELOW_COST or room <= 0:   # the last hours sell below cost: buy nothing
+    if left < policy.LAST_HOURS_BELOW_COST or room <= 0:   # the last hours sell at cost: buy nothing
         return [], dict(plan, target={}, cycle_minutes=None)
     cands, units, have_sku, by_cat, median, skip = candidates(inv, cat, demand, est, p, now)
     sold = {k for k in have_sku if est.sku_rate(k) > 0 or est.asked_sku.get(k, 0.0) > 0}

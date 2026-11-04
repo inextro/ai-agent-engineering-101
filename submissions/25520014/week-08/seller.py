@@ -24,10 +24,11 @@ Price:
   opening ask  = list price x the arm Thompson sampling picks (0.7/0.8/0.9/1.0, per kind, model.py), cut by
                  c_discount for grade C, never under the floor
   floor        = cost x (1 + min_margin) + warranty premium (break rate of the grade x price), then lower in the
-                 last `liquidate_hours` (down to the cost) and in the last 6 hours (down to half the cost), and for
-                 food close to its date (half the cost: it is thrown away at cost otherwise)
+                 last `liquidate_hours` (down to the cost, reached 6 hours before the end; never under it: since
+                 11-05 03:45 the board scores book, cash + cost of unsold units), and for food close to its date
+                 (half the cost: it is thrown away at cost otherwise)
   clearance    = stock bought before the 11-03 23:55 demand fix, in a category other shops sell 1-10/h (clearance.py):
-                 ask at most the market's median share of list less 0.05, floor at most 0.9 x cost; logged with
+                 ask at most the market's median share of list less 0.05, floor at most the cost; logged with
                  arm "clearance" so the bandit does not learn from it
   an offer at or above the current ask closes at the ask (more is a misreading: "2 for 50000"). Below it the shop counters: each counter moves a
   1 / (counters left) share of the way from the ask down to max(floor, offer); after `max_concessions` counters
@@ -604,11 +605,9 @@ def floor_price(u, p, warranty, est_price):
     premium = BREAK.get(u.get("grade"), max(BREAK.values())) * est_price if warranty else 0
     floor = cost * (1 + p["min_margin"]) + premium
     left = policy.hours_left()
-    if left < policy.LAST_HOURS_BELOW_COST:
-        floor = 0.5 * cost
-    elif left < p["liquidate_hours"]:
+    if left < p["liquidate_hours"]:       # toward the cost, never under it (book scoring, 11-05 03:45)
         span = p["liquidate_hours"] - policy.LAST_HOURS_BELOW_COST
-        frac = (left - policy.LAST_HOURS_BELOW_COST) / span
+        frac = max(0.0, (left - policy.LAST_HOURS_BELOW_COST) / span)
         floor = cost + (floor - cost) * frac
     if u.get("kind") == "food" and u.get("expires_at") and u["expires_at"] - time.time() < 3 * 3600:
         floor = min(floor, 0.5 * cost)
