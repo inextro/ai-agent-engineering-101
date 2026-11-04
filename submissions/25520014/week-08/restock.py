@@ -86,6 +86,9 @@ CAP_FLOOR = 3                                   # units a SKU may hold below the
 # holds 9 goods units (4M, 0.1 h of its sales) and sells grades as supplied (71/20/9%); we held 314 (186M, 3 h) and
 # sold 80/14/6%. Offline 6 h with grades, paid shares and the B/C fallbacks: board +144-154M (1 h) -> +220-250M,
 # stock 129-131M -> 34-44M, gross 110-123M -> 101-121M. A fast SKU out for the minutes a late window adds is the price.
+SHORTAGE_ENTRY = True                           # model.shortage(): enter without the unproven wait, demand floor
+SHORT_W_H = model.SHORT_W_H                     # sku_demand: an equal share of the last hour among its suppliers + us
+SHORT_COVER_H = 1.0                             # a short SKU's cap: this many hours of its demand to us
 GRADE_CAP = False                               # a goods SKU's B and C count only up to their share of its cap
 GRADE_SHARE_H = 6                               # our goods settles this recent give the grade shares
 # 11-04 21:15, offline only, not deployed (off): the seller sells the best grade first, so the cap filled with B and C left no room for A: 자코모 4인
@@ -210,7 +213,14 @@ def sku_demand(est, sku):
     when the SKU runs out, so a cap built on them stayed low: 300 of 311 requests we missed in 3 h (11-04 04-07 h)
     were SKUs we stock, mattress G1515d951 54 of them."""
     asked = est.asked_sku.get(sku, 0.0) / est.watched if est.watched > 0 else 0.0
-    return est.own_sku_rate(sku) + asked * est.p_close
+    rate = est.own_sku_rate(sku) + asked * est.p_close
+    short = est.shortage().get(sku) if SHORTAGE_ENTRY else None
+    if short:
+        # sells as fast as it arrives (model.shortage): an equal share of the last hour's sales among the shops
+        # that supplied it and us, at least. A SKU we never held reads only its prior (category share x market
+        # rate over 24 h), 라클라우드 퀸 0.1 x 15 an hour while it sold 70 (11-04 20 h)
+        rate = max(rate, short["sold"] / (short["shops"] + 1) / SHORT_W_H)
+    return rate
 
 
 def cap_hours():
@@ -354,8 +364,8 @@ def candidates(inv, cat, demand, est, p, now):
         asked = s in est.asked_recent                   # a request we missed in the last 2 h (model.ASKED_RECENT_H)
         if est.sku_rate(s) <= 0 and not asked:
             continue                                    # nobody buys it (11-04: 255 of 415 fruit sales one box)
-        if not asked and not have_sku.get(s) and est.unproven(s):
-            continue                                    # new to the market: wait for its first sales
+        if not asked and not have_sku.get(s) and est.unproven(s) and not (SHORTAGE_ENTRY and s in est.shortage()):
+            continue                                    # new to the market: wait for its first sales (not when short)
         rate = sku_demand(est, s)
         # continuous since 11-05 01:00: min(cap_h of demand, max(CAP_FLOOR, FAST_COVER_H of demand)); fast (a line
         # every window, P_k over FAST_COVER_H) once FAST_COVER_H of demand reaches CAP_FLOOR
@@ -363,6 +373,10 @@ def candidates(inv, cat, demand, est, p, now):
         cap = math.ceil(min(rate * cap_h, max(CAP_FLOOR, rate * FAST_COVER_H)) - 1e-9)
         if asked:
             cap = max(cap, 1)                           # a buyer asked us for it
+        if SHORTAGE_ENTRY and s in est.shortage():
+            # sells as it arrives: an hour of its demand to us (11-04 top 30: a short SKU-hour was followed by a
+            # saturated one 0% of the time, by another short one 72%)
+            cap = max(cap, math.ceil(rate * SHORT_COVER_H - 1e-9))
         have = count_sku.get(s, 0)
         if share and kind == "goods":
             g = by_grade.get(s, Counter())

@@ -86,7 +86,15 @@ OWN_HALF_LIFE_H = 1.0           # own_sku_rate's memory, its sales and its in-st
 # 13% after 19 h (A ran short, kimauve came in cheaper) and 24 h kept the afternoon. Backtest 11-04 12-22 h, next
 # hour of our sales of our top 40 SKUs, prior unchanged: Poisson deviance 2551 at 24 h, 2256 at 3, 2189 at 1.5, 2249
 # at 1; predicted 2627 / 2178 against 2154 sold. The category share and the market rates keep half_life_h.
-RECENT_W = 0.5                  # own_sku_rate leans this much on our settles of the SKU in the last hour (11-05 00:45),
+SHORT_W_H = 1.0                 # shortage(): the window a SKU's market supply and sales are compared over
+SHORT_MIN_SOLD = 3              # settles of the SKU in that window, all shops
+SHORT_SELL_THROUGH = 0.85       # sold / (market stock at the window's start + supplied in it)
+SHORT_STOCK_FRAC = 0.2          # market stock at the start at most max(2, this x sold)
+# A SKU that sells as fast as it arrives is short of supply: its sales are the supply, not the demand. 11-04 top 30
+# SKUs by amount, hour by hour: 99 such SKU-hours (1,963 sold), we held the SKU in 29% of them against 95% of the
+# 237 saturated hours, and the state held into the next hour 72% of the time (saturated 90%). 라클라우드 퀸 sold 15
+# an hour with 2 shops and 70 with 10, all it was supplied; we entered at 19 h, 7 h after (unproven, value ranking).
+RECENT_W = 0.5                 # own_sku_rate leans this much on our settles of the SKU in the last hour (11-05 00:45),
 RECENT_MIN = 5                  # when the market settled it this many times in that hour and we held it 0.5 h of it.
 # A share lost shows within the hour: 자코모 4인 read 29/h at 23 h when we sold 1. Backtest 11-04 12-23 h (top 40
 # SKUs, 421 SKU-hours, next hour's settles over its in-stock time): Poisson deviance 2389 (1.5 h) -> 1918 with 1.0 h
@@ -334,6 +342,44 @@ class Estimates:
             if held >= 0.5:                       # the same spread (b), its mean moved toward the last hour
                 a = (RECENT_W * self.n1_ours.get(sku, 0) + (1 - RECENT_W) * a / b) * b
         return a, b
+
+    def shortage(self):
+        """SKUs short of supply in the market's last SHORT_W_H: {sku: {"sold", "supplied", "stock0", "shops"}}, the
+        shops being those that supplied it in the window. Market stock is every shop's supplies less its settles and
+        expiries since the round began, from the ledger."""
+        if getattr(self, "_short", None) is not None:
+            return self._short
+        start = round_start(self.db) or 0
+        w0 = self.now - SHORT_W_H * 3600
+        stock0, sup, sold, shops = defaultdict(int), defaultdict(int), defaultdict(int), defaultdict(set)
+        for ts, d in entries(self.db, "supply", start):
+            s, n = d.get("sku"), len(d.get("units") or []) or d.get("qty") or 0
+            if not s or ts >= self.now:
+                continue
+            if ts < w0:
+                stock0[s] += n
+            else:
+                sup[s] += n
+                shops[s].add(d.get("shop"))
+        for ts, d in entries(self.db, "settle", start):
+            s = sku_of(d)
+            if ts < w0:
+                stock0[s] -= 1
+            elif ts < self.now:
+                sold[s] += 1
+        for ts, d in entries(self.db, "expire", start):
+            if ts < w0:
+                for s in d.get("skus") or []:
+                    stock0[s] -= 1
+        out = {}
+        for s, n in sold.items():
+            s0 = max(stock0.get(s, 0), 0)
+            avail = s0 + sup.get(s, 0)
+            if (n >= SHORT_MIN_SOLD and avail > 0 and n / avail >= SHORT_SELL_THROUGH
+                    and s0 <= max(2, SHORT_STOCK_FRAC * n)):
+                out[s] = {"sold": n, "supplied": sup.get(s, 0), "stock0": s0, "shops": len(shops.get(s, ()))}
+        self._short = out
+        return out
 
     def _stock_spans(self):
         """SKU -> the merged time spans we held at least one unit of it: each unit from its supply to its settle or
