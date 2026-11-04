@@ -76,6 +76,9 @@ SKU_IN_TEXT = re.compile(r"\bG[0-9a-f]{8}\b")
 P_CLOSE_DEFAULT = 0.5           # share of our talks that end in a deal, until 20 talks in 6 h measure it
 SKU_SHARE_DEFAULT = 0.3         # our share of a SKU's sales until we sold 2 (discounted) of the SKUs we held
 SKU_SHARE_MIN_W = 2.0
+SKU_NEW_MIN_H = 0.5             # a SKU new to the market counts at least this many hours (sku_rate): 1 sale in 5 min is not 12/h
+SKU_NEW_AFTER_H = 1.0           # a SKU first supplied this long after the window opens is new to the market
+SKU_NEW_MIN_SALES = 5          # market settles a SKU new to the market needs before restock enters it
 SKU_PRIOR_H = 2.0               # hours the market-based guess of our own sales of a SKU is worth (own_sku_rate)
 
 
@@ -188,6 +191,14 @@ class Estimates:
                 self.w_ours[c] += wt
                 self.w_sku_ours[sku_of(d)] += wt
             self.sales.append((ts, d))
+        # when each SKU first reached the market in the window: a SKU new to the market sold only since then.
+        # Supplies before the window leave the SKU at the whole window (sku_rate).
+        self.first_supply = {}
+        for ts, d in entries(self.db, "supply", self.now - horizon):
+            s = d.get("sku")
+            if s and s not in self.first_supply:
+                self.first_supply[s] = ts
+        self._hl, self._horizon = hl, horizon
         # the prior from the market itself: the spread of the categories' observed rates (empirical Bayes).
         # A gamma with that mean and variance is worth mean / variance hours; demand is skewed (mattresses near
         # 200 deals an hour, air conditioners none), so it is worth minutes and each category's own count decides.
@@ -233,8 +244,30 @@ class Estimates:
     def sku_rate(self, sku):
         """The market's discounted sales of one SKU per hour (all shops). Buyers settle on few SKUs of a category
         (11-04: 255 of 415 fresh fruit sales one 10 kg apple box, none for the 3.5 kg box we bought at the median
-        price), so restock picks SKUs by this and caps each by it."""
-        return self.w_sku.get(sku, 0.0) / self.watched if self.watched > 0 else 0.0
+        price), so restock picks SKUs by this and caps each by it. The hours are those since the SKU first reached
+        the market (any shop's supply), at least SKU_NEW_MIN_H: until 11-04 13 h they were the whole window, so
+        sofas and beds of 1-2M won first supplied at 11 h (yms979) read 1.5 an hour against about 11 sold, and
+        dae-yangkim sold 57 of them in 2 h to our 3."""
+        if self.watched <= 0:
+            return 0.0
+        return self.w_sku.get(sku, 0.0) / self.sku_hours(sku)
+
+    def unproven(self, sku):
+        """A SKU new to the market (first supplied inside the window) that the market has not yet settled
+        SKU_NEW_MIN_SALES of: restock waits for sales before it enters (owner, 11-04 13 h)."""
+        first = self.first_supply.get(sku)
+        start = self.now - self._horizon
+        new = first is not None and first - start > SKU_NEW_AFTER_H * 3600   # not one of the round's opening SKUs
+        return new and self.w_sku.get(sku, 0.0) < SKU_NEW_MIN_SALES
+
+    def sku_hours(self, sku):
+        """Discounted hours a SKU has been on the market in the window (the whole window if supplied before it)."""
+        first = self.first_supply.get(sku)
+        if first is None or self.now - first >= self._horizon:
+            return self.watched
+        age = max(self.now - first, SKU_NEW_MIN_H * 3600)
+        hl = self._hl
+        return min(self.watched, hl / math.log(2) * (1 - 0.5 ** (age / hl)) / 3600)
 
     def sku_share(self, c):
         """Our share of the sales of the SKUs of c that we sold: where we stocked a SKU, what part of its sales we

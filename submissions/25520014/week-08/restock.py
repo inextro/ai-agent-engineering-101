@@ -195,6 +195,8 @@ def candidates(inv, cat, demand, est, p, now):
         asked = est.asked_sku.get(s, 0.0)
         if est.sku_rate(s) <= 0 and asked <= 0:
             continue                                    # nobody buys it (11-04: 255 of 415 fruit sales one box)
+        if asked <= 0 and not have_sku.get(s) and est.unproven(s):
+            continue                                    # new to the market: wait for its first sales
         rate = sku_demand(est, s)
         cap = math.ceil(rate * cap_h - 1e-9)
         if asked > 0:
