@@ -64,6 +64,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   (4만). Deals a little under the floor after 13:24 are this rule, on purpose; the owner may raise it to 2%.
 - 11-04 13:24 forum: a complaint that cites one of our settles but names only another shop is not ours and stays
   off the list (post 3967 was about dragonash's 3 h warranty).
+- 11-04 13:48 seller: among units of one SKU and grade the cheapest goods unit is offered first, and its floor is
+  the mean cost of the units of that SKU and grade we hold (x 1.08 + the warranty premium), not its own cost. A deal
+  a little under one unit's own-cost floor is this rule, on purpose; the SKU and grade as a whole stays above cost.
+- 11-04 13:48 restock: a request we missed makes restock keep at least one unit of a SKU only for 2 h after it.
+- 11-04 13:48 lost talks where the buyer's number was at or over our floor (10:23-13:48: 20, 110만): we were still
+  stepping down. Closing at such an offer within 3/5/10% of our price would win 4/11/13 of them but give up
+  41/59/118만 on 99/117/130 deals the buyer later raised into: no change; do not ask to close at the buyer's offer.
 - 11-04 11:16 seller: when the unit is swapped for another (taken by a parallel talk) the reply keeps the opening
   wording, or says "this unit's price"; "we came down" on a first reply (5ffb5c63) is fixed.
 
