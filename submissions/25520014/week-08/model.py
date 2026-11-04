@@ -81,11 +81,17 @@ SKU_NEW_AFTER_H = 1.0           # a SKU first supplied this long after the windo
 SKU_NEW_MIN_SALES = 5          # market settles a SKU new to the market needs before restock enters it
 ASKED_RECENT_H = 2.0            # a request we missed lets restock buy a SKU nobody else buys only this long (asked_recent)
 SKU_PRIOR_H = 2.0               # hours the market-based guess of our own sales of a SKU is worth (own_sku_rate)
-OWN_HALF_LIFE_H = 1.5           # own_sku_rate's memory, its sales and its in-stock hours (11-04 23:28). With the
+OWN_HALF_LIFE_H = 1.0           # own_sku_rate's memory, its sales and its in-stock hours (11-04 23:28; 1.0 from 11-05 00:45). With the
 # policy's half_life_h (24 h) the 자코모 4인 rate read 44 an hour at 22 h when we sold 13: our share fell from 80% to
 # 13% after 19 h (A ran short, kimauve came in cheaper) and 24 h kept the afternoon. Backtest 11-04 12-22 h, next
 # hour of our sales of our top 40 SKUs, prior unchanged: Poisson deviance 2551 at 24 h, 2256 at 3, 2189 at 1.5, 2249
 # at 1; predicted 2627 / 2178 against 2154 sold. The category share and the market rates keep half_life_h.
+RECENT_W = 0.5                  # own_sku_rate leans this much on our settles of the SKU in the last hour (11-05 00:45),
+RECENT_MIN = 5                  # when the market settled it this many times in that hour and we held it 0.5 h of it.
+# A share lost shows within the hour: 자코모 4인 read 29/h at 23 h when we sold 1. Backtest 11-04 12-23 h (top 40
+# SKUs, 421 SKU-hours, next hour's settles over its in-stock time): Poisson deviance 2389 (1.5 h) -> 1918 with 1.0 h
+# and 0.5 of the last hour, predicted 2290 -> 2252 against 2258; SKUs that gained 849 -> 1039 (1685 sold), lost
+# 1441 -> 1213 (573). The last hour alone: 3325; 0.7 of it 1809 but +3.5% bias; the prior share at 3 h adds little.
 
 
 def read_jsonl(path, since):
@@ -182,6 +188,7 @@ class Estimates:
         self.w_ours = defaultdict(float)
         self.w_sku, self.w_sku_ours = defaultdict(float), defaultdict(float)   # the same per SKU (restock's caps)
         self.w_sku_fast = defaultdict(float)                  # our settles per SKU at OWN_HALF_LIFE_H (own_sku_rate)
+        self.n1_all, self.n1_ours = defaultdict(int), defaultdict(int)   # settles per SKU in the last hour (RECENT_W)
         self.watched = watched
         self._spans = None                                     # SKU -> spans we held a unit of it (own_sku_rate)
         self.sales = []                                       # (ts, data) for the manager's summary
@@ -198,6 +205,10 @@ class Estimates:
                 self.w_ours[c] += wt
                 self.w_sku_ours[sku_of(d)] += wt
                 self.w_sku_fast[sku_of(d)] += 0.5 ** ((self.now - ts) / (OWN_HALF_LIFE_H * 3600))
+            if ts >= self.now - 3600:
+                self.n1_all[sku_of(d)] += 1
+                if d.get("shop") in mine:
+                    self.n1_ours[sku_of(d)] += 1
             self.sales.append((ts, d))
         # when each SKU first reached the market in the window: a SKU new to the market sold only since then.
         # Supplies before the window leave the SKU at the whole window (sku_rate).
@@ -317,7 +328,12 @@ class Estimates:
         hl = OWN_HALF_LIFE_H * 3600
         exposed = sum(hl / math.log(2) * (0.5 ** ((self.now - b) / hl) - 0.5 ** ((self.now - a) / hl))
                       for a, b in spans) / 3600
-        return self.w_sku_fast.get(sku, 0.0) + SKU_PRIOR_H * prior, exposed + SKU_PRIOR_H
+        a, b = self.w_sku_fast.get(sku, 0.0) + SKU_PRIOR_H * prior, exposed + SKU_PRIOR_H
+        if RECENT_W and self.n1_all.get(sku, 0) >= RECENT_MIN:
+            held = sum(max(0.0, min(y, self.now) - max(x, self.now - 3600)) for x, y in spans) / 3600
+            if held >= 0.5:                       # the same spread (b), its mean moved toward the last hour
+                a = (RECENT_W * self.n1_ours.get(sku, 0) + (1 - RECENT_W) * a / b) * b
+        return a, b
 
     def _stock_spans(self):
         """SKU -> the merged time spans we held at least one unit of it: each unit from its supply to its settle or

@@ -76,6 +76,12 @@ CAP_HOURS = (1.0, 2.0)                          # a SKU's units: its demand to u
 # than it gained (owner, 11-04 19:09).
 FAST_RATE = 3.0                                 # demand to us per hour (sku_demand)
 FAST_COVER_H = 0.34                             # one supply window (20 min, 16-24 min measured)
+CAP_FLOOR = 3                                   # units a SKU may hold below the fast cover (owner, 11-05 01:00).
+# With FAST_RATE as a cliff, a SKU just under 3/h held 2 h of demand (6 units) and one just over 0.34 h (2): the
+# demand fix moved 시몬스 퀸 3.61 -> 2.65/h and its cap 2 -> 6, the next buy 5.8M -> 11.0M. Offline 6 h (3 seeds,
+# true demand = new model): cliff + old model gross 68.2M, board +142.8M, stock 56.6M; cliff + new model 65.6M,
+# +137.7M, 59.0M; continuous floor 2: 69.8M, +165.7M, 35.2M; floor 3: 74.7M, +161.2M, 44.6M, fewest stockouts
+# (true demand = old model: floor 3 81.9M / +171.3M against the cliff's 77.3M / +157.3M). FAST_RATE is unused.
 # 1.0 from 19:09, 0.34 from 11-04 21:25 (owner: recover cash first). A deep stock sells A and leaves B and C: dae-yangkim
 # holds 9 goods units (4M, 0.1 h of its sales) and sells grades as supplied (71/20/9%); we held 314 (186M, 3 h) and
 # sold 80/14/6%. Offline 6 h with grades, paid shares and the B/C fallbacks: board +144-154M (1 h) -> +220-250M,
@@ -351,8 +357,10 @@ def candidates(inv, cat, demand, est, p, now):
         if not asked and not have_sku.get(s) and est.unproven(s):
             continue                                    # new to the market: wait for its first sales
         rate = sku_demand(est, s)
-        fast = rate >= FAST_RATE
-        cap = math.ceil(rate * (min(cap_h, FAST_COVER_H) if fast else cap_h) - 1e-9)
+        # continuous since 11-05 01:00: min(cap_h of demand, max(CAP_FLOOR, FAST_COVER_H of demand)); fast (a line
+        # every window, P_k over FAST_COVER_H) once FAST_COVER_H of demand reaches CAP_FLOOR
+        fast = rate * FAST_COVER_H >= CAP_FLOOR
+        cap = math.ceil(min(rate * cap_h, max(CAP_FLOOR, rate * FAST_COVER_H)) - 1e-9)
         if asked:
             cap = max(cap, 1)                           # a buyer asked us for it
         have = count_sku.get(s, 0)
