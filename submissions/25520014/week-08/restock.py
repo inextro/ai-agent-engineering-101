@@ -88,6 +88,18 @@ GRADE_SHARE_H = 6                               # our goods settles this recent 
 # so a B or C unit beyond that share of the cap is not stock an A buyer can use. The B and C fallbacks sell them.
 # Rejected offline (6 h, 3 seeds, live restock.decide with grades): A of 자코모 4인 34 -> 38 an hour, but every
 # line bought for A brings 28% B and C, so stock 124-140M -> 222-224M and board +158M -> +62M.
+# Surge (agent.md, 11-04 21:27): a SKU's units past SURGE_FREE in the market's last hour each add SURGE_STEP to its
+# cost, up to SURGE_MAX. inventory.json `surge` is the factor now, but we buy later in the window and others buy
+# before us; the units bought an hour earlier leave the count meanwhile (windows are 20 min apart, so the window three
+# back leaves while this one is open). Forecast U at our purchase (surge_counts) = units still in the hour then +
+# what other shops bought in the previous window over the same seconds; the j-th new unit pays factor(U + j).
+# Backtest on the Round 3 ledger (1,081 SKU-windows, a purchase 83 s into the window, owner 11-04 23:30):
+# factor now MAE 2.26%p, bias +1.65%p (too low); this forecast MAE 1.28%p, bias -0.08%p.
+SURGE_FREE, SURGE_STEP, SURGE_MAX = 50, 0.002, 1.5
+SURGE_WINDOW = 3600
+SUPPLY_OPEN_S = 180                             # a window stays open 3 minutes
+BUY_OFFSET = 83                                 # our supply lands this many seconds into a window (median, 11-04)
+SURGE_STALE = 120                               # archive older than this: fall back to inventory.json `surge`
 
 
 def window_shut(inv, now):
@@ -208,6 +220,69 @@ def grade_shares(est, cat, now):
     return {g: max(c[g] / n if n else 0.0, 0.02) for g in "BC"}
 
 
+def surge_factor(u):
+    """The cost factor of a unit that is the u-th of its SKU in the market's last hour."""
+    return min(SURGE_MAX, 1 + SURGE_STEP * max(0, u - SURGE_FREE))
+
+
+def window_open_at(inv, now):
+    """When the current supply window opened, or the next one opens (inventory.json `restock`)."""
+    r = inv.get("restock") or {}
+    at, close = r.get("opens_at"), r.get("closes_at")
+    at = at / 1000 if at and at > 1e12 else at
+    close = close / 1000 if close and close > 1e12 else close
+    if close and close - SUPPLY_OPEN_S <= now < close:
+        return close - SUPPLY_OPEN_S
+    return at or now
+
+
+def surge_counts(inv, now, db=None):
+    """sku -> the market's units of it in the last hour at our purchase, forecast: the units still in the hour then
+    (the ledger up to now, less those older than an hour by then) + what other shops bought in the previous window
+    over the same seconds of it. Falls back to inventory.json `surge` when the archive is stale or unreadable."""
+    fallback = {x["sku"]: x.get("units") or 0 for x in (inv.get("surge") or []) if x.get("sku")}
+    own = db is None
+    try:
+        db = db or model.connect()
+        last = db.execute("SELECT MAX(ts) FROM ledger").fetchone()[0] or 0
+        if now - last > SURGE_STALE:
+            return fallback
+        t_open = window_open_at(inv, now)
+        t_buy = max(t_open + BUY_OFFSET, now + 10)
+        off = t_buy - t_open
+        rows = [(ts, d) for ts, d in model.entries(db, "supply", min(t_buy - SURGE_WINDOW, t_open - 1800))]
+        u = Counter()
+        for ts, d in rows:
+            if t_buy - SURGE_WINDOW <= ts <= now:
+                u[d.get("sku")] += d.get("qty") or 1
+        starts, prev_ts = [], None                       # windows before this one: runs of supply 5+ min apart
+        for ts, _ in rows:
+            if ts >= t_open - 60:
+                break
+            if prev_ts is None or ts - prev_ts > RUN_GAP:
+                starts.append(ts)
+            prev_ts = ts
+        if starts and starts[-1] >= t_open - 1800:
+            a, b = starts[-1] + max(0.0, now - t_open), starts[-1] + off
+            for ts, d in rows:
+                if a <= ts < b and d.get("shop") != model.SHOP_NAME:
+                    u[d.get("sku")] += d.get("qty") or 1
+        u.pop(None, None)
+        return dict(u)
+    except Exception:
+        return fallback
+    finally:
+        if own and db is not None:
+            db.close()
+
+
+def unit_cost(x, j):
+    """(expected cost, top cost, margin) of the j-th new unit of a candidate SKU (j = 1 for the next one bought)."""
+    f = surge_factor(x["surge_u"] + j)
+    cost = x["base_cost"] * f
+    return cost, x["base_worst"] * f, x["price"] - cost - x["warranty"]
+
+
 def candidates(inv, cat, demand, est, p, now):
     """What each SKU's units are worth, before the horizon: {sku: facts}. Each SKU is its own demand (buyers order
     a SKU, and those of a quilt are not those of a sheet): its rate is our posterior for it (model.own_sku_posterior,
@@ -238,14 +313,16 @@ def candidates(inv, cat, demand, est, p, now):
     if p["warranty_hours"] > 0:
         rates = [est.break_rate[g] for g in "ABC" if p[f"warranty_{g}"]]
         warranty_rate = sum(rates) / len(rates) if rates else 0.0
-    # 11-04 21:27 rule: past 50 units of a SKU in the market's last hour, each unit adds 0.2% to its cost, up to +50%
-    # (inventory.json `surge`). Costs here were list x COST_SHARE, so a surged SKU looked cheaper than it was
-    # (지누스 그린티 x1.23 makes an A cost about its market price, 0.73 of list).
-    surge = {x["sku"]: x["factor"] for x in (inv.get("surge") or []) if x.get("factor")}
+    # 11-04 21:27 rule: past 50 units of a SKU in the market's last hour, each unit adds 0.2% to its cost, up to +50%.
+    # Costs here were list x COST_SHARE, so a surged SKU looked cheaper than it was (지누스 그린티 x1.23 makes an A
+    # cost about its market price, 0.73 of list). 22:41: x inventory.json `surge` now; 11-04 23:30: each new unit at
+    # the forecast count at our purchase (surge_counts, unit_cost), so a surged unit is bought when it still pays.
+    counts = surge_counts(inv, now, getattr(est, "db", None))
     out = {}
     for s, x in cat.items():
         c, lp, kind = x["category"], x["list_price"], x["kind"]
-        f = surge.get(s, 1.0)
+        surge_u = counts.get(s, 0)
+        f = surge_factor(surge_u + 1)                   # the next unit; later ones cost more (unit_cost)
         if c in skip or WORST_COST * lp * f > unit_cap:
             continue
         asked = s in est.asked_recent                   # a request we missed in the last 2 h (model.ASKED_RECENT_H)
@@ -265,13 +342,17 @@ def candidates(inv, cat, demand, est, p, now):
         room = min(cap - have, MAX_QTY)
         if room <= 0:
             continue
-        price, cost = est.price_ratio(c) * lp, COST_SHARE[kind] * lp * f
-        cu = price - cost - (warranty_rate * price if kind == "goods" else 0.0)
+        price = est.price_ratio(c) * lp
+        warranty = warranty_rate * price if kind == "goods" else 0.0
+        cost = COST_SHARE[kind] * lp * f
+        cu = price - cost - warranty
         if cu <= 0:
             continue
         a, b = est.own_sku_posterior(s)
         a += (rate - est.own_sku_rate(s)) * b           # the missed requests, at the same weight
         out[s] = {"kind": kind, "category": c, "lp": lp, "cost": cost, "worst": WORST_COST * lp * f, "cu": cu,
+                  "price": price, "warranty": warranty, "base_cost": COST_SHARE[kind] * lp,
+                  "base_worst": WORST_COST * lp, "surge_u": surge_u,
                   "life": FOOD_LIFE * (x.get("shelf_hours") or 24) if kind == "food" else None,
                   "have": have, "room": room, "a": a, "b": b}
         if fast:
@@ -283,33 +364,35 @@ def ranked(cands, p, hours, left):
     """Every unit with a positive value over a refill cycle of `hours`: [(value per won, value, sku, k)]. The k-th
     unit of a SKU is worth P(it sells by the next refill) x its margin - P(not) x what holding it costs, per won of
     its cost: the profit a won tied up in it earns per cycle, so a unit that sells late (slow turnover) is worth less
-    than one that sells at once."""
+    than one that sells at once. Each new unit pays its own surge (unit_cost)."""
     h = min(hours, left)
     out = []
     for s, x in cands.items():
-        if left < p["liquidate_hours"]:
-            co = x["cost"]                                       # it may not sell before the round ends
-        elif x["kind"] == "food":
-            co = x["cost"] * min(1.0, h / max(x["life"], 0.1))   # it ages; past its usable life it is lost
-        else:
-            co = 0.01 * x["cost"] * h / 24                       # storage
         tail = model.nb_tail(x["a"], x["b"], min(h, x.get("h", h)), kmax=x["have"] + x["room"])
         for k in range(x["have"] + 1, x["have"] + x["room"] + 1):
+            cost, _, cu = unit_cost(x, k - x["have"])
+            if left < p["liquidate_hours"]:
+                co = cost                                        # it may not sell before the round ends
+            elif x["kind"] == "food":
+                co = cost * min(1.0, h / max(x["life"], 0.1))    # it ages; past its usable life it is lost
+            else:
+                co = 0.01 * cost * h / 24                        # storage
             pk = tail[k - 1]
-            value = pk * x["cu"] - (1 - pk) * co
-            if value <= 0:                                       # P_k only falls with k: the rest are worse
+            value = pk * cu - (1 - pk) * co
+            if value <= 0:                      # P_k only falls with k and the cost only rises: the rest are worse
                 break
-            out.append((value / x["cost"], value, s, k))
+            out.append((value / cost, value, s, k))
     out.sort(key=lambda u: -u[0])
     return out
 
 
 def allocate(units, cands, room):
-    """Take units from the top while `room` (cash, at the top cost) lasts: {sku: new units}."""
+    """Take units from the top while `room` (cash, at the top cost with its surge) lasts: {sku: new units}."""
     target = Counter()
-    for _, _, s, _ in units:
-        if cands[s]["worst"] <= room:
-            room -= cands[s]["worst"]
+    for _, _, s, k in units:
+        top = unit_cost(cands[s], k - cands[s]["have"])[1]
+        if top <= room:
+            room -= top
             target[s] += 1
     return target
 
@@ -355,12 +438,18 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
         if len(buy) >= MAX_LINES:
             break
         x = cands[s]
-        qty = min(target[s], int((room - spent) // x["worst"]))
+        qty, top = 0, 0.0                                   # units at their top cost, each with its own surge
+        while qty < target[s]:
+            w = unit_cost(x, qty + 1)[1]
+            if spent + top + w > room:
+                break
+            qty, top = qty + 1, top + w
         if qty <= 0:
             continue
-        buy[s] = {"sku": s, "qty": qty, "kind": x["kind"], "category": x["category"], "worst_cost": x["worst"],
-                  "k_first": x["have"] + 1, "value": round(value[s] * qty / target[s])}
-        spent += qty * x["worst"]
+        buy[s] = {"sku": s, "qty": qty, "kind": x["kind"], "category": x["category"], "worst_cost": round(top / qty),
+                  "k_first": x["have"] + 1, "value": round(value[s] * qty / target[s]),
+                  "surge_u": x["surge_u"], "surge_last": round(surge_factor(x["surge_u"] + qty), 3)}
+        spent += top
     if left >= p["liquidate_hours"]:
         for w in asked(units, by_cat, median, skip, p, balance, cat, demand, now):
             if len(buy) < MAX_LINES and w["sku"] not in buy and spent + w["worst_cost"] <= room:
