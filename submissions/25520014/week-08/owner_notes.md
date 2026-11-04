@@ -59,6 +59,11 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   candidate only after 5 market settles (unless a buyer asked us for it or we hold it). High-end furniture (cost
   0.7M to 1.6M, from 11:02) was undercounted 6 to 10 times and we sold 3 of it in 3 h against dae-yangkim's 57.
   More high-priced SKUs and a larger stock at cost after 13:12 are this change, on purpose; the owner watches it.
+- 11-04 13:24 seller: once the price is final, an offer up to 1% under the floor closes (FLOOR_TOL, never under
+  the cost). 16 h of talks: 22 walked in that band (59만 margin), 30 deals at the floor had such an offer before
+  (4만). Deals a little under the floor after 13:24 are this rule, on purpose; the owner may raise it to 2%.
+- 11-04 13:24 forum: a complaint that cites one of our settles but names only another shop is not ours and stays
+  off the list (post 3967 was about dragonash's 3 h warranty).
 - 11-04 11:16 seller: when the unit is swapped for another (taken by a parallel talk) the reply keeps the opening
   wording, or says "this unit's price"; "we came down" on a first reply (5ffb5c63) is fixed.
 
