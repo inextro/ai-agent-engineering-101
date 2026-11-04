@@ -170,3 +170,9 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   at its supply share (18-23% of their goods deals) and ours sat at 13%; a B put before a held A loses the buyer
   (20:32-20:51), a B after the A failed costs no A deal. B fallback deals, logged "fallback" with fallback_grade B in
   turns, are this rule, on purpose; the owner judges them with the C ones (paid share, stars).
+- 11-04 21:25 restock: fast SKUs (3+ an hour to us) keep one supply window of stock (FAST_COVER_H 1.0 -> 0.34), to
+  turn stock into cash first (owner). dae-yangkim holds 9 goods units (4M) and sells its grades as supplied; our
+  deep stock sold A and left B and C (at 21:04: A 56M, B 76M, C 43M). Offline 6 h: board +70-96M against 1 h, stock
+  to 34-44M, gross 0-9M lower. Fast SKUs running out of A between windows, B and C offered when A is gone, and fewer
+  supply lines are this rule, on purpose. The owner judges it at 22 h; it goes back to 0.5 h if gross falls under
+  15M an hour. Do not answer it with restock skips.

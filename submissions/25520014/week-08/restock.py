@@ -75,7 +75,11 @@ CAP_HOURS = (1.0, 2.0)                          # a SKU's units: its demand to u
 # held half the stock and sold more of the high-end SKUs we never stocked (gross +5%), while 0.5 h ran out more
 # than it gained (owner, 11-04 19:09).
 FAST_RATE = 3.0                                 # demand to us per hour (sku_demand)
-FAST_COVER_H = 1.0
+FAST_COVER_H = 0.34                             # one supply window (20 min, 16-24 min measured)
+# 1.0 from 19:09, 0.34 from 11-04 21:25 (owner: recover cash first). A deep stock sells A and leaves B and C: dae-yangkim
+# holds 9 goods units (4M, 0.1 h of its sales) and sells grades as supplied (71/20/9%); we held 314 (186M, 3 h) and
+# sold 80/14/6%. Offline 6 h with grades, paid shares and the B/C fallbacks: board +144-154M (1 h) -> +220-250M,
+# stock 129-131M -> 34-44M, gross 110-123M -> 101-121M. A fast SKU out for the minutes a late window adds is the price.
 GRADE_CAP = False                               # a goods SKU's B and C count only up to their share of its cap
 GRADE_SHARE_H = 6                               # our goods settles this recent give the grade shares
 # 11-04 21:15, offline only, not deployed (off): the seller sells the best grade first, so the cap filled with B and C left no room for A: 자코모 4인
