@@ -181,6 +181,12 @@ ABANDONED = 10 * 60   # a talk this old is over (the kit stops a buyer at 300 s,
 NEED_HOURS = re.compile(r"(?:\blast\b|shelf[ -]?life|유통기한|남은)[^.;\n]{0,40}?(\d+(?:\.\d+)?)\s*(?:h\b|hrs?\b|hours?\b|시간)"
                         r"|(\d+(?:\.\d+)?)\s*(?:h\b|hrs?\b|hours?\b|시간)\s*(?:of\s+)?(?:shelf[ -]?life|이상\s*남)", re.I)
 NEED_MARGIN_H = 1.0   # the checkout comes after the talk: the unit must still meet the need then
+# A buyer that says no hours may still need them: the market's own buyers (buyer-01, buyer-02) never say, need 0.25,
+# 0.5 or 0.75 of the SKU's shelf_hours (1,166 of 1,166 "Only N h of shelf life left; I needed M h" results, all
+# shops), pay, and give 2 stars when it falls short: 52 of our 143 verified house results (2.00 each), 11-05 08h.
+# Stars count only verified sales, so a food unit not offered costs nothing there. Without a stated need, food is
+# offered only with this share of its shelf_hours left (owner, 11-05 08h).
+UNSAID_NEED_SHARE = 0.75
 
 
 def need_hours(text):
@@ -277,6 +283,11 @@ def find_units(text, taken):
     if need is not None:
         until = time.time() + (need + NEED_MARGIN_H) * 3600
         units = [u for u in units if u.get("kind") != "food" or not u.get("expires_at") or u["expires_at"] >= until]
+    else:                                # UNSAID_NEED_SHARE of its shelf life, plus the checkout margin
+        now_ = time.time()
+        shelf = lambda u: (catalog().get(u.get("sku")) or {}).get("shelf_hours")
+        units = [u for u in units if u.get("kind") != "food" or not u.get("expires_at") or not shelf(u)
+                 or u["expires_at"] >= now_ + (UNSAID_NEED_SHARE * shelf(u) + NEED_MARGIN_H) * 3600]
     named = [u for u in units if u["sku"].lower() in want]
     if not named:
         named = [u for u in units if (u.get("name") or "").lower() in want]

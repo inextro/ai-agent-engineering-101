@@ -260,6 +260,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   purpose (6 h: 33 of 41 such talks closed). totato2203-r3's "[시세·가게 분석 | tomato&potato]" roundups (74-148 shops
   named) are not complaints any more; 30 were taken off the list.
 
+- 11-05 08:00 (seller, kit restarted). A buyer that states no shelf-life need is offered food only with 0.75 of its
+  shelf_hours left. The market's own buyers (buyer-01, buyer-02) never state one, need 0.25/0.5/0.75 of shelf_hours,
+  pay anyway and give 2 stars when it falls short: 52 of our 143 verified house results. Stars count only verified
+  sales. Food sales to buyers who say nothing will fall on purpose (at 07:53, 1 of 9 food units qualified). The 2-star
+  "Only N h of shelf life left" reviews before 08:00 are known; do not report them again.
+
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
