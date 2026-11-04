@@ -521,7 +521,7 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
         if k - cands[s]["have"] <= target[s]:
             value[s] += v
     buy, spent = {}, 0.0
-    short_g = {s for s in est.shortage() if cat.get(s, {}).get("kind") == "goods"} if SHORTAGE_ENTRY else set()
+    short_g = {s for s in est.shortage() if cat.get(s, {}).get("kind") == "goods"} if SHORT_OWN and SHORTAGE_ENTRY else set()
     short_room = SHORT_STOCK_MAX - sum(u.get("cost") or 0 for u in units if u.get("sku") in short_g)
     for s in sorted(target, key=lambda s: -value[s]):
         if len(buy) >= MAX_LINES:
