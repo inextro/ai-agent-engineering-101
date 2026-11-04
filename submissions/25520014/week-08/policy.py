@@ -49,7 +49,12 @@ ARMS = (0.70, 0.80, 0.90, 1.00) # opening ask as a share of the list price; the 
 # our old asks) favours the old arms (paid-deal rate 49%; +0% 39%, +4% 46%, +8% 35%, +15% 30%) and cannot judge
 # demand; the two disagree, so the bandit decides, with the floor itself (0.0) among the arms. Revert if the goods
 # deal rate falls over 5%p or profit per talk falls in the first hour (owner, 11-05 00:45).
-GOODS_ARMS = (0.0, 0.04, 0.08, 0.15)   # 0.0: open at the floor, the old behaviour in half the talks
+# 11-05 08h the bandit had settled on 0.0 (owner: fix it). 00:22-07:08 goods talks by arm: 0.0 1,507 talks, 24.2%
+# closed, profit 39.5k a talk, verified stars 4.73; 0.04 408, 19.6%, 29.8k, 4.63; 0.08 597, 19.4%, 33.7k, 4.56; 0.15
+# 510, 19.2%, 40.5k, 4.45 (posterior means 0.21 / 0.185 / 0.188 / 0.178). The board's ALL weighs book 0.5, revenue
+# 0.3, stars 0.2 and we lead book and revenue, so stars are where it can still rise; the other arms cost about 1M of
+# margin an hour in exploration. 0.0 still follows the market: its base is max(floor, MKT_BASE x the market's price).
+GOODS_ARMS = (0.0,)                     # was (0.0, 0.04, 0.08, 0.15) from 11-05 00:22
 
 
 def arms(kind):

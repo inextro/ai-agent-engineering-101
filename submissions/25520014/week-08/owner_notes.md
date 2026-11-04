@@ -265,7 +265,10 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   pay anyway and give 2 stars when it falls short: 52 of our 143 verified house results. Stars count only verified
   sales. Food sales to buyers who say nothing will fall on purpose (at 07:53, 1 of 9 food units qualified). The 2-star
   "Only N h of shelf life left" reviews before 08:00 are known; do not report them again.
-
+- 11-05 08:00 (policy, same kit restart). Goods open at arm 0.0 only (GOODS_ARMS was 0.0/0.04/0.08/0.15): the
+  bandit had settled on it (00:22-07:08: 24.2% closed, 39.5k profit a talk, stars 4.73; the others 19-20%, 29.8-40.5k,
+  4.45-4.63). The board weighs book 0.5, revenue 0.3, stars 0.2 and we lead the first two, so stars matter most now.
+  Goods talks under other arms before 08:00 are history; do not propose bringing the arms back without new data.
 
 ## buyer
 
