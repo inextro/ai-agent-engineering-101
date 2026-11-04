@@ -27,6 +27,16 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   the code puts an alert at the top of the report; widening clearance.py (now only stock bought before the 11-03
   23:55 fix) is the owner's call: say what the record shows under 결정 필요, do not answer it with restock skips.
   On 11-04 09:45 nothing was unsold for 24 h (88% of stock at cost was under 2 h old).
+- 11-04 09:54 seller: a buyer who raised an earlier offer to just past the ask (at most 1.2 x ask) gets the deal at
+  the ask at once; before, the shop asked "several units or a mistake?" and 4 talks in 24 h ended on that last turn.
+  A first number above the ask, or more than 1.2 x ask, is still asked about.
+- 11-04 09:54 template wording: goods grade A is "in normal condition with no defects" (never "new"); the warranty
+  line says the market refunds the full price "from our balance".
+- 11-04 09:54 the record's claims are true/false/none_made. none_made is a buyer checking out without our claim (all
+  15 so far are one buyer, dariaklt); it is not a false claim. False has been 0.
+- 11-04 09:54 the owner put the hours back into the negotiation playbook (version 10): food shelf life is said as the
+  facts give it ("at least N hours", code eee8656), the warranty in words ("six-hour"). The 09:47 retries came from
+  the warranty written as "6" and amounts in words, not from food hours; do not take the hours out again.
 
 ## buyer
 
