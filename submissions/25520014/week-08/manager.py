@@ -191,6 +191,21 @@ def excerpts(now):
     return talks, [{"request": k, "times": n} for k, n in missed.most_common(MISSED_SHOWN)]
 
 
+STALE_H = 24                 # a unit unsold this long is stale stock (owner 11-04)
+STALE_ALERT = 1_000_000      # stale stock at cost from which the report asks the owner about wider clearance
+
+
+def stale_stock(units, now):
+    """Units unsold for STALE_H hours or more: count, cost, the categories holding most of it. clearance.py marks
+    down only stock bought before the 11-03 23:55 demand fix; past STALE_ALERT the owner decides on widening it."""
+    old = [u for u in units if u.get("grade") != "expired" and now - (u.get("supplied_at") or now) >= STALE_H * 3600]
+    by = Counter()
+    for u in old:
+        by[u.get("category", "").split(">")[-1]] += u.get("cost", 0)
+    return {"units": len(old), "at_cost": round(sum(u.get("cost", 0) for u in old)),
+            "top_categories_by_cost": [(c, round(v)) for c, v in by.most_common(5)]}
+
+
 def restock_plan(units):
     """restock's last plan beside what we actually hold: the target is what the money and the demand posterior ask
     for, not stock (11-03: a target of 138 categories read as 'held' looked like a counting bug)."""
@@ -244,7 +259,8 @@ def summary(md, now):
                   "goods_units": sum(u.get("kind") == "goods" for u in units),
                   "at_cost": round(sum(u.get("cost", 0) for u in units)),
                   "grades": dict(Counter(u.get("grade") for u in units)),
-                  "food_expiring_6h": sum(1 for u in units if u.get("expires_at") and u["expires_at"] - now < 6 * 3600)},
+                  "food_expiring_6h": sum(1 for u in units if u.get("expires_at") and u["expires_at"] - now < 6 * 3600),
+                  f"unsold_{STALE_H}h_or_more": stale_stock(units, now)},
         "restock_plan": restock_plan(units),
         "restock_last_hour": {"runs": len(restocks), "units_bought": sum(b["qty"] for r in restocks for b in r["buy"])},
         "negotiations_6h": {"opened": len(opened), "deals": len(deals),
@@ -275,6 +291,12 @@ def summary(md, now):
     talks, missed_texts = excerpts(now)
     s["last_hour"] = hour_metrics(hour, now)
     s["health"] = health(md, now, p, b)
+    st = s["stock"][f"unsold_{STALE_H}h_or_more"]
+    if st["at_cost"] >= STALE_ALERT:
+        s["health"]["alerts"].append(
+            f"{STALE_H}시간 넘게 안 팔린 재고 {st['units']}개, 원가 {st['at_cost']:,}원 "
+            f"(많은 곳: {', '.join(f'{c} {v:,}' for c, v in st['top_categories_by_cost'][:3])}): "
+            "할인 처분을 11-03 23:55 이후 산 재고로 넓힐지 소유자 결정 필요")
     s["your_last_decisions_and_what_followed"] = recent_decisions(now)
     s["negotiations_last_hour"] = talks
     s["requests_not_in_stock_last_hour"] = missed_texts
@@ -585,9 +607,10 @@ def change_lines(changed, pb_changed, why):
 
 def report(now, used, alerts, changed, pb_changed, refused, text, liked=(), why=None):
     """One entry of the owner's report: the model's Korean summary, then what the code actually applied and why."""
-    lines = [f"## {time.strftime('%m-%d %H:%M', time.localtime(now))} ({used or '판단 없음'})", "", text.strip() or "(보고 없음)", ""]
-    if alerts:
-        lines += ["- 코드 경고: " + "; ".join(alerts)]
+    lines = [f"## {time.strftime('%m-%d %H:%M', time.localtime(now))} ({used or '판단 없음'})", ""]
+    if alerts:      # the code's checks, word for word, above whatever opus wrote (as in buyer_manager)
+        lines += ["[점검 필요]"] + [f"- {a}" for a in alerts] + [""]
+    lines += [text.strip() or "(보고 없음)", ""]
     lines += change_lines(changed, pb_changed, why)
     if refused:
         lines += ["- 적용 거부: " + "; ".join(refused)]

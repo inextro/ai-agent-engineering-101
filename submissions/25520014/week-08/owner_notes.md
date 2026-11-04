@@ -23,6 +23,10 @@ the code does, so the managers do not read a deliberate effect as a fault and un
 - 11-04 09:23 the template reply after a step down says "we came down", not "we can come down".
 - 11-04 09:23 the complaint list holds only posts that name us or cite one of our settles; a post in our thread about
   another shop is still answered but not listed.
+- 11-04 09:45 the record's stock shows unsold_24h_or_more (units, cost, top categories). From 1,000,000 won at cost
+  the code puts an alert at the top of the report; widening clearance.py (now only stock bought before the 11-03
+  23:55 fix) is the owner's call: say what the record shows under 결정 필요, do not answer it with restock skips.
+  On 11-04 09:45 nothing was unsold for 24 h (88% of stock at cost was under 2 h old).
 
 ## buyer
 
