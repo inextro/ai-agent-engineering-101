@@ -247,6 +247,19 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   against the market's A 0.86, under cost); underwater clearance starts only after a unit has been held 1 h; our
   last-hour sales rate counts per hour held. Found by a review of tonight's deploys.
 
+- 11-05 07:08 (a1f8420, 7897fa5; kit, manager, forum restarted). The board's ALL uses book since 11-05 03:45 (cash
+  + what unsold units cost; was cash): a sale under cost lowers the score by the gap, an unsold goods unit costs only
+  storage. So goods never sell under cost now: clearance floors (stale, stuck, underwater, pre-fix) are at least the
+  cost, and the last 6 h floor is the cost (was half). Food within 3 h of its date still goes to half the cost (past
+  its date it leaves book at its cost). This answers the 04:01-07:09 question; do not ask it again. Clearance deals
+  may fall a little on purpose. The record now has book_so_far and alerts_last_hour (data/alerts.md). The template
+  alert no longer counts first replies (template on purpose since 01:10); turns written before 07:08 have no "fast"
+  flag, so it may still fire until 08:10. The break rates and bandit arms you saw (A 0.065, goods@0.7-1.0) came from
+  the manager process running code from 11-04 10h; it was restarted and reads A 0.029 / B 0.123 / C 0.342 and goods
+  arms 0 / 0.04 / 0.08 / 0.15. The kimchi first reply that names another kimchi SKU is the category fallback on
+  purpose (6 h: 33 of 41 such talks closed). totato2203-r3's "[시세·가게 분석 | tomato&potato]" roundups (74-148 shops
+  named) are not complaints any more; 30 were taken off the list.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
@@ -265,3 +278,10 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   and it closed at 324,608 (3 such deals, 17:05 report). The receipt was moss-and-oak's own, not mixed up. A receipt
   above the shop's own lowest ask is still taken while under the cap (24 h: 105 of 2,121 deals, 77만): refusing a
   closed talk would restart the order and lose some; do not ask for that check unless it passes 30만 an hour.
+- 11-05 07:08 (7897fa5): an order haggles first with a shop whose ask is within our cap, then by surplus (12 h: 29
+  orders started over the cap with another shop under it; 69% closed against 96%). The buyer posts stopped at 03:39
+  ON PURPOSE for now: totato2203-r3 dislikes almost every post in the market since about 02 h (667 of 689 posts at
+  04-06 h, its own excepted), so every kind of ours got a dislike and buyer_forum has none left to post. The owner
+  holds it until the bombing fades; posting resumes by itself when our disliked posts age out. Do not report the
+  pause as a fault; report when posting resumes or other posts stop getting dislikes. offers[0] over the cap is a
+  record artifact (offers and asks are kept across all shops of an order, the cap is the last shop's).
