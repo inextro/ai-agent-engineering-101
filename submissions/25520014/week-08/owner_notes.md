@@ -295,6 +295,12 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   (other shops' first asks to our own buyer for SKUs we sell; grade not recorded). The warranty stays 6 h (owner,
   11-05 09:50), although goods break only within 6 h and a longer one costs no refunds: do not propose it again
   without new data on buyers choosing by warranty length.
+- 11-05 10:10 (restock, no restart). The market check no longer adds min_margin (A_CHECK_MARGIN = False): a goods SKU
+  is skipped only when an A at our mean A cost x the forecast surge plus its break cost is over the market's A
+  median. With the margin an average A sat on the median (자코모 4인 G8ec51935 0.797 against 0.797), so our best SKUs
+  flipped out of restock on small moves (235M of it sold in the market in 6 h while we held none). 12 h backtest:
+  SKU-hours blocked only by the margin earned 0.147 of list a deal when we held them (A 0.094). Expect more lines
+  on SKUs with a thin A margin (G8095ddd6, G45c54b01, G754bf0ca); the floor in the talk is unchanged.
 - 11-05 10:59 (manager restart, report only). The shop record gets "market_gaps" (6 h): per category the market's
   settled amount, our share, the share of market sales that came while we held that SKU and our share of those;
   the SKUs that sold most while we held none; the orders our buyer saw that no shop had stock for. Why: over
@@ -302,6 +308,17 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   (53 of 64 SKUs never held), a stock gap restock can close; mattresses and sofas sold 83-88% while we held the
   SKU, so there the gap is buyers' choice, not stock. In 6 h 자코모 4인 G8ec51935 sold 235M while we held none.
   Low sales-while-held points at restock; a low share-while-held at price, terms or buyers who pick at random.
+- 11-05 13:20 (owner decisions on the 13:01 report; do not ask again without new data of the kind named here).
+  Warranty stays 6 h: 25620027 moved to 24 h at 10 h and its goods share stayed in its old range (8.5, 12.4% vs
+  4.7-11.1% before); inside that shop the same SKU and grade sold at 6 h and 24 h at mixed prices and counts, so
+  "10-25x more units" compared shops, not warranties. All 3,152 breaks in 48 h came within 6.0 h of the sale.
+  Raise it only with a same-SKU, same-grade, same-hour comparison where the longer warranty sells more.
+  The 24 h unsold stock (mostly old C sofas) is not cleared below cost: book counts unsold units at cost and
+  storage is 0.25% of cost per 6 h (about 6,000 won on 2.3M), so a sale under cost only lowers book. Do not
+  list it under 결정 필요 again; report it only if storage or the end of the round changes that.
+  자코모 4인 G8ec51935 is bought in nearly every window since 10:04 (1-13 units, 10-12 h 60 sold); hours while we
+  held none come from selling out between windows, and the quantity is limited by surge (the market buys 80-130
+  units an hour, each extra unit costs 1.08-1.16x), not by the market A check.
 
 ## buyer
 

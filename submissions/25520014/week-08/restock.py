@@ -75,14 +75,20 @@ CAP_HOURS = (1.0, 2.0)                          # a SKU's units: its demand to u
 # sofa G8ec51935 was bought in each of 24 runs and held 69 units (94M at cost) for 2 h; offline over 6 h a 1 h cover
 # held half the stock and sold more of the high-end SKUs we never stocked (gross +5%), while 0.5 h ran out more
 # than it gained (owner, 11-04 19:09).
-FAST_RATE = 3.0                                 # demand to us per hour (sku_demand)
+FAST_RATE = 3.0                                 # demand to us per hour (sku_demand); FAST_BUFFER uses it
 FAST_COVER_H = 0.34                             # one supply window (20 min, 16-24 min measured)
 CAP_FLOOR = 3                                   # units a SKU may hold below the fast cover (owner, 11-05 01:00).
+# 11-05 14 h (owner): a goods SKU of FAST_RATE+ an hour holds FAST_BUFFER units past its cap. A SKU is shown to buyers
+# only while we hold a unit (56 depth.py, last 5 h: 0 units 2.3% of its market sales, 1 unit 15.2%, 2-7 13-21%), and
+# 자코모 4인 alone lost ~26M in 5 h while out. 56's sim, 6 h, 8 seeds (book change / revenue / end stock): now +98.1M /
+# 582M / 69.5M; +2 on fast goods +105.8M / 636M / 76.9M; +1 fast +100.7M; +1 all goods +103.0M / 97.2M stock; +2 all
+# +102.5M / 127.8M; FAST_COVER_H 0.75 +102.9M / 633M / 83.1M. The sim sells at the market median, not our floor.
+FAST_BUFFER = 2
 # With FAST_RATE as a cliff, a SKU just under 3/h held 2 h of demand (6 units) and one just over 0.34 h (2): the
 # demand fix moved 시몬스 퀸 3.61 -> 2.65/h and its cap 2 -> 6, the next buy 5.8M -> 11.0M. Offline 6 h (3 seeds,
 # true demand = new model): cliff + old model gross 68.2M, board +142.8M, stock 56.6M; cliff + new model 65.6M,
 # +137.7M, 59.0M; continuous floor 2: 69.8M, +165.7M, 35.2M; floor 3: 74.7M, +161.2M, 44.6M, fewest stockouts
-# (true demand = old model: floor 3 81.9M / +171.3M against the cliff's 77.3M / +157.3M). FAST_RATE is unused.
+# (true demand = old model: floor 3 81.9M / +171.3M against the cliff's 77.3M / +157.3M). FAST_RATE: FAST_BUFFER only.
 # 1.0 from 19:09, 0.34 from 11-04 21:25 (owner: recover cash first). A deep stock sells A and leaves B and C: dae-yangkim
 # holds 9 goods units (4M, 0.1 h of its sales) and sells grades as supplied (71/20/9%); we held 314 (186M, 3 h) and
 # sold 80/14/6%. Offline 6 h with grades, paid shares and the B/C fallbacks: board +144-154M (1 h) -> +220-250M,
@@ -131,6 +137,20 @@ GRADE_SHARE_H = 6                               # our goods settles this recent 
 # 0.80-0.81 of list in the market, our A floor 0.86-0.93 (units bought at 0.75-0.81 with the surge): 92 talks, 4
 # deals, yet bought again at 23:05 and 23:22, priced at our own category price (0.82).
 MARKET_CHECK = True
+# 11-05 10 h (owner): the check compares an A's cost and break cost with the market's A median, without min_margin.
+# With the margin an average A sat on the market's median (자코모 4인 G8ec51935: 0.66 x surge 1.048 x 1.08 + break
+# 0.05 = 0.797 against 0.797), so a SKU flipped out of restock on small moves although it was among our best (12 h:
+# 195 deals, A 0.811 of list at cost 0.688, B and C more; 235M sold in the market in 6 h while we held none). The
+# median is what half the buyers pay over, and B and C come with every A line. Backtest over the last 12 h, hour by
+# hour (~/wk8-test/acheck.py): SKU-hours blocked only by the margin 94, our deals in them 180 at 0.147 of list
+# profit (A 0.094, B 0.191, C 0.281; 7.8% under cost against 2.4% where it passed); blocked either way 14. cu and
+# the value-per-won ranking still decide the units.
+A_CHECK_MARGIN = False
+# 11-05 14 h (owner): the check ran on the next unit's surge only, so a line of 20 could buy its last units above the
+# market A median (each unit +0.2% past 50 in the hour). Now every unit up to the last one bought must pass; the line
+# is cut at the first that does not. Without min_margin (56: 147 of 235 goods units with a floor over the market sold
+# in their first hour at the floor; unsold ones stay in book at cost).
+A_CHECK_TOP = True
 A_COST = 0.66                                   # mean cost / list of a goods A unit (828 supplied before 21:27: 0.55-0.75)
 SUPPLY_MIX = {"A": 0.60, "B": 0.24, "C": 0.16}  # goods grades as supplied to us (1,378 units before 21:27)
 GRADE_REL = {"A": 1.0, "B": 0.87, "C": 0.75}    # a grade the market has too few sales of: this x its A price
@@ -406,6 +426,8 @@ def candidates(inv, cat, demand, est, p, now):
         # every window, P_k over FAST_COVER_H) once FAST_COVER_H of demand reaches CAP_FLOOR
         fast = rate * FAST_COVER_H >= CAP_FLOOR
         cap = math.ceil(min(rate * cap_h, max(CAP_FLOOR, rate * FAST_COVER_H)) - 1e-9)
+        if FAST_BUFFER and kind == "goods" and rate >= FAST_RATE:
+            cap += FAST_BUFFER                          # units past the window's demand (FAST_BUFFER)
         if asked:
             cap = max(cap, 1)                           # a buyer asked us for it
         if SHORTAGE_ENTRY and s in est.shortage():
@@ -429,8 +451,14 @@ def candidates(inv, cat, demand, est, p, now):
         m = mkt.get(s) if kind == "goods" else None
         if m and "A" in m:
             # f is the forecast factor of our next unit (surge_counts), not the factor now
-            if A_COST * lp * f * (1 + p["min_margin"]) + premium_a * m["A"] * lp > m["A"] * lp:
-                continue                                # an A of it would not sell above its floor
+            margin = p["min_margin"] if A_CHECK_MARGIN else 0.0
+            pays = lambda j: (A_COST * lp * surge_factor(surge_u + j) * (1 + margin) + premium_a * m["A"] * lp
+                              <= m["A"] * lp)
+            if not pays(1):
+                continue                                # an A of it would not pay its cost and breaks at the market
+            if A_CHECK_TOP:                             # each unit, up to the last (dearest) one bought
+                while room > 1 and not pays(room):
+                    room -= 1
             price = min(price, lp * sum(w * m.get(g, m["A"] * GRADE_REL[g]) for g, w in SUPPLY_MIX.items()))
         warranty = warranty_rate * price if kind == "goods" else 0.0
         cost = COST_SHARE[kind] * lp * f

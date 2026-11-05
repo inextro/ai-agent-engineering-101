@@ -192,7 +192,8 @@ def forum_alerts(db, now, us):
         hours = next((k for k, s in enumerate(storm) if s["share"] is None or s["share"] < STORM_ON), len(storm))
         out.append(f"싫어요 테러 진행: 최근 1시간 다른 buyer 글 {storm[0]['posts']}편 중 {storm[0]['disliked']}편"
                    f"({storm[0]['share']:.0%})이 싫어요를 받았습니다, {hours}시간째. 우리 buyer 글은 "
-                   + (f"{(now - last) / 60:.0f}분째 대기(의도)" if now - last > 1800 else "나가고 있습니다")
+                   + ((f"{(now - last) / 60:.0f}분째 대기(의도)" if last else "6시간 넘게 대기(의도)")
+                      if now - last > 1800 else "나가고 있습니다")   # last = 0 when no post in the window (11-05: "29897525분")
                    + (", 소유자 지시로 무기한 정지(테러가 끝난 게 확인될 때까지)" if FORUM_PAUSED else "")
                    + (f", 지금 규칙의 자동 재개는 {resume} 이후" if resume else ""))
     elif was and storm[0]["share"] is not None and storm[0]["share"] < STORM_OFF:
