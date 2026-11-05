@@ -319,6 +319,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   자코모 4인 G8ec51935 is bought in nearly every window since 10:04 (1-13 units, 10-12 h 60 sold); hours while we
   held none come from selling out between windows, and the quantity is limited by surge (the market buys 80-130
   units an hour, each extra unit costs 1.08-1.16x), not by the market A check.
+- 11-05 16:16 (restock, no restart). A goods SKU with demand of 3+ an hour holds 2 units past its cap
+  (FAST_BUFFER): buyers see a SKU only while we hold a unit, and fast SKUs ran out 64 times (13.1 h) in 08-16 h.
+  56 replay: the 2nd-3rd units of a fast SKU sold 85% in 1 h, 95% in 3 h; +2 would have covered about 40.8M of
+  sales in 8 h. Expect about 15M more goods stock and more lines on fast SKUs; do not report that stock as stale
+  unless it is unsold after 3 h. The market A check now runs on each unit up to the dearest one bought
+  (A_CHECK_TOP, no min_margin); it cuts nothing at today's line sizes. Watch: fast-SKU stockouts, 3 h sell-through
+  of units bought 7th or later, 24 h stock.
 
 ## buyer
 
