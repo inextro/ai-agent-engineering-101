@@ -295,6 +295,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   (other shops' first asks to our own buyer for SKUs we sell; grade not recorded). The warranty stays 6 h (owner,
   11-05 09:50), although goods break only within 6 h and a longer one costs no refunds: do not propose it again
   without new data on buyers choosing by warranty length.
+- 11-05 10:59 (manager restart, report only). The shop record gets "market_gaps" (6 h): per category the market's
+  settled amount, our share, the share of market sales that came while we held that SKU and our share of those;
+  the SKUs that sold most while we held none; the orders our buyer saw that no shop had stock for. Why: over
+  12 h bedding was 3.5% ours, but 9.8% of what sold while we held the SKU: 71% of its sales came while we held none
+  (53 of 64 SKUs never held), a stock gap restock can close; mattresses and sofas sold 83-88% while we held the
+  SKU, so there the gap is buyers' choice, not stock. In 6 h 자코모 4인 G8ec51935 sold 235M while we held none.
+  Low sales-while-held points at restock; a low share-while-held at price, terms or buyers who pick at random.
 
 ## buyer
 
