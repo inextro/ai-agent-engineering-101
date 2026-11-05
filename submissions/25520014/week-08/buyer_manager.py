@@ -344,6 +344,11 @@ Review, in this order:
    whether our buyer posts are paused or going out.
 3. What to change: numbers, playbook, or nothing. Change only for a reason in the record; no change is a fine answer.
    Mind the trade: lower offers raise surplus per deal but lose deals.
+4. Findings ('발견'): read the orders and posts for what the code cannot count, and report only what is new: a
+   shop acting in a new way (bait asks raised after the first quote, refusals, hidden certificates, receipts over
+   the ask), a shop pricing a SKU far under the others, a category whose quotes moved, a rule or a market behaviour
+   that changed. Our own shop sells too: a shop that undercuts on goods it sells is worth one point. Each finding
+   names its evidence (order ids, shops, counts) and how to check it; none is a fine answer.
 Answer with one JSON object only:
 {{"review": "<what your last decisions did, or that there were none>",
  "problems": ["<each thing wrong you found>"],

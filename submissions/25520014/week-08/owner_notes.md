@@ -282,6 +282,19 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   usual floor (14.0M more than at 0.97 x market), 54 in 1-3 h, 11 later, 23 held; the market price is a median,
   so many buyers pay over it. After UW_HELD_H the underwater terms sell at market, never under cost. Keep it; talks
   lost a little under the floor in a unit's first hour are expected, do not report them.
+- 11-05 09:40 (manager restart, report only). Reports are bullets now (owner): a header line per section, then
+  short "- " points. The shop report gets a '시장' section from the new "competition" record: share by hour, rising
+  shops and their prices by SKU and grade against ours, our talks split by food/goods, rival SKUs/the rest, asks
+  at or under the market/over it. Why: 07-09 h our share fell 17.3 -> 13.5 -> ~10% while gom31-certified-goods
+  rose 10.7 -> 15.8 -> 18.4% on our top SKUs (A of G8095ddd6 at 0.72 of list with a 12 h warranty against our
+  0.76; G8ec51935 0.77 against 0.81), and the 09:01 report blamed food, which had 2 talks of 323. Name a cause only
+  from a part with enough talks.
+- 11-05 10:00 (manager restart, report only). Both reports get a '발견' section (owner: what we miss about the
+  market): at most two new points, each observation -> evidence -> how to check, or '- 없음'. New in the shop
+  record: buyers_who_left_after_our_first_reply (their first messages) and competition.quotes_our_buyer_got_last_hour
+  (other shops' first asks to our own buyer for SKUs we sell; grade not recorded). The warranty stays 6 h (owner,
+  11-05 09:50), although goods break only within 6 h and a longer one costs no refunds: do not propose it again
+  without new data on buyers choosing by warranty length.
 
 ## buyer
 

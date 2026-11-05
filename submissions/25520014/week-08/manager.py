@@ -83,11 +83,37 @@ ARCHIVE_FULL_H = 48                      # every hour this recent is in the inde
 LOOKUP_ROUNDS, LOOKUP_HOURS = 2, 3
 WHAT = ("negotiations", "settles", "broken", "forum", "balance", "board", "decision")
 UPVOTES_MAX = 5
-REPORT_CHARS = 700                       # the report arrives on Telegram every hour: short
-REPORT_SPEC = ("<the owner's report in Korean, at most four short lines, only what matters. '상황:' what happened, "
-               "in one line; '그대로 둔 이유:' only when you changed nothing, why that was the right call, in one line; "
-               "'결정 필요:' what only the owner can decide (a code bug, a process down, a range that holds you back) or "
-               "'없음'. The reason for each change goes in why_ko, not here. Leave out numbers that changed nothing.>")
+REPORT_CHARS = 1300                      # the report arrives on Telegram every hour: short (700 before the bullets, 11-05)
+# Bullets, not prose (owner, 11-05 09 h: the four-sentence reports were hard to read). Sections are a header line
+# each, then "- " bullets in short noun-ending phrases (개조식), one fact a bullet, "\n" between lines.
+_SPEC = ("<the owner's report in Korean, in bullets: each section is a header line ('{sections}'), then its "
+         "points as lines starting with '- ' (sub-points '  - '), lines joined by \\n. Each point is one fact in a "
+         "short 개조식 phrase ending in a noun or '-음/-함' (e.g. '- 체결 116/323건(36%), 07시 49%에서 하락'), not a "
+         "full sentence; at most four points a section, only what matters. {market}'발견' at most two points the "
+         "owner does not know yet (not in your memory, not in an earlier report), each as '관찰 → 근거 (ids, numbers) "
+         "→ 확인 방법', or the single point '- 없음'. '그대로 둔 이유' only when you changed nothing; '결정 필요' what "
+         "only the owner can decide (a code bug, a process down, a range that holds you back), or the single point "
+         "'- 없음'. The reason for each change goes in why_ko, not here. Leave out numbers that changed nothing.>")
+REPORT_SPEC = _SPEC.format(sections="상황 / 발견 / 그대로 둔 이유 / 결정 필요", market="")
+SHOP_REPORT_SPEC = _SPEC.format(
+    sections="상황 / 시장 / 발견 / 그대로 둔 이유 / 결정 필요",
+    market="'시장' from the record's competition: our share by hour, shops rising and what they sell (grade, price "
+           "over list, warranty) against ours, and where our deal rate moved (food or goods, SKUs a rising shop "
+           "sells or the rest, asks at or under the market or over it); and from market_gaps the one or two "
+           "categories with the most market money we do not get, saying whether stock (sales while we held the "
+           "SKU) or choice (our share while held) holds it, and the SKUs that sold most while we held none. ")
+# What '발견' is for (owner, 11-05 09 h): what the code cannot count and the model can read, across the record's
+# texts; never a restatement of the record's numbers or general advice. One rule each in the two prompts.
+FINDINGS_SHOP = """4. Findings ('발견'): read for what the code cannot count, and report only what is new:
+   - why buyers left: "buyers_who_left_after_our_first_reply" (their first messages): a need we did not meet
+     (a warranty length, a grade, a price they named, another shop they quoted);
+   - what rising shops promise: their forum posts in forum_newest (warranty, certificates, prices) against ours;
+   - demand we do not serve: requests_not_in_stock_last_hour repeating a SKU or category we never hold, and
+     market_gaps.orders_no_shop_could_fill_by_category (orders no shop in the market had stock for);
+   - quotes our buyer got from other shops for SKUs we sell (competition.quotes_our_buyer_got_last_hour);
+   - a rule or a market behaviour that changed (the rules page, a shop or account acting in a new way).
+   A finding names its evidence (negotiation, post or order ids, counts) and how to check it. When checking needs
+   code, put it under 결정 필요; do not answer a finding with a policy change unless the record already proves it."""
 WHY_SPEC = ('"why_ko": {{"<each number you change, or negotiation / forum{skip}>": "<in Korean, one or two sentences: '
             'what in the record made you change it (the evidence, with its numbers) and what you expect it to do>", ...}},')
 UPVOTE_RULE = """Upvote: "upvote" lists the forum posts by others (from the record, by id, each with why) whose
@@ -248,6 +274,187 @@ def restock_plan(units):
                                       "price_market_ratio")}}
 
 
+COMP_HOURS = 3        # competition(): the last full clock hours compared
+COMP_TOP = 6          # shops shown by share
+RISE_PP = 2.0         # a shop up on the hour before and this many points over its lowest earlier hour is "rising"
+FALL_ALERT_PP = 3.0   # our share falling every hour and by this many points in all raises an alert
+COMP_SKUS = 8         # overlapping SKUs shown per rising shop
+
+
+def competition(db, now, cat):
+    """Who is taking the market and where our deals went (owner, 11-05 09 h: gom31's share rose 9.7 -> 15.0 ->
+    18.4% over 07-09 h on our top SKUs while the 09:01 report blamed food, 2 of 323 talks). Shares are of the
+    market's settled amount by clock hour; our talks are split by kind, by whether a rising shop sells the SKU, and
+    by our last ask against the market's median now for the SKU and grade (model.market_grade_prices)."""
+    end = now - now % 3600                                   # KST is UTC + 9 h: the clock hours line up
+    hours = [end - (COMP_HOURS - i) * 3600 for i in range(COMP_HOURS)]
+    label = lambda t: time.strftime("%H", time.localtime(t))
+    names = {r[0]: r[1] for r in db.execute("SELECT url, name FROM shops")}
+    ours = model.our_urls(db)
+    amt = [Counter() for _ in hours]
+    sold = {}                                                # shop -> sku -> grade -> [(ratio, warranty)]
+    for ts, d in model.entries(db, "settle", hours[0]):
+        if ts >= end:
+            continue
+        a, s = model.amount_of(d), model.sku_of(d)
+        shop = "우리" if d.get("shop") in ours else names.get(d.get("shop"), d.get("shop"))
+        amt[int((ts - hours[0]) // 3600)][shop] += a or 0
+        x = cat.get(s) or {}
+        if a and x.get("list_price") and x.get("kind", "goods") == "goods":
+            sold.setdefault(shop, {}).setdefault(s, {}).setdefault(d.get("grade"), []).append(
+                (a / x["list_price"], d.get("warranty_hours")))
+    share = [{k: 100 * v / (sum(c.values()) or 1) for k, v in c.items()} for c in amt]
+    sh = lambda shop: [round(s.get(shop, 0.0), 1) for s in share]
+    top = sorted(set().union(*share), key=lambda k: -share[-1].get(k, 0))[:COMP_TOP]
+    # up on the hour before and RISE_PP over its lowest earlier hour: gom31 went 14.2 -> 10.7 -> 15.8 over 06-08 h
+    rising = [k for k in set().union(*share) if k != "우리" and sh(k)[-1] > sh(k)[-2]
+              and sh(k)[-1] - min(sh(k)[:-1]) >= RISE_PP]
+    med = lambda v: round(sorted(v)[len(v) // 2], 3) if v else None
+    mine = sold.get("우리", {})
+    rivals = []
+    for k in sorted(rising, key=lambda k: -share[-1].get(k, 0))[:2]:
+        skus = sold.get(k, {})
+        both = sorted((s for s in skus if s in mine), key=lambda s: -sum(map(len, skus[s].values())))[:COMP_SKUS]
+        rivals.append({"shop": k, "share_by_hour": sh(k), "goods_skus_sold": len(skus),
+                       "skus_we_also_sold": [{
+                           "sku": s, "name": (cat.get(s) or {}).get("name", "")[:24],
+                           "by_grade": {g: {"they_n": len(v), "they_price_over_list": med([r for r, _ in v]),
+                                            "they_warranty_h": Counter(w for _, w in v).most_common(1)[0][0],
+                                            "our_n": len(mine[s].get(g, [])),
+                                            "our_price_over_list": med([r for r, _ in mine[s].get(g, [])])}
+                                        for g, v in sorted(skus[s].items(), key=str)}} for s in both]})
+    # our goods and food talks of those hours, by part
+    rival_skus = {s for k in rising for s in sold.get(k, {})}
+    mkt = model.market_grade_prices(db, now, cat)
+    turns = {}
+    for t in jsonl(TURNS, hours[0]):
+        turns.setdefault(t["task"], []).append(t)
+    parts = {}
+    for r in jsonl(model.NEGOTIATIONS, hours[0]):
+        if r["outcome"] == "open" or r["ts"] >= end:
+            continue
+        ts_ = turns.get(r["task"], [])
+        s = r.get("sku") or next((t.get("sku") for t in ts_ if t.get("sku")), None)
+        g = r.get("grade") or next((t.get("grade") for t in reversed(ts_) if t.get("grade")), "A")
+        ask = r.get("price") if r["outcome"] == "deal" else r.get("last_ask")
+        m, lp = (mkt.get(s) or {}).get(g), (cat.get(s) or {}).get("list_price")
+        keys = [f"kind:{r.get('kind')}"]
+        if r.get("kind") == "goods":
+            if rising:
+                keys.append("goods:rival_sku" if s in rival_skus else "goods:other_sku")
+            if m and lp and ask:
+                keys.append("goods:ask_at_or_under_market" if ask / lp <= m else "goods:ask_over_market")
+        h = int((r["ts"] - hours[0]) // 3600)
+        for k in keys:
+            c = parts.setdefault(k, [[0, 0, 0] for _ in hours])[h]    # talks, deals, left after our first reply
+            c[0] += 1
+            c[1] += r["outcome"] == "deal"
+            c[2] += r["outcome"] != "deal" and len(ts_) <= 1
+    # what other shops quoted our own buyer last hour for SKUs we sell: the buyer asks several shops per order
+    # (buyer.jsonl `quotes`, shop -> first ask; the grade is not recorded)
+    q = {}
+    for r in jsonl(policy.DATA / "buyer.jsonl", now - 3600):
+        s, lp = r.get("sku"), r.get("list")
+        if s in mine and lp and isinstance(r.get("quotes"), dict):
+            for shop, v in r["quotes"].items():
+                if isinstance(v, (int, float)) and v > 0:
+                    q.setdefault(s, {}).setdefault(shop, []).append(v / lp)
+    quotes = [{"sku": s, "name": (cat.get(s) or {}).get("name", "")[:24],
+               "first_ask_over_list_by_shop": {k: med(v) for k, v in sorted(by.items(), key=lambda kv: med(kv[1]))},
+               "we_sold_A_at": med([r for r, _ in mine[s].get("A", [])])}
+              for s, by in sorted(q.items(), key=lambda kv: -sum(map(len, kv[1].values())))[:COMP_SKUS]]
+    return {"hours": [label(t) for t in hours],
+            "note": "share = % of the market's settled amount in that clock hour; talks as [talks, deals, deal %, "
+                    "left after our first reply]; market price = the median other shops got for the SKU and grade "
+                    "over the last 2 h (24 h when thin), as a share of list",
+            "our_share_by_hour": sh("우리"),
+            "top_shops_last_hour": {k: sh(k) for k in top},
+            "rising_shops": rivals,
+            "quotes_our_buyer_got_last_hour": quotes,
+            "our_talks_by_hour": {k: [[n, d, round(100 * d / n) if n else None, q] for n, d, q in v]
+                                  for k, v in sorted(parts.items())}}
+
+
+LEFT_SHOWN = 10        # first messages of buyers who left after our first reply, shown to the manager
+
+
+def left_after_first(now):
+    """The first messages of last hour's buyers who left after our first reply, one per SKU first, then the rest:
+    what they asked for that the opening did not meet (owner, 11-05 09 h: 134 of 201 lost goods talks in 08 h)."""
+    by_task = {}
+    for t in jsonl(TURNS, now - 3600):
+        by_task.setdefault(t["task"], []).append(t)
+    out, seen = [], set()
+    gone = [r for r in jsonl(model.NEGOTIATIONS, now - 3600)
+            if r["outcome"] in ("cancel", "abandoned") and len(by_task.get(r["task"], [])) == 1]
+    for first_pass in (True, False):
+        for r in gone:
+            t = by_task[r["task"]][0]
+            if len(out) >= LEFT_SHOWN or (first_pass and t.get("sku") in seen) or r["task"][:8] in {o["task"] for o in out}:
+                continue
+            seen.add(t.get("sku"))
+            out.append({"task": r["task"][:8], "sku": t.get("sku"), "grade": t.get("grade"), "our_ask": t.get("price"),
+                        "buyer": clip(t.get("buyer") or "", 300)})
+    return {"count": len(gone), "examples": out}
+
+
+GAP_HOURS = 6          # market_gaps(): the window
+GAP_CATS = 8           # categories shown, by market amount
+GAP_SKUS = 8           # SKUs sold while we held none, by market amount
+
+
+def market_gaps(est, now, cat):
+    """Where the market's money is and why we do not get more of it (owner, 11-05 10 h: over 12 h our share was
+    10.0% of mattresses, 19.7% of sofas and 3.5% of bedding, yet 7.6-9.8% of bedding sold while we held the SKU:
+    71% of bedding sales came in hours we held none, 53 of 64 SKUs never held; competition() shows only shops).
+    Per category: our share of the settled amount, the share of market sales that came while we held the SKU
+    (stock) and our share of those (choice and price). The SKUs that sold most while we held none. The orders our
+    own buyer saw that no shop could fill (data/buyer.jsonl why_none), demand nobody serves."""
+    t0 = now - GAP_HOURS * 3600
+    mine = model.our_urls(est.db)
+    spans = getattr(est, "_spans", None) or est._stock_spans()
+    leaf = lambda s: ((cat.get(s) or {}).get("category") or "?").split(">")[-1]
+    held = lambda s, ts: any(x <= ts < y for x, y in spans.get(s, []))
+    by = {}                               # category -> [amount, ours, amount in hours held, ours in hours held]
+    out = Counter()                       # sku -> amount sold while we held none
+    skus, held_skus = {}, {}
+    for ts, d in model.entries(est.db, "settle", t0):
+        if ts >= now:
+            continue
+        s, a = model.sku_of(d), model.amount_of(d) or 0
+        c, ours, h = leaf(s), d.get("shop") in mine, held(s, ts)
+        v = by.setdefault(c, [0, 0, 0, 0])
+        v[0] += a; v[1] += a * ours; v[2] += a * h; v[3] += a * (ours and h)
+        skus.setdefault(c, set()).add(s)
+        if h or ours:
+            held_skus.setdefault(c, set()).add(s)
+        else:
+            out[s] += a
+    total = sum(v[0] for v in by.values()) or 1
+    pct = lambda a, b: round(100 * a / b, 1) if b else None
+    cats = [{"category": c, "market_M": round(v[0] / 1e6, 1), "market_share_of_all": pct(v[0], total),
+             "our_share": pct(v[1], v[0]), "market_sales_while_we_held_the_sku": pct(v[2], v[0]),
+             "our_share_while_held": pct(v[3], v[2]),
+             "skus_sold": len(skus[c]), "skus_we_held": len(held_skus.get(c, ()))}
+            for c, v in sorted(by.items(), key=lambda kv: -kv[1][0])[:GAP_CATS]]
+    rate = {c: v[3] / v[2] for c, v in by.items() if v[2]}
+    gone = [{"sku": s, "name": (cat.get(s) or {}).get("name", "")[:24], "category": leaf(s),
+             "market_M_while_we_held_none": round(a / 1e6, 1),
+             "ours_at_our_in_stock_share_M": round(a * rate.get(leaf(s), 0) / 1e6, 1)}
+            for s, a in out.most_common(GAP_SKUS)]
+    seen, none = 0, Counter()
+    for r in jsonl(policy.DATA / "buyer.jsonl", t0):
+        seen += 1
+        if (r.get("why_none") or {}).get("shops_with_offers") == 0:
+            none[r.get("category")] += 1
+    return {"hours": GAP_HOURS,
+            "note": "amounts are settled amounts; 'held' = we had a unit of that SKU in stock at the sale. Low "
+                    "market_sales_while_we_held_the_sku = we lose on stock (restock); a low our_share_while_held = "
+                    "buyers pick other shops while we have it (price, terms, or buyers who pick at random)",
+            "categories": cats, "skus_sold_most_while_we_held_none": gone,
+            "orders_our_buyer_saw": seen, "orders_no_shop_could_fill_by_category": dict(none.most_common(6))}
+
+
 def summary(md, now):
     """What opus sees: numbers by code, plus the newest forum posts and our reviews as text."""
     p = policy.load()
@@ -324,8 +531,23 @@ def summary(md, now):
             f"{STALE_H}시간 넘게 안 팔린 재고 {st['units']}개, 원가 {st['at_cost']:,}원 "
             f"(많은 곳: {', '.join(f'{c} {v:,}' for c, v in st['top_categories_by_cost'][:3])}): "
             "할인 처분을 11-03 23:55 이후 산 재고로 넓힐지 소유자 결정 필요")
+    try:
+        s["competition"] = comp = competition(db, now, model.catalog(db))
+        o = comp["our_share_by_hour"]
+        if all(b < a for a, b in zip(o, o[1:])) and o[0] - o[-1] >= FALL_ALERT_PP:
+            s["health"]["alerts"].append(
+                f"시장 점유율 {' → '.join(f'{v}%' for v in o)}({'·'.join(comp['hours'])}시), "
+                f"{len(o) - 1}시간 연속 하락. 오른 가게: "
+                f"{', '.join(r['shop'] + ' ' + '→'.join(map(str, r['share_by_hour'])) for r in comp['rising_shops']) or '없음'}")
+    except Exception as e:                    # the report goes out without it rather than not at all
+        s["competition"] = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
+    try:
+        s["market_gaps"] = market_gaps(est, now, model.catalog(db))
+    except Exception as e:
+        s["market_gaps"] = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
     s["your_last_decisions_and_what_followed"] = recent_decisions(now)
     s["negotiations_last_hour"] = talks
+    s["buyers_who_left_after_our_first_reply"] = left_after_first(now)
     s["requests_not_in_stock_last_hour"] = missed_texts
     prior = jsonl(LOG, 0)
     s["your_notes_from_last_hour"] = prior[-1].get("notes") if prior else None
@@ -378,9 +600,13 @@ Review, in this order:
 1. Your last decisions: did the code run on them (negotiations on the current versions), and what followed?
    Undo or adjust what did not work.
 2. Anything wrong: alerts, a process not writing, template replies, haiku saying something off in the excerpts,
-   buyers asking for what we do not hold, complaints.
+   buyers asking for what we do not hold, complaints. When the deal rate or our share moved, find where in
+   "competition": food or goods, SKUs a rising shop sells or the rest, asks at or under the market or over it,
+   buyers who left after our first reply. Name a cause only from a part with enough talks to carry the change
+   (11-05 09:01 blamed food for a fall when food had 2 talks of 323).
 3. What to change: numbers, playbook, or nothing. Change only for a reason in the record; no change is a fine
    answer.
+{findings}
 Answer with one JSON object only:
 {{"review": "<what your last decisions did, or that there were none>",
  "problems": ["<each thing wrong you found>"],
@@ -529,7 +755,7 @@ def decide(md, now):
     prompt = PROMPT.format(policy=describe(p), negotiation=json.dumps(b["negotiation"] or "(none)"),
                            forum=json.dumps(b["forum"] or "(none)"), skips=json.dumps(skips),
                            chars=policy.GUIDE_CHARS, skip_hours=policy.SKIP_HOURS, skip_max=policy.SKIP_MAX,
-                           report_spec=REPORT_SPEC, why_spec=WHY_SPEC.format(skip=" / restock_skip"), summary=json.dumps(s, ensure_ascii=False, indent=1)) + "\n\n" + UPVOTE_RULE + rules.section("shop")
+                           report_spec=SHOP_REPORT_SPEC, findings=FINDINGS_SHOP, why_spec=WHY_SPEC.format(skip=" / restock_skip"), summary=json.dumps(s, ensure_ascii=False, indent=1)) + "\n\n" + UPVOTE_RULE + rules.section("shop")
     memory = MEMORY.read_text(encoding="utf-8") if MEMORY.exists() else ""
     index, looked, used, answer = archive_index(now), [], [], None
     db = model.connect()
