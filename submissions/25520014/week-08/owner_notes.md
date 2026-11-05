@@ -342,6 +342,14 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   yes, even when it names the grade: yms979 sent "the refurbished unit? I can offer 1600000" to a C at 1,700,000, the
   talk closed at 1,700,000, it rated 1 star with "Avoid" and stopped coming (1 of 304 fallback closes in 72 h). New
   tunnel investigations-organisation-dealtime-photographs. Watch: fallback closes, receipt mismatch reviews.
+- 11-06 01:43 (seller, kit restarted 01:43:32-01:44:52, new tunnel merely-wondering-pretty-connections). A goods
+  floor is now the offered unit's own cost x (1 + min_margin) + warranty premium, not the mean cost of the SKU and
+  grade held (POOL_FLOOR = False); the cheapest unit still goes first. One dear unit lifted the cheap ones' floor over
+  the market: in 12 h, 316 A talks had the cheapest unit's floor under the market's A and the mean floor over it, 39%
+  closed against 50%. Dear units left over now sit until the underwater rule (1 h) and sell near cost: expect more
+  goods sold at about 0 margin; that is by design, do not report it as a bug. Kept as is: buying A units whose floor
+  is over the market on arrival (24 h: 421 units, 97% sold, median 0.8 h, +16.6M, 4.6% of cost). Watch: A share on
+  fast SKUs (G75f11c19), goods margin, units unsold after 3 h.
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)

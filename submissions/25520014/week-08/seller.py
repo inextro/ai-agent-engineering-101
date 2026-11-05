@@ -254,6 +254,12 @@ FALLBACK_GRADES = ("A", "B")
 # offers (11-04) 14 lapsed and the buyer later sent at least its price, 5 of those ended with no deal (3.5M at the
 # fallback price; e8dec12d 다우닝 3인: C offered at 1,550,000, buyer 1,400,000, then 1,500,000 ... 1,775,000, cancelled).
 FALLBACK_MAX = 2
+# Goods floors on the mean cost of the SKU and grade held (find_units _pool_cost, 11-04 13:48) or on the offered
+# unit's own cost (False, 11-06 02 h). The mean kept dear units from being left over, but one dear unit lifted the
+# floor of the cheap ones over the market: 12 h to 11-06 01:40, 316 A talks had the cheapest unit's own floor under
+# the market's A price and the mean floor over it, 39% closed against 50% with both under. A dear unit left over goes
+# underwater after clearance.UW_HELD_H (11-05 01:40, later than the mean floor) and sells just under the market.
+POOL_FLOOR = False
 B_FALLBACK = True
 
 
@@ -299,8 +305,8 @@ def find_units(text, taken):
                                           u["cost"] if u.get("kind") == "goods" else 0, u.get("supplied_at") or 0)):
         by_grade.setdefault(u["grade"], u)
     for g, u in by_grade.items():
-        if u.get("kind") == "goods":
-            same = [x["cost"] for x in named if x["sku"] == u["sku"] and x["grade"] == g]
+        if u.get("kind") == "goods" and POOL_FLOOR:
+            same =[x["cost"] for x in named if x["sku"] == u["sku"] and x["grade"] == g]
             by_grade[g] = dict(u, _pool_cost=sum(same) / len(same))
     return by_grade, inv
 
@@ -743,8 +749,11 @@ class Seller(AgentExecutor):
             cs = [x for x in units if x["sku"] == u["sku"] and x.get("grade") == g and x["unit"] not in held]
             if not cs:
                 continue
-            c = min(cs, key=lambda x: (x.get("supplied_at") or 0))          # the one held longest
-            c = dict(c, _pool_cost=sum(x["cost"] for x in cs) / len(cs))
+            if POOL_FLOOR:
+                c = min(cs, key=lambda x: (x.get("supplied_at") or 0))      # the one held longest
+                c = dict(c, _pool_cost=sum(x["cost"] for x in cs) / len(cs))
+            else:                                    # the cheapest on its own cost, as find_units (POOL_FLOOR)
+                c = min(cs, key=lambda x: (x["cost"], x.get("supplied_at") or 0))
             co = option(c, policy.load(), deal["arm"], deal.get("wants_warranty", True))
             if offer < close_floor(co):
                 continue
