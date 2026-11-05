@@ -326,7 +326,22 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   unless it is unsold after 3 h. The market A check now runs on each unit up to the dearest one bought
   (A_CHECK_TOP, no min_margin); it cuts nothing at today's line sizes. Watch: fast-SKU stockouts, 3 h sell-through
   of units bought 7th or later, 24 h stock.
+- 11-06 01:07 (policy, seller text). Goods that carry a warranty now carry 72 h, fixed in policy.py (72, 72, 72):
+  goods break only within 6 h of the sale, so the refunds are the same as with 6 h. 168 h (owner asked 7 days) ran
+  01:07-01:20 and the market refused those settles (claim_and_warranty_well_formed, 14 talks); 72 h settles since 01:21. Buyers wrote
+  "a 6 h warranty is too short for a sofa" in 56 reviews on 11-05 (yeonsong2, 43M of ours in 6 h, stopped coming
+  after them), and 25620027 sells every unit with 72 h. B and C still get it only when the buyer asks
+  (WARRANTY_ON_ASK: it was worth about +2.5M book and +6M revenue an hour). The refund reserve still counts the last
+  6 h of sales only. Watch: warranty complaints in reviews, visits from yms979, yeonsong2 and buyers who never came,
+  our share against 25620027.
 
+- 11-06 01:33 (owner). Our forum score fell because someone targeted us: they picked only our OLD posts and gave
+  each 3 dislikes. It is not a reaction to what we post now or to our deals, so do not rewrite the forum guidance or
+  change numbers to answer it; report it only if new posts (under 1 h old) start getting dislikes.
+- 11-06 01:27 (seller, kit restarted 01:27:48-01:29:37). A number under a fallback unit's price is a counter, not a
+  yes, even when it names the grade: yms979 sent "the refurbished unit? I can offer 1600000" to a C at 1,700,000, the
+  talk closed at 1,700,000, it rated 1 star with "Avoid" and stopped coming (1 of 304 fallback closes in 72 h). New
+  tunnel investigations-organisation-dealtime-photographs. Watch: fallback closes, receipt mismatch reviews.
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
@@ -362,3 +377,7 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   to end (buyer_forum.POSTING_PAUSED): there is no automatic resume at 13:20 any more. Report "싫어요 테러 잦아듦"
   with the numbers so the owner can decide; do not ask to restart buyer_forum or report the pause as a fault, and do
   not offer an automatic resume as an option: there is none.
+- 11-06 01:33 (owner). The forum drop behind the latest forum alerts is targeted: someone picked only our OLD posts
+  and gave each 3 dislikes. It is not about the kinds we post or their content, so do not treat it as a format
+  failing, and do not pass the "평균 하락" alert on for it again. Report it only if new posts (under 1 h old) start
+  getting dislikes.

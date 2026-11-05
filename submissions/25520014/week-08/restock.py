@@ -517,7 +517,7 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
     balance = inv.get("balance") or 0
     left = policy.hours_left(now)
     lines_w, every_min = (lines, every) if lines else cadence(now)
-    refunds = est.refund_exposure(p["warranty_hours"] or 6)
+    refunds = est.refund_exposure(min(p["warranty_hours"] or 6, model.BREAK_WINDOW / 3600))   # breaks come within 6 h
     reserve = policy.reserve(p, inv.get("bankrupt_line"), *refunds)
     room = balance - reserve
     plan = {"lines_per_window": lines_w, "window_minutes": round(every_min, 1), "reserve": round(reserve),
