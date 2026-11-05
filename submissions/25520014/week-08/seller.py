@@ -821,7 +821,10 @@ class Seller(AgentExecutor):
             # buyers answer with numbers: at 19:40-19:45 three of the first four told of the C sent their number again.
             # A number at or over the C's price takes the C (owner, 11-04 19:50: A sells anyway, sell C when we can),
             # unless it reaches what closes the A or B: that buyer is paying for the better grade
-            took = accepts(text) or wants_lower(text, fb) or (
+            # a lower number is a counter even when it names the grade (11-06): yms979 sent "the refurbished unit? I
+            # can offer 1600000" to a C at 1,700,000, the talk closed at 1,700,000 and it rated 1 star, "Avoid"
+            low = offer is not None and offer < opts[fb]["ask"]
+            took = not low and (accepts(text) or wants_lower(text, fb)) or (
                 offer is not None and opts[fb]["ask"] <= offer and not REFUSE.search((text or "").lower())
                 and (cur not in opts or offer < close_floor(opts[cur])))     # "No, the original one. 1603432" is a no
             if took and self.swap_if_taken(task_id, deal, fb) is not False:
