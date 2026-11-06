@@ -83,6 +83,9 @@ ARCHIVE_FULL_H = 48                      # every hour this recent is in the inde
 LOOKUP_ROUNDS, LOOKUP_HOURS = 2, 3
 WHAT = ("negotiations", "settles", "broken", "forum", "balance", "board", "decision")
 UPVOTES_MAX = 5
+UPVOTES_OFF = True    # owner 11-06 11:40: no likes from our shop or buyer. Patch 3.4 scores buyers by stances from other
+                      # accounts, so our likes raise rival buyers' forum (we had liked shaun0927 8 times, BJEon01 and
+                      # SungJinho once each, the buyers now above us)
 REPORT_CHARS = 1300                      # the report arrives on Telegram every hour: short (700 before the bullets, 11-05)
 # Bullets, not prose (owner, 11-05 09 h: the four-sentence reports were hard to read). Sections are a header line
 # each, then "- " bullets in short noun-ending phrases (개조식), one fact a bullet, "\n" between lines.
@@ -821,6 +824,8 @@ def decide(md, now):
 def upvote(md, ids, db, role):
     """Like the posts the manager says it used: known posts by others, not liked by us before, at most UPVOTES_MAX.
     `ids` holds {"id", "why"} objects (bare ids are taken too). Returns [(id, why)] sent (the kit posts the votes from .market/outbox.jsonl; they count once we have 5 deals)."""
+    if UPVOTES_OFF:
+        return []
     path = policy.DATA / f"votes_{role}.json"        # one file per role: the two managers never write the same one
     try:
         done = set(json.loads(path.read_text(encoding="utf-8")))

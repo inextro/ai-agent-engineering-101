@@ -362,6 +362,9 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   please." and "... certificate attached." (95% of its paid deals here): since 01:21 it rates us 1.4-1.7 with or
   without a warranty while other shops get about 3.9 from it in the same hours. It bought 127M a day (7.5% of our
   revenue, 24.5M margin), so expect revenue and goods talks to drop by about that; it is by design, not a fault.
+- 11-06 11:32 (owner, both managers restarted). No likes any more: upvote() sends nothing (manager.UPVOTES_OFF), for
+  the shop and the buyer. Patch 3.4 scores buyers by stances from other accounts, so our likes lifted rival buyers'
+  forum. Leave "upvote" empty; we never dislike either.
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
@@ -430,3 +433,6 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   and raise 0.40 unchanged. Each window now has "haggle": compare policy 5 with 4 on paid_over_first_ask (baseline
   last hour 0.927), deals_at_our_first_offer (5 of 84), lost_with_an_ask_under_cap (11) and deals per hour. Give it
   two hours before you move it; after that open_under is yours within its range, one of open_under/raise at a time.
+- 11-06 11:32 (owner). No likes from us (shop or buyer): our likes raised rivals' forum (we had liked shaun0927 8
+  times, BJEon01 and SungJinho once, all now above us). Our forum fell 0.915 -> 0.892 between 11:10 and 11:20, the only
+  buyer that moved, likely one new dislike stance (voters are not public). Leave "upvote" empty; never dislike.
