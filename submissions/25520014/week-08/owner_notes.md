@@ -406,6 +406,9 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   unit since 11-04 16:50 whenever it was bought, and the C units are already named as a cheaper option in the first
   reply (mention_alt, about 300 times a day; our C asks 0.565 of list against the market's 0.634) and still do not
   sell to us. Book counts them at cost; storage is 1% a day. Report a new cause under 발견 only.
+- 11-06 21:00 (owner; manager restarted). The 19:19 stale-stock line above reached the code but not your process:
+  the kit restart does not restart you, so the 20:01 report still asked for the clearance decision. From 21:01 the
+  line says no decision is needed. The forum process (up since 11-05 07:09) was restarted at 20:11 for the same reason.
 
 ## buyer
 
@@ -520,3 +523,5 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   gone: since patch 3.5 the forum rating scores as its value, so a rival's rise costs us nothing (17:05 it fired at
   percentile 0.83 while the value rose 0.885 -> 0.891). It is now "값 하락": the value more than 0.01 under the board
   an hour ago (12 h replay: fires once, 10:40 0.915 -> 0.891). The percentile is shown for reference only.
+- 11-06 21:05 (owner; buyer_manager restarted). The 19:12 "값 하락" forum check above was in the file but not in your
+  process until this restart; reports 19:05 and 20:05 still ran the old percentile check.
