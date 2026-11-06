@@ -242,7 +242,8 @@ def excerpts(now):
 
 
 STALE_H = 24                 # a unit unsold this long is stale stock (owner 11-04)
-STALE_ALERT = 1_000_000      # stale stock at cost from which the report asks the owner about wider clearance
+STALE_ALERT = 1_000_000      # stale stock at cost from which the report notes it (11-06 19 h: no owner decision asked;
+                             # clearance has covered every stale goods unit since 11-04 16:50, mention_alt names the C)
 
 
 def stale_stock(units, now):
@@ -535,7 +536,8 @@ def summary(md, now):
         s["health"]["alerts"].append(
             f"{STALE_H}시간 넘게 안 팔린 재고 {st['units']}개, 원가 {st['at_cost']:,}원 "
             f"(많은 곳: {', '.join(f'{c} {v:,}' for c, v in st['top_categories_by_cost'][:3])}): "
-            "할인 처분을 11-03 23:55 이후 산 재고로 넓힐지 소유자 결정 필요")
+            "clearance가 이미 산 시점과 관계없이 적용 중이고 C는 첫 답장에 대안으로 언급 중, 보관료 하루 1%만 듦. "
+            "소유자 결정 불필요, 원인이 새로 보이면 발견에만 적기")
     try:
         s["competition"] = comp = competition(db, now, model.catalog(db))
         o = comp["our_share_by_hour"]

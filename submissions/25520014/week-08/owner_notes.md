@@ -398,6 +398,15 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   for +0.005 on the star ranking, by design. These talks log arm "star_cap": lower prices there are not a fault.
   Report Kiro729's mean stars here and its deals over 0.70 of list if the cap stops holding.
 
+- 11-06 19:19 (owner; seller restarted). A goods talk whose ask is within 1% of its floor (TIGHT_GAP; most A talks
+  with the arm at 0.0) starts at its last step: the first counter is the floor, called final, and an offer up to 1%
+  under the floor closes from the first offer (FLOOR_TOL, never under cost). Prices do not change; the 15-21 won
+  steps and "we lowered" on them are gone. Fewer turns and earlier "final price" in these talks are by design.
+- 11-06 19:19 (owner). Stale stock (24 h+ unsold): no owner decision needed. Clearance has covered every stale goods
+  unit since 11-04 16:50 whenever it was bought, and the C units are already named as a cheaper option in the first
+  reply (mention_alt, about 300 times a day; our C asks 0.565 of list against the market's 0.634) and still do not
+  sell to us. Book counts them at cost; storage is 1% a day. Report a new cause under 발견 only.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
