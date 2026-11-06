@@ -459,12 +459,34 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
     return None
 
 
-def accept_policy(order, c, price, m):
+BREAK_WINDOW_H = 6          # goods break up to 6 h after the sale (agent.md): a warranty this long covers every break
+ACCEPT_MIN = 0.0            # a goods grade is paid for only if its expected saved rate is at least this
+
+
+def goods_saved(p, r, warranty):
+    """Expected saved rate of one goods deal (patch 3.4: saved = surplus / list price; a deal that served nothing
+    counts -1, or 0 when refunded): it lasts with 1 - p and saves 1 - r of the list price; it breaks with p and
+    counts 0 under a warranty, -1 without one."""
+    return (1 - p) * (1 - r) - (0 if warranty else p)
+
+
+def accept_policy(order, c, price, m, receipt=None, list_price=None):
+    """What the kit must check before paying. Goods (11-06, patch 3.4): a grade is accepted when its expected saved
+    rate at this price is at least ACCEPT_MIN. The old rule (list x (1 - p) >= price) lost the price when a unit
+    broke; the score now counts -1 for an unrefunded break whatever the price, so without a warranty C is worth
+    paying only up to about 46% of the list (p 0.35) instead of 65%. The seller's receipt says the warranty; when we
+    count on it, the accept asks for it too so the kit refuses a checkout that comes without it."""
     if c["kind"] == "food":
         hours = order.get("use_within_hours")
         return {"cert": True, "min_hours_left": round(hours + FOOD_MARGIN_H, 2)} if hours else {"cert": True}
-    ok = [g for g in "ABC" if c["list"] * (1 - m.breaks[g]) >= price]
-    return {} if ok == ["A", "B", "C"] else {"grades": ok or ["A"]}
+    w = (receipt or {}).get("warranty_hours")
+    warranty = isinstance(w, (int, float)) and w >= BREAK_WINDOW_H
+    r = price / (list_price or c["list"])
+    ok = [g for g in "ABC" if goods_saved(m.breaks[g], r, warranty) >= ACCEPT_MIN]
+    acc = {} if ok == ["A", "B", "C"] else {"grades": ok or ["A"]}
+    if warranty and any(goods_saved(m.breaks[g], r, False) < ACCEPT_MIN for g in ok):
+        acc["warranty_hours"] = BREAK_WINDOW_H
+    return acc
 
 
 FOOD_BAND_TOP = {"A": 1.0, "B": 0.80, "C": 0.45}   # a food grade's highest share of shelf life left (agent.md)
@@ -607,7 +629,7 @@ def main():
                 log(f"receipt price {price} above our cap {cap}: not taking it")
                 rec["end"], receipt = f"receipt price {price} above the cap", None
                 continue                        # try the next shop while time is left
-            acc = accept_policy(order, c, price, m)
+            acc = accept_policy(order, c, price, m, receipt, (cat.get(item) or {}).get("list_price") if item else None)
             why = doomed(receipt, acc, cat.get(item or c["sku"]) or {})
             if why:                             # the kit would refuse to pay: no deal here, the next shop may do
                 log(f"{c['shop']}: receipt {why}: not taking it")
