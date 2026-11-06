@@ -350,6 +350,14 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   goods sold at about 0 margin; that is by design, do not report it as a bug. Kept as is: buying A units whose floor
   is over the market on arrival (24 h: 421 units, 97% sold, median 0.8 h, +16.6M, 4.6% of cost). Watch: A share on
   fast SKUs (G75f11c19), goods margin, units unsold after 3 h.
+- 11-06 10:46 (seller and share_watch, kit restarted at 10:46). Two buyers get "none in stock" from their first
+  message on (seller.BLOCKED, refusals in data/blocked.jsonl): totato2203 ("Quote the total price. Require a market
+  certificate.") now rates every shop 1 star, and Q00 ("(buyer: q00)") rates every large shop 1 star "SCAM". Since
+  06:09 the board's star ranking is the mean over buyer accounts of each one's mean stars here (plus 5 at 3), so
+  each account is 1/50 of it; blocking freezes their means (ours 4.19 and 1.00). Fewer goods talks from them is by
+  design. shaun0927 (also low, "Certificate attached, please.") is kept for now: it buys 127M a day. New alert
+  "warranty" in alerts.md: buyers may want a warranty on goods B/C (patch 3.4 scores an unrefunded break -1); when it
+  rings, put it in 결정 필요 for the owner (giving B one by default), do not change WARRANTY_ON_ASK yourself.
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
@@ -406,7 +414,7 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   unit under a warranty still saves it) and is the goods accept threshold. Expect fewer deals (backtest at 0.20:
   -24%) and a higher Saved (0.246 -> about 0.29); that drop in deals is intended. Weigh Saved (0.5) against deals
   (0.1) by their board percentiles in our_buyer_score_now.
-- 11-06 10:55 (owner). Dislike alerts on our buyer posts (code, "싫어요 경보"): while the bombing is on (30%+ of
+- 11-06 10:48 (owner). Dislike alerts on our buyer posts (code, "싫어요 경보"): while the bombing is on (30%+ of
   other buyers' posts disliked in the last hour) only a post of ours with 2+ dislikes is raised, since the bomber's
   one dislike weighs 1 in all; with no bombing any dislike is raised. Put it under 결정 필요; posts are not paused
   by code, the owner decides. Say each hour whether the bombing is on, fading or over.

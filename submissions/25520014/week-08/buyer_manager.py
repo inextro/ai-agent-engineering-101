@@ -211,7 +211,7 @@ def forum_alerts(db, now, us):
         resume = None
     on = storm and storm[0]["share"] is not None and storm[0]["share"] >= STORM_ON
     was = any(s["share"] is not None and s["share"] >= STORM_ON for s in storm[1:])
-    # 7. (owner 11-06 10:50, STANCES) dislikes on our posts of the last DISLIKE_LOOK_H: while the bombing is on, the
+    # 7. (owner 11-06 10:48, STANCES) dislikes on our posts of the last DISLIKE_LOOK_H: while the bombing is on, the
     # bomber's one dislike a post is expected and weighs 1 in all, so only a post with BOMB_DISLIKES or more (another
     # account too) is reported; with no bombing any dislike is reported. Reported, not paused: a stance stays
     # whether or not we keep posting, so the owner decides.
