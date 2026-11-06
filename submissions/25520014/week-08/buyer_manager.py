@@ -175,6 +175,7 @@ def our_forum(board, us):
     return f, sum(1 for b in ranked if (b.get("forum") or 0) < f) / (len(ranked) - 1)
 
 
+FORUM_DROP = 0.01  # how far the forum value may fall in an hour before "값 하락" fires (patch 3.5: value, not rank)
 AVG_DROP = 0.03   # how far under the forum score the last 2 h of posts must average before "평균 하락" fires
 
 
@@ -209,10 +210,15 @@ def forum_alerts(db, now, us):
     last6 = [i for i, t in mine if t < now - 600][-6:]
     if len(last6) == 6 and all(votes.get(i, (0, 0))[0] == 0 for i in last6):
         out.append(f"투표 끊김: 최근 글 6편(#{last6[0]}~#{last6[-1]})이 10분이 지나도 좋아요 0입니다")
-    # 4. percentile fell: more than 0.15 under its best in the last 6 h of board snapshots
-    seen = [p for p in (our_forum(b, us)[1] for b in snaps) if p is not None]
-    if pct is not None and seen and max(seen) - pct > 0.15:
-        out.append(f"순위 하락: forum 백분위 {pct:.2f}, 최근 6시간 최고 {max(seen):.2f}에서 {max(seen) - pct:.2f} 떨어졌습니다")
+    # 4. value fell: patch 3.5 (11-06) scores the forum rating as itself (0 to 1), not as a percentile, so a rival's
+    # rise no longer costs us; until then this line fired on a percentile drop (17:05: 0.83 while the value rose
+    # 0.885 -> 0.891). Now: the value more than FORUM_DROP under the snapshot about an hour ago
+    # (board rows are stored only when the board changed, so the newest row before the hour is its value then)
+    row = db.execute("SELECT raw FROM board WHERE ts <= ? ORDER BY ts DESC LIMIT 1", (now - 3600,)).fetchone()
+    before = our_forum(json.loads(row[0]), us)[0] if row else None
+    if score is not None and before is not None and before - score > FORUM_DROP:
+        out.append(f"값 하락: forum 값 {score:.3f}, 1시간 전 {before:.3f}에서 {before - score:.3f} 떨어졌습니다"
+                   + (f" (백분위 {pct:.2f}, 참고용)" if pct is not None else ""))
     # 6. dislike bombing (owner 11-05): from 11-05 01 h one voter disliked nearly every post in the market (buyer
     # posts with a dislike: 23 h 0/290, 03 h 269/277), every kind of ours got one, and buyer_forum's 12 h rule left
     # nothing to post after 03:43. The owner holds our posts while it lasts and wants to hear when it fades.
@@ -371,7 +377,8 @@ deal it rates the shop from the market's receipt and posts its purchases on the 
 Once an hour you review the record and set what the code runs on next. The owner does not watch; they read your
 report afterwards and correct you when needed.
 
-Score (percentiles among buyers; the rules page below has the current formula, patch 3.4 of 11-06):
+Score (percentiles among buyers, except the forum rating, which counts as its value 0 to 1 since patch 3.5 of 11-06;
+the rules page below has the current formula):
 0.5 x Saved + 0.3 x forum rating + 0.1 x number of deals + 0.1 x number of our buyer posts (hidden ones do not count).
 - Saved = sum over deals of (list price - price paid) / list price, divided by (deals + 100). A deal that served
   nothing (goods broken, food not lasting) counts -1, or 0 when a warranty refunded it, whatever its price. With
@@ -424,7 +431,7 @@ Review, in this order:
 2. Anything wrong: deals far under the orders, many orders ending the same way, template messages, posts without
    likes, too few deals for the 20 needed.
    "forum_strategy_checks" holds code checks that the forum strategy's premises broke (votes stopped, the
-   percentile fell, posting stopped). When "alerts" is not empty, put each in '결정 필요:' with its likely cause
+   forum value fell over the hour, posting stopped). When "alerts" is not empty, put each in '결정 필요:' with its likely cause
    from the record and the owner's options. Do not rewrite the forum guidance for these yourself: the owner decides
    the forum strategy. Since patch 3.4 the rating takes one stance per account per author, and one account has
    disliked nearly every buyer post since 11-05 01 h; our posts go out every 5 minutes on purpose. The owner knows
