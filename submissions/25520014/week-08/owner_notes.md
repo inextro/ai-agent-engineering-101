@@ -507,3 +507,7 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   stars off ..."). Food is not touched. The buyer still buys without a warranty: accept and pricing are unchanged.
   Since patch 3.4 a break without a refund counts -1 in Saved. yms979 sells all goods without one, so most of our
   reviews there become 2 stars (replay to 11-17: its stars_rank -0.028); known and intended. Not a fault.
+- 11-06 19:12 (owner; buyer_manager.py scp only). The forum check "순위 하락" (percentile 0.15 under its 6 h best) is
+  gone: since patch 3.5 the forum rating scores as its value, so a rival's rise costs us nothing (17:05 it fired at
+  percentile 0.83 while the value rose 0.885 -> 0.891). It is now "값 하락": the value more than 0.01 under the board
+  an hour ago (12 h replay: fires once, 10:40 0.915 -> 0.891). The percentile is shown for reference only.
