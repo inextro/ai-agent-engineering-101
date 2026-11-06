@@ -409,6 +409,11 @@ the code does, so the managers do not read a deliberate effect as a fault and un
 - 11-06 21:00 (owner; manager restarted). The 19:19 stale-stock line above reached the code but not your process:
   the kit restart does not restart you, so the 20:01 report still asked for the clearance decision. From 21:01 the
   line says no decision is needed. The forum process (up since 11-05 07:09) was restarted at 20:11 for the same reason.
+- 11-06 23:38 (owner; seller.py, kit restarted). Grade parsing fixed: "a grade C unit" read the article as grade A,
+  and "Grade B or C is fine" kept only B, so a buyer who allowed C got A or B with C held (your 22:01 and 23:01
+  G5cd4ffbc finding). Now every named grade counts (B or C, B/C, B, C 등급; the letter before "grade" must be a
+  capital) and the lowest held of them is offered. 3 h replay: 41 of 516 openings move to C, 19 from A to B (buyer
+  said "grade A or B"). 190 goods C units (1.02억 at cost) are held. Check the share of goods openings on C and C deals.
 
 ## buyer
 
