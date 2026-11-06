@@ -58,6 +58,10 @@ EDGE = 0.05                 # share of the list price we expect to save under th
                             # at or above it (else a market priced near the cap would leave no goods order worth trying)
 P = buyer_policy.load()     # read once per order (the kit starts this script for every order)
 QUOTES = P["quotes"]        # shops that get the opening message (buyer_policy)
+# 11-07 01 h (owner: more shops for food): in 162 food orders since 18:00 with three quotes, the third-scored shop
+# asked less than the first two in 26 (by 10.5% of list on average, 0.017 per order), so a fourth quote should still
+# find cheaper food. Food has no breaks and is our best per-deal saved. Goods keep QUOTES. Undo: FOOD_EXTRA_QUOTES = 0.
+FOOD_EXTRA_QUOTES = 1
 ROUNDS = 6                  # offers we send to one shop
 SMALL_STEP = 0.02           # a shop's concession under this share of its last ask: take the ask (under our cap)
 OPEN_UNDER = P["open_under"]    # the first offer: this share of the lower of the ask and the usual price (buyer_policy)
@@ -647,6 +651,8 @@ def main():
         finish(rec, result)
         return
     seen, live = set(), []
+    n_quotes = QUOTES + (FOOD_EXTRA_QUOTES if order.get("kind") == "food" else 0)
+    rec["n_quotes"] = n_quotes
     # ask QUOTES shops at once; when every one of them turns us down (or says its food is too short), ask the next
     # QUOTES while time is left (11-04: 110 of 450 orders in 6 h ended at the first question)
     while not any(t[2]["status"]["state"] in ("TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED") for t in live):
@@ -658,7 +664,7 @@ def main():
                 seen.add(c["shop"])
                 c["ratio"] = m.ratio(c["shop"])
                 picks.append(c)
-            if len(picks) == QUOTES:
+            if len(picks) == n_quotes:
                 break
         if not picks or (rec.get("rounds_of_quotes") and time.time() - started > DEADLINE - NEXT_SHOP_SECS):
             break
