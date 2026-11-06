@@ -211,6 +211,23 @@ def forum_alerts(db, now, us):
         resume = None
     on = storm and storm[0]["share"] is not None and storm[0]["share"] >= STORM_ON
     was = any(s["share"] is not None and s["share"] >= STORM_ON for s in storm[1:])
+    # 7. (owner 11-06 10:50, STANCES) dislikes on our posts of the last DISLIKE_LOOK_H: while the bombing is on, the
+    # bomber's one dislike a post is expected and weighs 1 in all, so only a post with BOMB_DISLIKES or more (another
+    # account too) is reported; with no bombing any dislike is reported. Reported, not paused: a stance stays
+    # whether or not we keep posting, so the owner decides.
+    if STANCES:
+        recent = [(i, votes[i][1]) for i, t in mine if t > now - DISLIKE_LOOK_H * 3600 and i in votes]
+        state = "진행" if on else "없음"
+        if storm and storm[0]["share"] is not None:
+            state += f"(최근 1시간 다른 buyer 글 {storm[0]['posts']}편 중 {storm[0]['disliked']}편 싫어요)"
+        need = BOMB_DISLIKES if on else 1
+        bad = [(i, d) for i, d in recent if d >= need]
+        if bad:
+            out.append(f"싫어요 경보: 테러 {state}인데 최근 {DISLIKE_LOOK_H}시간 우리 글 중 싫어요 {need}개 이상 "
+                       + ", ".join(f"#{i}({d}개)" for i, d in bad) + ". "
+                       + ("테러 계정 말고 다른 계정도 싫어요를 눌렀다는 뜻입니다"
+                          if on else "테러가 아닌 계정의 싫어요입니다")
+                       + ". 글 정지 여부는 owner가 정합니다")
     if on and not STANCES:
         hours = next((k for k, s in enumerate(storm) if s["share"] is None or s["share"] < STORM_ON), len(storm))
         out.append(f"싫어요 테러 진행: 최근 1시간 다른 buyer 글 {storm[0]['posts']}편 중 {storm[0]['disliked']}편"
@@ -238,6 +255,8 @@ STORM_ON, STORM_OFF = 0.30, 0.10   # share of other buyers' posts with a dislike
 FORUM_VOTES_H = 12                 # buyer_forum.VOTES_H: a kind with a disliked post waits this long (not imported: its loop)
 FORUM_PAUSED = False               # buyer_forum.POSTING_PAUSED (owner 11-05 08:10 paused; 11-06 10:40 resumed, patch 3.4)
 STANCES = True                     # patch 3.4: forum rating = one stance per account per author, not per post
+BOMB_DISLIKES = 2                  # during the bombing a post of ours with this many dislikes is reported (owner 11-06)
+DISLIKE_LOOK_H = 2                 # our posts this many hours back are checked for dislikes (votes land within minutes)
 MAIN_TAGS = ("가격 동향", "상품 시세", "구매 후기")   # the tags of buyer_forum.MAIN, the only kinds it posts (ONLY_MAIN)
 
 
@@ -379,10 +398,12 @@ Review, in this order:
    "forum_strategy_checks" holds code checks that the forum strategy's premises broke (votes stopped, the
    percentile fell, posting stopped). When "alerts" is not empty, put each in '결정 필요:' with its likely cause
    from the record and the owner's options. Do not rewrite the forum guidance for these yourself: the owner decides
-   the forum strategy. A dislike on one of our posts is not a problem by itself since patch 3.4: the rating takes
-   one stance per account per author, and one account has disliked nearly every buyer post since 11-05 01 h
-   ("market_dislike_share_by_hour_newest_first"); our posts go out every 5 minutes on purpose. Report a forum
-   problem only from forum_score or its percentile.
+   the forum strategy. Since patch 3.4 the rating takes one stance per account per author, and one account has
+   disliked nearly every buyer post since 11-05 01 h; our posts go out every 5 minutes on purpose. The code raises
+   "싫어요 경보" only for dislikes past that account (2+ on a post while the bombing is on, any while it is off);
+   other single dislikes are not a problem. Every hour, say in one line under 상황 whether the bombing is on,
+   fading or over, from "market_dislike_share_by_hour_newest_first" (share of other buyers' posts with a dislike,
+   under 2% before 11-05 01 h).
 3. What to change: numbers, playbook, or nothing. Change only for a reason in the record; no change is a fine answer.
    Mind the trade: lower offers and a higher min_saved raise Saved per deal but lose deals.
 4. Findings ('발견'): read the orders and posts for what the code cannot count, and report only what is new: a

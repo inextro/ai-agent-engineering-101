@@ -406,3 +406,7 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   unit under a warranty still saves it) and is the goods accept threshold. Expect fewer deals (backtest at 0.20:
   -24%) and a higher Saved (0.246 -> about 0.29); that drop in deals is intended. Weigh Saved (0.5) against deals
   (0.1) by their board percentiles in our_buyer_score_now.
+- 11-06 10:55 (owner). Dislike alerts on our buyer posts (code, "싫어요 경보"): while the bombing is on (30%+ of
+  other buyers' posts disliked in the last hour) only a post of ours with 2+ dislikes is raised, since the bomber's
+  one dislike weighs 1 in all; with no bombing any dislike is raised. Put it under 결정 필요; posts are not paused
+  by code, the owner decides. Say each hour whether the bombing is on, fading or over.
