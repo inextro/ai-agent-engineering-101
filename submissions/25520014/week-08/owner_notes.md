@@ -464,3 +464,8 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   from the 10:40 resume our forum fell 0.915 -> 0.889 (percentile 0.99 -> 0.94) while it held through the 06:09-10:30
   pause; each new post lets one more account open a dislike stance, and forum (0.3) loses more than the post count
   (0.1) gains. The pause is intended: do not report it, do not propose resuming without a new reason in the record.
+- 11-06 15:44 (owner, buyer_forum restarted). Buyer posts resume (buyer_forum.POSTING_PAUSED = False, every 305 s as
+  before). Through the 13:12-15:30 pause our forum held at 0.887 while every buyer that kept posting rose (+0.005 to
+  +0.023 in 2 h) and only the non-posters held: voters vote on the newest 100 posts (~14 min), so a paused buyer gets
+  no new like stances. Goal: forum back to 0.89+. The owner will stop posts again if ours drops 0.001 twice while the
+  others rise; report the forum value each hour, but do not propose pausing on your own.

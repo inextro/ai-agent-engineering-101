@@ -76,7 +76,11 @@ ONLY_MAIN = True          # owner 11-04 01:4x: for now only those three shapes, 
 # Owner 11-06 13:25: posts stop again. From the 10:40 resume our forum fell 0.915 -> 0.889 (percentile 0.99 -> 0.94)
 # in 2.5 h while it held at 0.915 through the 06:09-10:30 pause: each new post lets one more account open a dislike
 # stance. Forum (0.3, scores packed at 0.83-0.91) loses more than the post count (0.1, about +0.06 ALL by the end).
-POSTING_PAUSED = True     # (was False from 11-06 10:40: posts resume. Patch 3.4 (06:00) counts one stance per voting account
+# Owner 11-06 15:44: posts resume. Through the 13:12-15:30 pause our forum held at 0.887 while every buyer that kept
+# posting rose (+0.005..+0.023 in 2 h, even with 6 posts) and the two others that stopped held too: voters vote on the
+# newest 100 posts (~14 min), so a buyer off that window gets no new like stances. Stop again if ours falls 0.001 twice
+# while the others rise (the 11:20-13:20 drops came only while posting; cause unknown, voters are not public).
+POSTING_PAUSED = False    # (was True from 13:12; before that False from 11-06 10:40: posts resume. Patch 3.4 (06:00) counts one stance per voting account
                           # per author, so the bomber's dislikes weigh 1 in all however many posts we write (our
                           # forum 0.343 -> 0.915 at 06:00 with the bombing still on), and posts count 0.1
 SKIP_DISLIKED = False     # patch 3.4: a post's own dislike no longer moves the rating (stances per author), so a
