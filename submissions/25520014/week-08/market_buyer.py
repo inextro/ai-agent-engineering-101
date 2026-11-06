@@ -1,16 +1,22 @@
-"""Week 08 market buyer (Round 3): goes to the shop and SKU with the largest expected surplus, haggles, reports.
+"""Week 08 market buyer (Round 3): goes to the shop and SKU with the largest expected saved rate, haggles, reports.
+
+Since patch 3.4 (11-06) the score is Saved = sum over deals of surplus / list price (-1 for a deal that served nothing,
+0 if refunded) over (deals + 100): a sofa and a snack at 30% off count the same. The score below is the expected
+surplus divided by the list price, the cap keeps min_saved (buyer_policy) of the list, and goods grades are accepted
+by their expected saved rate (accept_policy).
 
     python market_buyer.py --shops .market/shops.json --order .market/order.json
 
-Surplus (the buyer's score) = list price of what we got - price paid (+ a warranty refund), 0 value when goods break
-or food does not last `use_within_hours`. For every shop x SKU in shops.json that fits the order:
+Surplus = list price of what we got - price paid (+ a warranty refund), 0 value when goods break or food does not
+last `use_within_hours`. For every shop x SKU in shops.json that fits the order:
 
-    expected surplus = P(shop deals with us) x P(price <= cap) x (value - expected price)
+    expected saved = P(shop deals with us) x P(price <= cap) x (value - expected price) / list price
         value          = list price x (1 - break rate)  for goods (break rates per grade, mixed by supply shares),
                          list price                     for food (the accept policy makes the kit refuse short-lived food)
         expected price = list price x the shop's ratio  (model.Prices: other buyers' settled deals, blended with the
                          market, times our own factor)
-        cap            = min(value, budget): never pay more than what the unit is worth, nor above the mandate
+        cap            = min(value, budget, list x (1 - keep)), keep = min_saved for food and
+                         min_saved / (1 - A break rate) for goods
         P(shop deals)  = our own past orders at that shop that ended paid, Beta prior 4:1 (80%)
 
 The best three shops (one SKU each) get the opening message at once; their first asks decide where we haggle. The
@@ -229,14 +235,19 @@ class Models:
 
 
 def value_cap(x, order, m):
-    """(value, cap) of one unit of SKU x for this order."""
+    """(value, cap) of one unit of SKU x for this order. Patch 3.4 scores Saved, the mean over deals of
+    (list - paid) / list, so the cap also keeps min_saved (buyer_policy) of the list price: food pays at most
+    list x (1 - min_saved); goods at most the price where an A unit under a warranty still saves min_saved (the best
+    case: the accept policy then checks the grade and warranty the receipt names)."""
     lp = x["list_price"]
-    value = lp * (1 - m.break_mix()) if x.get("kind") == "goods" else lp
-    return value, min(value, order["budget"])
+    goods = x.get("kind") == "goods"
+    value = lp * (1 - m.break_mix()) if goods else lp
+    keep = MIN_SAVED / (1 - m.breaks["A"]) if goods else MIN_SAVED
+    return value, min(value, order["budget"], lp * (1 - keep))
 
 
 def candidates(order, shops, cat, m):
-    """Every (shop, SKU) that fits, scored by expected surplus, best first. Food whose whole shelf life is shorter
+    """Every (shop, SKU) that fits, scored by expected saved rate (patch 3.4: surplus / list price), best first. Food whose whole shelf life is shorter
     than the order needs is left out: the accept policy would make the kit refuse it after the haggle."""
     out = []
     need_h = (order.get("use_within_hours") or 0) + FOOD_MARGIN_H
@@ -250,9 +261,9 @@ def candidates(order, shops, cat, m):
             lp = x["list_price"]
             value, cap = value_cap(x, order, m)
             expect = min(lp * m.ratio(s["name"]), cap - EDGE * lp)
-            es = m.p_deal(s["name"]) * m.p_within(s["name"], cap, lp) * (value - expect)
+            es = m.p_deal(s["name"]) * m.p_within(s["name"], cap, lp) * (value - expect) / lp
             out.append({"shop": s["name"], "url": s["url"], "sku": o["sku"], "name": x["name"], "kind": x.get("kind"),
-                        "list": lp, "value": round(value), "cap": int(cap), "expect": round(expect), "es": round(es)})
+                        "list": lp, "value": round(value), "cap": int(cap), "expect": round(expect), "es": round(es, 4)})
     return sorted(out, key=lambda c: -c["es"])
 
 
@@ -460,7 +471,7 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
 
 
 BREAK_WINDOW_H = 6          # goods break up to 6 h after the sale (agent.md): a warranty this long covers every break
-ACCEPT_MIN = 0.0            # a goods grade is paid for only if its expected saved rate is at least this
+MIN_SAVED = P["min_saved"]  # least expected saved rate of a deal (buyer_policy; the manager moves it): cap and accept
 
 
 def goods_saved(p, r, warranty):
@@ -472,7 +483,8 @@ def goods_saved(p, r, warranty):
 
 def accept_policy(order, c, price, m, receipt=None, list_price=None):
     """What the kit must check before paying. Goods (11-06, patch 3.4): a grade is accepted when its expected saved
-    rate at this price is at least ACCEPT_MIN. The old rule (list x (1 - p) >= price) lost the price when a unit
+    rate at this price is at least MIN_SAVED (10:32-11:xx it was 0). When no grade reaches it the price is under the
+    cap, which A under a warranty clears, so A alone is accepted. The old rule (list x (1 - p) >= price) lost the price when a unit
     broke; the score now counts -1 for an unrefunded break whatever the price, so without a warranty C is worth
     paying only up to about 46% of the list (p 0.35) instead of 65%. The seller's receipt says the warranty; when we
     count on it, the accept asks for it too so the kit refuses a checkout that comes without it."""
@@ -482,9 +494,9 @@ def accept_policy(order, c, price, m, receipt=None, list_price=None):
     w = (receipt or {}).get("warranty_hours")
     warranty = isinstance(w, (int, float)) and w >= BREAK_WINDOW_H
     r = price / (list_price or c["list"])
-    ok = [g for g in "ABC" if goods_saved(m.breaks[g], r, warranty) >= ACCEPT_MIN]
+    ok = [g for g in "ABC" if goods_saved(m.breaks[g], r, warranty) >= MIN_SAVED]
     acc = {} if ok == ["A", "B", "C"] else {"grades": ok or ["A"]}
-    if warranty and any(goods_saved(m.breaks[g], r, False) < ACCEPT_MIN for g in ok):
+    if warranty and any(goods_saved(m.breaks[g], r, False) < MIN_SAVED for g in ok):
         acc["warranty_hours"] = BREAK_WINDOW_H
     return acc
 
@@ -545,7 +557,7 @@ def main():
     if not cands:
         rec["why_none"] = why_none(order, shops, cat, m)
         log(f"{order.get('item')} budget {order.get('budget')}: 0 candidates {rec['why_none']}")
-        rec["end"] = "no shop with a positive expected surplus"
+        rec["end"] = "no shop with a positive expected saved rate"
         finish(rec, result)
         return
     seen, live = set(), []

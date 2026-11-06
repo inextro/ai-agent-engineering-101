@@ -112,6 +112,9 @@ def window(since, until):
             "ends": dict(Counter(str(r.get("end"))[:60] for r in rs).most_common(8)),
             "price_over_list": round(sum(r["price"] / r["list"] for r in deals) / len(deals), 3) if deals else None,
             "surplus_sum": sum(r["list"] - r["price"] for r in deals),
+            # patch 3.4 scores the mean of (list - paid) / list, not the sum in won (breaks not yet known here)
+            "saved_rate_mean": round(sum(1 - r["price"] / r["list"] for r in deals) / len(deals), 3) if deals else None,
+            "deals_under_min_saved": sum(1 for r in deals if 1 - r["price"] / r["list"] < buyer_policy.load()["min_saved"]),
             "mean_secs": round(sum(r.get("secs", 0) for r in rs) / len(rs), 1) if rs else None,
             "second_shop_tried": sum(1 for r in rs if (r.get("tried") or 0) > 1),
             "messages_by_model": msgs.get("model", 0), "messages_by_template": msgs.get("template", 0)}
@@ -124,6 +127,24 @@ def wilson(likes, dislikes, z=1.96):
         return None
     p = likes / n
     return (p + z * z / (2 * n) - z * ((p * (1 - p) + z * z / (4 * n)) / n) ** 0.5) / (1 + z * z / n)
+
+
+def score_now(db, us):
+    """Our buyer's row on the newest board snapshot with the percentile of each scored part among ranked buyers, and
+    the best Saved rates (patch 3.4: the manager weighs min_saved against Saved and deal counts)."""
+    row = db.execute("SELECT raw FROM board ORDER BY ts DESC LIMIT 1").fetchone()
+    if not row:
+        return None
+    ranked = [b for b in json.loads(row[0]).get("buyers", []) if b.get("all") is not None]
+    me = next((b for b in ranked if ((b.get("owner") or {}).get("login") or "").lower() == us.lower()), None)
+    if me is None or len(ranked) < 2:
+        return None
+    pct = lambda k: round(sum(1 for b in ranked if (b.get(k) or 0) < (me.get(k) or 0)) / (len(ranked) - 1), 3)
+    return {"ours": {k: me.get(k) for k in ("saved", "forum", "deals", "posts", "served", "all")},
+            "percentile_among_buyers": {k: pct(k) for k in ("saved", "forum", "deals", "posts", "all")},
+            "weights": {"saved": 0.5, "forum": 0.3, "deals": 0.1, "posts": 0.1},
+            "best_saved_rates": sorted((round(b.get("saved") or 0, 3) for b in ranked), reverse=True)[:5],
+            "most_deals": max(b.get("deals") or 0 for b in ranked)}
 
 
 def our_forum(board, us):
@@ -271,6 +292,7 @@ def summary(md, now):
         "hours_left_in_round": round(policy.hours_left(now), 1),
         "our_buyer_settles_this_round_vs_20_needed_to_rank": [len(ours), 20],
         "market_settles_this_round": len(settles),
+        "our_buyer_score_now": score_now(db, us),
         "last_hour": window(now - 3600, now),
         "last_6_hours": window(now - 6 * 3600, now),
         "shops_skipped_now_for_refusing_us_at_the_first_question": read_avoid(),
@@ -298,17 +320,32 @@ def summary(md, now):
 
 
 PROMPT = """You manage the buying side of an agent in a marketplace (Round 3, 14 days). The buyer's code gets an order
-(a category, a list of SKUs, a budget, for food a use_within_hours), picks shops by expected surplus from a price
-model on the public ledger, asks the best few shops for a price at once, haggles with the one whose ask leaves the most
-surplus (the code chooses every offer; haiku writes the words), and pays only up to cap = min(value, budget). After a
+(a category, a list of SKUs, a budget, for food a use_within_hours), picks shops by expected saved rate (surplus / list
+price) from a price model on the public ledger, asks the best few shops for a price at once, haggles with the one whose
+ask saves the most (the code chooses every offer; haiku writes the words), and pays only up to the cap: min(value,
+budget, list x (1 - min_saved)), for goods the price where an A unit under a warranty still saves min_saved. After a
 deal it rates the shop from the market's receipt and posts its purchases on the forum as facts. You do not trade.
 Once an hour you review the record and set what the code runs on next. The owner does not watch; they read your
 report afterwards and correct you when needed.
 
-Score (percentiles among buyers; the rules page below has the current formula): 0.5 x surplus (list price of what
-was useful - price paid + warranty refunds) + 0.3 x votes on our buyer posts (from other owners' agents with 5+
-deals) + 0.1 x number of deals + 0.1 x number of our buyer posts (hidden posts do not count). At least 20
-settled deals are needed to rank. The kit stops an order after 300 s.
+Score (percentiles among buyers; the rules page below has the current formula, patch 3.4 of 11-06):
+0.5 x Saved + 0.3 x forum rating + 0.1 x number of deals + 0.1 x number of our buyer posts (hidden ones do not count).
+- Saved = sum over deals of (list price - price paid) / list price, divided by (deals + 100). A deal that served
+  nothing (goods broken, food not lasting) counts -1, or 0 when a warranty refunded it, whatever its price. With
+  thousands of deals Saved is the mean saving per deal: a sofa and a snack at 30% off count the same, and a deal
+  saving less than our current Saved lowers it. The won amounts (surplus_sum) no longer score.
+- Forum rating: one stance per voting account per author (its likes minus dislikes on all our posts); a like stance
+  weighs 1 + log2(its net likes), a dislike stance 1, only from other owners' agents with 50+ deals. More posts do
+  not add dislike weight from an account that already disliked us. From 11-06 12:00 an account pays for its 4th new
+  dislike stance in an hour.
+"our_buyer_score_now" has each part with its percentile. The kit stops an order after 300 s.
+
+min_saved (patch 3.4, owner 11-06: start 0.20, yours to move): the least expected saving a deal must bring. It
+caps food at list x (1 - min_saved) and goods a little higher (A under a warranty), and the accept refuses a goods
+grade whose expected saved (break counted as -1 without a warranty, 0 with one) is under it. Raising it lifts
+Saved (0.5) and loses deals (0.1); lowering it does the reverse. Aim it near what the record says a deal can still
+add: about our current Saved, lower while deals' percentile falls, higher while saved_rate_mean stays above it and
+paid deals hold. Judge by the board's percentiles, not by surplus in won.
 
 Policy now, with the allowed range of each number (a change moves at most a quarter of the range):
 {policy}
@@ -344,7 +381,7 @@ Review, in this order:
    dislike, hour by hour (under 2% before 11-05 01 h). Say in one line whether it is rising, steady or fading, and
    whether our buyer posts are paused or going out.
 3. What to change: numbers, playbook, or nothing. Change only for a reason in the record; no change is a fine answer.
-   Mind the trade: lower offers raise surplus per deal but lose deals.
+   Mind the trade: lower offers and a higher min_saved raise Saved per deal but lose deals.
 4. Findings ('발견'): read the orders and posts for what the code cannot count, and report only what is new: a
    shop acting in a new way (bait asks raised after the first quote, refusals, hidden certificates, receipts over
    the ask), a shop pricing a SKU far under the others, a category whose quotes moved, a rule or a market behaviour
