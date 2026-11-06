@@ -545,3 +545,8 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   both halves; only the words differ. Judge (2) after a few hours by comparing the halves on price / first ask, deal
   rate, and per-deal saved; do not read a change in deals per hour as a fault of (1) without checking talks that ended
   after our first counter.
+- 11-07 01:08 food orders ask four shops for a first quote instead of three (FOOD_EXTRA_QUOTES 1; buyer.jsonl
+  `n_quotes`). In 162 food orders since 18:00 with three quotes, the third-scored shop asked less than the first two in
+  26 (by 10.5% of list), so a fourth should still find cheaper food. Goods keep three. Watch order time (`secs`) and the
+  food deal rate; a slower opening is the cost. Food orders turned down by every shop are not helped: most had one shop
+  listing the SKU.
