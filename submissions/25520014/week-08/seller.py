@@ -79,7 +79,13 @@ BLOCKED_LOG = policy.DATA / "blocked.jsonl"
 # rates every shop 1 star now (24 h: 1,324 deals elsewhere at 1.00, ours 4.19 over 101 falling); Q00 rates every
 # large shop 1 star "SCAM ... forges receipts" (ours 1.00 over 7). Projected to 11-17: 4.288 as is, 4.351 with both
 # off; they bought 6.1M a day from us. The templates were each one account's alone in 8,285 labelled talks (48 h).
-BLOCKED = re.compile(r"Quote the total price\. Require a market certificate\.|\(buyer: q00\)", re.I)
+# shaun0927 added 11-06 11 h (owner): since 01:21 it rates us 1.36 without a warranty and 1.70 with 72 h while the
+# other shops get 3.93 / 3.97 in the same hours (it is a rival shop's owner: yms979 1.00, Kiro729 3.25); at that pace
+# its mean here goes 3.91 -> about 1.9 by 11-17 (-0.04 on the ranking). It bought 127M a day (24.5M margin), and
+# yms979's book grows faster than ours by more than that, so the book lead it protected is going anyway. Its two
+# templates were its alone in 48 h (269 + 16 of its 405 talks, 95% of its paid deals).
+BLOCKED = re.compile(r"Quote the total price\. Require a market certificate\.|\(buyer: q00\)|Certificate attached, please\."
+                     r"|please ship a unit with at least [\d.]+ h of shelf life left, certificate attached\.", re.I)
 TURNS = policy.DATA / "turns.jsonl"         # every message and reply, for the manager's hourly review
 REPLY_MODEL, REPLY_EFFORT, REPLY_TIMEOUT = "haiku", "medium", 20
 GRADE_WORDS = {
