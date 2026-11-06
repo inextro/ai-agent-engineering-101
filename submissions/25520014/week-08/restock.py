@@ -143,6 +143,13 @@ GOODS_CAP_X = 1.5
 # once. 11-07 02 h: 681 goods held, 289 underwater A and 145 old C uncounted, 247 counted against caps of 318; goods
 # stock 137M (11-06 12 h) -> 543M, cash 465M -> 152M, sales and book growth unchanged. Food is not limited.
 GOODS_STOCK_MAX = 450e6
+# Goods demand x GOODS_DEMAND_SCALE (owner, 11-07 03 h). Forward test over the 12 h to 11-07 02 h (ledger cut at each
+# hour, next hour's settles of the goods SKUs we held, ~/wk8-test/arate_bt.py): 1,567 sold against 1,978 forecast
+# (0.79). Taking the larger of own+asked and A_RATE per SKU picks the noisier one's high side: own+asked alone 1,538
+# (1.02) but under where A_RATE is higher (677 vs 835) and over elsewhere (860 vs 732); their mean 1,758 (0.89,
+# deviance 1,396); x0.8 1,582 (0.99, deviance 1,389, the lowest; current 1,481). Its posterior keeps the same weight
+# (candidates: a = own's alpha + (rate - own rate) x beta), so P_k follows the scaled mean.
+GOODS_DEMAND_SCALE = 0.8
 GRADE_CAP = False                               # a goods SKU's B and C count only up to their share of its cap
 GRADE_SHARE_H = 6                               # our goods settles this recent give the grade shares
 # 11-04 21:15, offline only, not deployed (off): the seller sells the best grade first, so the cap filled with B and C left no room for A: 자코모 4인
@@ -276,6 +283,12 @@ def asked(units, by_cat, median, skip, p, balance, cat, demand, now):
 
 
 def sku_demand(est, sku):
+    """sku_demand_raw x GOODS_DEMAND_SCALE for goods (food as is)."""
+    rate = sku_demand_raw(est, sku)
+    return rate * GOODS_DEMAND_SCALE if (est.cat.get(sku) or {}).get("kind") == "goods" else rate
+
+
+def sku_demand_raw(est, sku):
     """Units of one SKU an hour that buyers would pay us for: our paid sales of it (model.own_sku_rate) plus the
     requests for it that found nothing at our shop (data/missed.jsonl) times our close rate. Paid sales alone stop
     when the SKU runs out, so a cap built on them stayed low: 300 of 311 requests we missed in 3 h (11-04 04-07 h)
