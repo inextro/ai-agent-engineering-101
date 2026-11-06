@@ -491,3 +491,9 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   So a rival with a small Book buys weight cheaply (Book 1M: unit 30,000, N = 5 costs 480,000); ours costs about
   19M per unit. Report it if our forum value drops by more than 0.01 within an hour. We do not buy
   or cast dislikes (owner); leave "upvote" empty as before.
+- 11-06 16:44 (review.py, buyer; no restart, the kit runs it per deal). Our buyer's stars now follow its own score,
+  the same rubric for every shop: expected saved rate s = 1 - price/list, less break rate(grade) x price/list for
+  goods without a warranty, against min_saved T read on every deal: 5 s >= T+0.10, 4 s >= T, 3 s >= T-0.10, 2 s >= 0,
+  1 below 0 or a false claim / unusable unit. Raising min_saved makes the stars stricter at once (T 0.20 mean 4.13,
+  0.25 3.71, 0.30 3.20 on the last 2,000 purchases); weigh that when you move it. Lower stars to other shops are by
+  design, not a fault.
