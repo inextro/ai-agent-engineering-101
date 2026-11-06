@@ -11,7 +11,8 @@ KST), with the numbers in data/share_watch.json. Signals, each against the 3 hou
      median paid share of list + 0.02 (on 11-04 the only signal that came before the revenue fell: 다우닝 and
      지누스 at 17 h, 자코모 at 22 h; session 56's audit);
   4. top SKUs: of the market's top 10 SKUs by revenue in the hour, those where our share is under 5%, with our stock,
-     talks and deals on each (out of stock, or held and losing), added when 1 or 2 rings.
+     talks and deals on each (out of stock, or held and losing), added when 1 or 2 rings;
+  5. warranty: buyers starting to want one on goods B/C (patch 3.4), see warranty_watch.
 (Our opening ask sits over the market's paid price by design, so the price signal uses the floor: with the ask it
 rang on 5 SKUs in every half hour of 11-04.)
 It changes nothing the shop reads; the owner decides. A signal repeats at most once an hour.
@@ -174,6 +175,72 @@ def signals(m):
     return out
 
 
+# 5. warranty (owner, 11-06 11 h): patch 3.4 (06:00) scores a buyer's unrefunded break -1, so buyers may stop taking
+# goods B and C without a warranty, which we give only to a buyer who asks (seller.WARRANTY_ON_ASK). Through 11-06
+# 11 h they had not: the market's share of B / C goods settled with a warranty held at 48-50% / 33-34% (18 h before
+# and after 06:00), no result carried an `accept` with warranty_hours, and our B/C talks whose buyer did not ask
+# closed 85-100% per 3 h. Rings when one of these moves; then B by default is the first step (a B's refund, 12% x
+# 538k = 65k, fits its 126k margin; a C's, 39% x 503k = 196k, takes its 207k).
+W_NOASK_MIN, W_NOASK_RATE = 15, 0.70
+W_MARKET = {"B": 0.60, "C": 0.45}
+
+
+def warranty_watch(now, db):
+    cat = load(MD / "catalog.json", {})
+    goods = lambda sku: (cat.get(sku) or {}).get("kind") == "goods"
+    t0, t1 = now - 3 * 3600 - 600, now - 600            # talks that had 10 minutes to close
+    opened, closed = {}, {}
+    try:
+        with NEG.open(encoding="utf-8") as f:
+            for line in f:
+                if '"open"' not in line and '"deal"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if d.get("outcome") == "open" and t0 <= d.get("ts", 0) < t1 and "wants_warranty" in d:
+                    opened[d["task"]] = d
+                elif d.get("outcome") == "deal" and t0 <= d.get("ts", 0) < now:
+                    closed[d.get("task")] = True
+    except OSError:
+        pass
+    noask = {g: [t for t, d in opened.items() if d.get("kind") == "goods" and d.get("grade") == g
+                 and not d.get("wants_warranty")] for g in ("B", "C")}
+    talks = {g: {"n": len(v), "deal_rate": round(sum(1 for t in v if t in closed) / len(v), 2) if v else None}
+             for g, v in noask.items()}
+    mk = {g: [0, 0] for g in ("B", "C")}
+    for (d,) in db.execute("select data from ledger where kind = 'settle' and ts >= ? and ts < ?", (now - 3 * 3600, now)):
+        d = json.loads(d)
+        if d.get("grade") in mk and goods(d.get("sku") or d.get("item")):
+            mk[d["grade"]][0] += 1
+            mk[d["grade"]][1] += bool(d.get("warranty_hours"))
+    market = {g: round(w / n, 2) if n >= 50 else None for g, (n, w) in mk.items()}
+    acc = 0
+    for (d,) in db.execute("select data from ledger where kind = 'result' and ts >= ? and ts < ?", (now - 3600, now)):
+        a = json.loads(d).get("accept")
+        acc += isinstance(a, dict) and bool(a.get("warranty_hours"))
+    return {"noask_talks": talks, "market_share_warranty": market, "accept_warranty_1h": acc}
+
+
+def warranty_signal(w):
+    why = []
+    for g, x in w["noask_talks"].items():
+        if x["n"] >= W_NOASK_MIN and x["deal_rate"] is not None and x["deal_rate"] < W_NOASK_RATE:
+            why.append(f"our goods {g} talks whose buyer asked no warranty closed {x['deal_rate']:.0%} of {x['n']} in 3 h "
+                       f"(85-100% through 11-06 11 h)")
+    for g, s in w["market_share_warranty"].items():
+        if s is not None and s > W_MARKET[g]:
+            why.append(f"the market's goods {g} settled with a warranty {s:.0%} in 3 h (11-06: B 48-50%, C 33-34%)")
+    if w["accept_warranty_1h"]:
+        why.append(f"{w['accept_warranty_1h']} buyer results in the last hour carried an accept with warranty_hours")
+    if not why:
+        return None
+    return ("warranty", "warranty: buyers may now want one on B/C (patch 3.4, unrefunded break -1): " + "; ".join(why)
+            + ". We give B/C a warranty only on ask (seller.WARRANTY_ON_ASK); ask the owner whether to give B one by "
+              "default (refund about 65k a unit against a 126k margin; C's refund takes its margin)")
+
+
 def shortage_note(now):
     """model.shortage() as restock sees it (session 56, a9c5f03), recorded only; None when unavailable."""
     try:
@@ -189,9 +256,13 @@ def run(now=None, write=True, live=True):
     db = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
     try:
         m = measure(now, db, live)
+        m["warranty"] = warranty_watch(now, db)
     finally:
         db.close()
     sig = signals(m)
+    ws = warranty_signal(m["warranty"])
+    if ws:
+        sig.append(ws)
     if not write:
         return m, sig
     state = load(STATE, {})

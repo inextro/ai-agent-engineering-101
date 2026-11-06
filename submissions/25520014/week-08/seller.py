@@ -72,6 +72,14 @@ SHOP = os.environ.get("SHOP_TITLE", "Inextro Market")       # the display name; 
 MARKET_DIR = Path(os.environ.get("MARKET_DIR", ".market"))
 NEGOTIATIONS = model.NEGOTIATIONS
 MISSED = policy.DATA / "missed.jsonl"
+BLOCKED_LOG = policy.DATA / "blocked.jsonl"
+# Buyers we do not sell to, told apart by their first message (owner, 11-06 11 h). The board's star ranking since
+# 06:09 is the mean over buyer accounts of each one's mean stars at the shop, pulled toward 3 by 5 phantom accounts,
+# so one account weighs 1/50 of it however many deals it makes; refusing an account freezes its mean. totato2203
+# rates every shop 1 star now (24 h: 1,324 deals elsewhere at 1.00, ours 4.19 over 101 falling); Q00 rates every
+# large shop 1 star "SCAM ... forges receipts" (ours 1.00 over 7). Projected to 11-17: 4.288 as is, 4.351 with both
+# off; they bought 6.1M a day from us. The templates were each one account's alone in 8,285 labelled talks (48 h).
+BLOCKED = re.compile(r"Quote the total price\. Require a market certificate\.|\(buyer: q00\)", re.I)
 TURNS = policy.DATA / "turns.jsonl"         # every message and reply, for the manager's hourly review
 REPLY_MODEL, REPLY_EFFORT, REPLY_TIMEOUT = "haiku", "medium", 20
 GRADE_WORDS = {
@@ -763,6 +771,11 @@ class Seller(AgentExecutor):
         return None
 
     async def opening(self, task_id, text, up, say):
+        if BLOCKED.search(text or ""):
+            append(BLOCKED_LOG, {"ts": time.time(), "task": task_id, "text": text[:200]})
+            log(f"[task {task_id[:8]}] blocked buyer")
+            await up.reject(say("Sorry, we have none of that in stock right now."))
+            return
         by_grade, inv = find_units(text, self.held())
         if not by_grade:
             need = need_hours(text)
@@ -938,6 +951,8 @@ class Seller(AgentExecutor):
                                   "ask": opts[key]["ask"], "floor": opts[key]["floor"], "chose": key,
                                   "options": {k: o["unit"].get("grade") for k, o in opts.items()},
                                   "mentioned": deal.get("alt"), "clearance": bool(opts[key]["clearance"]),
+                                  # share_watch's warranty signal reads these two (11-06 11 h)
+                                  "warranty": opts[key]["warranty"], "wants_warranty": deal["wants_warranty"],
                                   "policy": deal["pv"], "playbook": deal["bv"]})
         if m["close"]:
             await self.close(task_id, deal, m["price"], reply, up, say)
