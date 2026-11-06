@@ -209,7 +209,25 @@ def need_hours(text):
     return float(m.group(1) or m.group(2)) if m else None
 
 
-NAMED_GRADE = re.compile(r"\bgrade\s*([abc])\b|\b([abc])[ -]grade\b|([ABC])\s*등급|등급\s*([ABC])", re.I)
+# A grade or a list of grades ("grade B or C", "grades B/C", "B or C grade", "B, C 등급"). 11-06 23 h: the old pattern
+# (re.I, one letter) read the article in "a grade C unit" as grade A and kept only the first of "Grade B or C", so a
+# buyer who allowed C was offered A or B with C held (3 h to 23:30, 42 openings on SKUs with C held; 190 goods C,
+# 1.02억 at cost). The letter before "grade" must be a capital; after "grade" either case.
+_GRADES_AFTER = r"[abc](?:\s*(?:,|/|&|or|and)\s*[abc])*"
+_GRADES_BEFORE = r"[ABC](?:\s*(?:,|/|&|or|and|또는|나|이나)\s*[ABC])*"
+NAMED_GRADE = re.compile(rf"(?i:\bgrades?\s*({_GRADES_AFTER})\b)|\b({_GRADES_BEFORE})[ -](?i:grades?)\b"
+                         rf"|({_GRADES_BEFORE})\s*등급|등급\s*({_GRADES_BEFORE})")
+_ONE_GRADE = re.compile(r"(?<![A-Za-z])[ABCabc](?![A-Za-z])")
+
+
+def named_grades(text):
+    """Every grade the buyer names, {"A", "B", "C"} or a part of it."""
+    out = set()
+    for m in NAMED_GRADE.finditer(text or ""):
+        out |= {g.upper() for g in _ONE_GRADE.findall(next(x for x in m.groups() if x))}
+    return out & set(RANK)
+
+
 # 11-04 20:32: a goods B held is offered before A to a buyer who names no grade. 72% of goods supply is A and the
 # best-first rule left B behind it (자코모 4인 G8ec51935 at 20:11: 13 A, 36 B); per list price a B earns 0.14 after
 # refunds against A's 0.07, a goods talk opened on B closed 62% against A's 49% (13-20 h), and B was paid 89% against
@@ -222,13 +240,12 @@ def offer_grade(text, opts):
     grade the buyer named that we hold, else the lowest grade at or above the lowest named, else our lowest.
     Goods B goes first (B_FIRST) to a buyer who names no grade and asks for no lower one."""
     held = sorted(opts, key=RANK.get)                    # lowest first
-    if not LOWER_OK.search(text or ""):
+    named = named_grades(text)
+    if not LOWER_OK.search(text or "") and not named - {"A"}:   # "grades B/C fine" asks for a lower one too
         if (B_FIRST and "B" in opts and opts["B"]["unit"].get("kind", "goods") == "goods"
-                and not NAMED_GRADE.search(text or "")):
+                and not named):
             return "B"
         return held[-1]
-    named = {next(x for x in m.groups() if x).upper() for m in NAMED_GRADE.finditer(text)}
-    named = {g for g in named if g in RANK}
     if not named:
         return held[0]
     for g in held:
@@ -279,8 +296,7 @@ B_FALLBACK = True
 
 def wants_lower(text, g):
     """The buyer asks for the lower grade g: "refurbished", "cheaper one", "grade C" (LOWER_OK) or names g."""
-    named = {next(x for x in m.groups() if x).upper() for m in NAMED_GRADE.finditer(text or "")}
-    return bool(LOWER_OK.search(text or "")) or g in named
+    return bool(LOWER_OK.search(text or "")) or g in named_grades(text)
 
 
 def find_units(text, taken):
