@@ -493,7 +493,13 @@ def choose_reply(deal, moves, history, buyer_text, how=None):
 # no refund; with one 0.681 paid, 0.203 refunded (ours 0.666 / 0.200); B 0.721 / 0 against 0.727 / 0.069 (ours
 # 0.726 / 0.109). Buyers do not pay for it and stars come at the sale, before any break. Of our first messages 8%
 # (C), 13% (B), 31% (A) ask for a warranty; with one B and C still clear their cost, so those buyers keep it.
-WARRANTY_ON_ASK = ("B", "C")
+WARRANTY_ON_ASK = ("C",)
+# B gets the warranty always from 11-06 13 h (owner, a 3 h trial): psyoung82 (about 17 paid deals an hour here 03-09 h)
+# left us at 10 h and since buys goods almost only with a warranty (B 0 h 22 -> 12 h 20, C 0 h 9 -> 12 h 18), at
+# moss-and-oak, which gives 12 h on every grade. A B given one unasked carries no break premium in its floor
+# (B_NO_PREMIUM), so its price stays where it was. Cost: 24 h to 13 h, 499 B sold (margin 69.9M), 11.1% broke within
+# 6 h, 9.9M of them unrefunded: about 10M a day more refunds. Revert to ("B", "C") if psyoung82 does not come back.
+B_NO_PREMIUM = True
 MKT_BASE = 0.95          # a goods ask starts from at least this share of the market's price for its SKU and grade
 WANTS_WARRANTY = re.compile(r"warrant|guarantee|보증|보장", re.I)
 
@@ -505,6 +511,8 @@ def option(u, p, arm, wants_warranty=True):
     warranty = int(p["warranty_hours"]) if kind == "goods" and p.get(f"warranty_{u.get('grade')}") else 0
     if u.get("grade") in WARRANTY_ON_ASK and not wants_warranty:
         warranty = 0
+    if B_NO_PREMIUM and u.get("grade") == "B" and not wants_warranty:
+        u = dict(u, _no_premium=True)
     u = dict(u, _warranty=warranty)
     if kind == "goods" and arm in policy.GOODS_ARMS:
         # goods: a premium over the floor (policy.GOODS_ARMS, 11-05 00:22); the floor's break premium is priced at
@@ -633,7 +641,7 @@ def bare(text):
 
 def floor_price(u, p, warranty, est_price):
     cost = u.get("_pool_cost") or u["cost"]          # goods: the mean cost of the SKU and grade held (find_units)
-    premium = BREAK.get(u.get("grade"), max(BREAK.values())) * est_price if warranty else 0
+    premium = BREAK.get(u.get("grade"), max(BREAK.values())) * est_price if warranty and not u.get("_no_premium") else 0
     floor = cost * (1 + p["min_margin"]) + premium
     left = policy.hours_left()
     if left < p["liquidate_hours"]:       # toward the cost, never under it (book scoring, 11-05 03:45)

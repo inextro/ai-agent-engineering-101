@@ -123,6 +123,20 @@ SHORT_STOCK_MAX = 40e6
 # cap of 5, so nothing more was bought (and the in-stock rate, then the cap, fell with the sales). 23 of 71 goods
 # SKUs held such an A (34 units, 27.9M). clearance.UW_FLOOR_COST lets it go just under the market meanwhile.
 UW_A_UNCOUNTED = True
+# A goods SKU's demand is at least our sales of it per hour we held a sellable A (an A whose floor is under the market's
+# A price) over the last A_RATE_H hours (owner, 11-06 13 h). The in-stock hours of own_sku_rate count any grade, so a
+# SKU whose buyers take only A read low while we held only B, C or a dear A: 12 h to 11-06 13 h, 프리미엄 앤 모달
+# 이불패드 4.51 an hour held against 9.55 an hour with an A, 파르페 호텔 침구 6.65 / 12.30, 지누스 클라우드 4.61 / 6.41
+# (over all goods SKUs B and C sold as fast, 1.90 against 1.58, so most SKUs are unchanged). Needs A_RATE_MIN_H held
+# with an A and A_RATE_MIN_N of our settles in that time.
+A_RATE, A_RATE_H, A_RATE_MIN_H, A_RATE_MIN_N = True, 12, 0.5, 3
+A_RATES = {}
+# Goods caps x GOODS_CAP_X (owner, 11-06 13 h). The caps were set while unsold stock cost its whole value (cash
+# scored); under book an unsold unit costs 1% a day. 56's sim (~/wk8-test/nv_sweep3.py, 6 h, 8 seeds, true demand
+# with the A-held rates): now 706M revenue / book +111.6M / end stock 98M; A_RATE 753M / +115.8M / 109M; A_RATE and
+# x1.5 818M / +116.0M / 189M; A_RATE and x2 852M / +118.2M / 246M. With today's estimate as the truth x2 gave
+# +61M revenue at the same book. 1.5 for now (owner).
+GOODS_CAP_X = 1.5
 GRADE_CAP = False                               # a goods SKU's B and C count only up to their share of its cap
 GRADE_SHARE_H = 6                               # our goods settles this recent give the grade shares
 # 11-04 21:15, offline only, not deployed (off): the seller sells the best grade first, so the cap filled with B and C left no room for A: 자코모 4인
@@ -161,7 +175,7 @@ A_CHECK_TOP = True
 A_COST = 0.66                                   # mean cost / list of a goods A unit (828 supplied before 21:27: 0.55-0.75)
 SUPPLY_MIX = {"A": 0.60, "B": 0.24, "C": 0.16}  # goods grades as supplied to us (1,378 units before 21:27)
 GRADE_REL = {"A": 1.0, "B": 0.87, "C": 0.75}    # a grade the market has too few sales of: this x its A price
-WARRANTY_ASKED = {"B": 0.13, "C": 0.08}         # share of our first messages asking for a warranty (11-04, 24 h)
+WARRANTY_ASKED = {"B": 1.0, "C": 0.08}   # B: always from 11-06 13 h (seller.WARRANTY_ON_ASK); was 0.13         # share of our first messages asking for a warranty (11-04, 24 h)
 SURGE_FREE, SURGE_STEP, SURGE_MAX = 50, 0.002, 1.5
 SURGE_WINDOW = 3600
 SUPPLY_OPEN_S = 180                             # a window stays open 3 minutes
@@ -271,7 +285,7 @@ def sku_demand(est, sku):
         # that supplied it and us, at least. A SKU we never held reads only its prior (category share x market
         # rate over 24 h), 라클라우드 퀸 0.1 x 15 an hour while it sold 70 (11-04 20 h)
         rate = max(rate, short["sold"] / (short["shops"] + 1) / SHORT_W_H)
-    return rate
+    return max(rate, A_RATES.get(sku, 0.0))     # A_RATE: our sales of it per hour a sellable A was held
 
 
 def short_own_rate(est, sku):
@@ -305,6 +319,75 @@ def underwater_a(u, mkt, premium_a, margin):
     if u.get("grade") != "A" or not m or not u.get("list_price"):
         return False
     return u["cost"] * (1 + margin) + premium_a * m * u["list_price"] > m * u["list_price"]
+
+
+def a_rates(est, cat, mkt, premium_a, margin, now):
+    """{goods sku: our settles per hour while we held a sellable A} over A_RATE_H (A_RATE). Unit spans from the
+    ledger (supply -> settle or expiry); a unit's grade and cost from the inventory snapshots, our talks
+    (negotiations.jsonl) or inventory.json; sellable = not underwater_a at today's market A prices."""
+    t0 = now - A_RATE_H * 3600
+    since = t0 - 86400
+    goods = lambda s: (cat.get(s) or {}).get("kind") == "goods"
+    info = {}
+    for _, raw in est.db.execute("SELECT ts, raw FROM inventory WHERE ts >= ?", (since,)):
+        for u in (json.loads(raw).get("units", []) if raw else []):
+            info[u.get("unit")] = u
+    neg = policy.DATA / "negotiations.jsonl"
+    if neg.exists():
+        with neg.open(encoding="utf-8") as f:
+            f.seek(max(0, neg.stat().st_size - 8_000_000))     # the last ~16 h of talks
+            f.readline()
+            for line in f:
+                if '"cost"' not in line or '"unit"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if d.get("unit") and d.get("grade") and d.get("cost") and d.get("sku"):
+                    info.setdefault(d["unit"], {"sku": d["sku"], "grade": d["grade"], "cost": d["cost"],
+                                                "list_price": (cat.get(d["sku"]) or {}).get("list_price")})
+    spans = {}
+    for ts, d in model.entries(est.db, "supply", since):
+        if d.get("shop") == model.SHOP_NAME and goods(d.get("sku")):
+            for u in d.get("units") or []:
+                spans[u] = [d["sku"], ts, now]
+    for ts, d in model.entries(est.db, "settle", since):
+        x = spans.get(d.get("unit"))
+        if x and d.get("shop") in est.mine:
+            x[2] = min(x[2], ts)
+    for ts, d in model.entries(est.db, "expire", since):
+        for u in d.get("units") or []:
+            if u in spans:
+                spans[u][2] = min(spans[u][2], ts)
+    held = {}
+    for u, (s, a, b) in spans.items():
+        x = info.get(u)
+        if not x or x.get("grade") != "A" or underwater_a(dict(x, sku=s, list_price=x.get("list_price") or cat[s]["list_price"]),
+                                                         mkt, premium_a, margin):
+            continue
+        a, b = max(a, t0), min(b, now)
+        if b > a:
+            held.setdefault(s, []).append((a, b))
+    out = {}
+    for s, iv in held.items():
+        merged = []
+        for a, b in sorted(iv):
+            if merged and a <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], b)
+            else:
+                merged.append([a, b])
+        held[s] = merged
+    n = Counter()
+    for ts, d in model.entries(est.db, "settle", t0):
+        s = d.get("sku")
+        if d.get("shop") in est.mine and s in held and any(a <= ts - 1 < b for a, b in held[s]):
+            n[s] += 1
+    for s, iv in held.items():
+        h = sum(b - a for a, b in iv) / 3600
+        if h >= A_RATE_MIN_H and n[s] >= A_RATE_MIN_N:
+            out[s] = n[s] / h
+    return out
 
 
 def grade_shares(est, cat, now):
@@ -425,6 +508,12 @@ def candidates(inv, cat, demand, est, p, now):
         except Exception as e:                          # no market prices: buy as before
             print(f"[restock] market grade prices unavailable: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
     premium_a = est.break_rate.get("A", 0.0) if p["warranty_hours"] > 0 and p.get("warranty_A") else 0.0
+    A_RATES.clear()
+    if A_RATE and mkt:
+        try:
+            A_RATES.update(a_rates(est, cat, mkt, premium_a, p["min_margin"], now))
+        except Exception as e:                          # no A rates: the demand as before
+            print(f"[restock] A rates unavailable: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
     if UW_A_UNCOUNTED and mkt:
         gone = lambda u: old_c(u, cat, now) or underwater_a(u, mkt, premium_a, p["min_margin"])
         count_sku = Counter(u.get("sku") for u in units if not gone(u))
@@ -451,6 +540,8 @@ def candidates(inv, cat, demand, est, p, now):
         cap = math.ceil(min(rate * cap_h, max(CAP_FLOOR, rate * FAST_COVER_H)) - 1e-9)
         if FAST_BUFFER and kind == "goods" and rate >= FAST_RATE:
             cap += FAST_BUFFER                          # units past the window's demand (FAST_BUFFER)
+        if kind == "goods":
+            cap = math.ceil(cap * GOODS_CAP_X - 1e-9)   # GOODS_CAP_X
         if asked:
             cap = max(cap, 1)                           # a buyer asked us for it
         if SHORTAGE_ENTRY and s in est.shortage():

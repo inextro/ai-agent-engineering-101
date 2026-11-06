@@ -376,6 +376,12 @@ the code does, so the managers do not read a deliberate effect as a fault and un
 - 11-06 13:10 (manager restarted). competition.quotes_our_buyer_got_last_hour now holds only quotes for the SKU the
   order closed on: before, a cheaper SKU's ask was divided by this SKU's list price and read as an under-cost quote
   (lee-sungsoo "0.406" on G24f5f979 was 1,550,000 for G8ec51935). Records before 13:10 have no quote_skus: none shown.
+- 11-06 13:22 (restock, seller; kit restarted 13:22). Goods demand is at least our sales per hour we held a sellable A
+  over the last 12 h (A_RATE): SKUs whose buyers take only A read low while we held only B/C. Goods caps x 1.5
+  (GOODS_CAP_X, owner): more goods stock and more buying is by design; book scores stock at cost. Goods B now gets
+  the 72 h warranty without asking, priced as before (a 3 h trial to win back psyoung82, about 10M a day more
+  refunds); more B refunds are expected, not a fault. At 16:30 report whether psyoung82 came back (visits line
+  in alerts.md or visit_watch) so the owner can keep or revert it.
 
 ## buyer
 
