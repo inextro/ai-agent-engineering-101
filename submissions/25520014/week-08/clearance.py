@@ -56,7 +56,12 @@ STUCK_FLOOR = 0.95        # its floor as a share of its ask (the SKU's market me
 UW_UNDER = 0.01           # an underwater unit opens this far under the market's price for its SKU and grade
 UW_FLOOR = 0.95           # its floor as a share of that ask
 UW_FLOOR_COST = 1.00      # ... never under this share of its cost (0.85 until 11-05: a small loss then, a loss in book now)
-UW_STORAGE_DAY = 0.01     # ... less the storage it would pay to the round's end: 1% of its cost a day (rules_shop.md)
+UW_STORAGE_DAY = 0.0      # ... less the storage it would pay to the round's end: 1% of its cost a day (rules_shop.md)
+# 0.01 -> 0 (owner, 11-07 03 h): the rule weighed the loss against storage to the round's end, as if the unit would
+# never sell, and applied after 1 h held. 247 A clearance deals under cost from 11-06 12 h (13.1M, median 0.957 of
+# cost); replayed at a floor of cost (other shops' later A settles of the SKU at or over it, our 0.17 share, units of
+# a SKU in a queue, sold at the floor): 152 sell later (median wait 1.2 h), 95 still held (115M), book +12.8M
+# (~/wk8-test/uw_floor_replay2.py). The units left go to restock.GOODS_STOCK_MAX, not back on the shelf.
 # 11-06 12 h (owner): held at cost, an A of 다우닝 플라나 4인 at 0.814 of list asked 0.814 where the market paid 0.766
 # and never sold. Kept to the end it pays 1% of its cost a day (11.5 days left: 11.5%); sold just under the market it
 # loses 0.3-7.2% of cost (13 units held over cost, 0.57M at the ask). So its floor is cost x (1 - 0.01 x days left):
