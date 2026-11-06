@@ -558,6 +558,19 @@ def option(u, p, arm, wants_warranty=True, capped=False):
             "clearance": bool(clear), "cap": cap}
 
 
+# 11-06 19 h (owner): an ask within TIGHT_GAP of its floor is final from the first reply. With the goods arm at 0.0
+# the ask is the floor plus a few hundred won (24 h: 53% of 5,830 goods A talks under 0.5%), so the ladder conceded
+# 15-21 won a step (e36ba3d3 316434 -> 316351 in 4 steps) and haiku said "lowered" each time, while FLOOR_TOL (1%
+# under the floor closes) waited for the last step: 19 talks a day walked within 1% under the floor (1.56M margin).
+# The prices do not change: the talk starts at its last step, so FLOOR_TOL and HOLD_GAP apply from the first offer.
+TIGHT_GAP = 0.01
+
+
+def tight(o):
+    """The ask is within TIGHT_GAP of the floor: no ladder worth walking, the talk starts final."""
+    return o["ask"] - o["floor"] <= TIGHT_GAP * o["ask"]
+
+
 SMALL_GAP = 0.02   # an offer at or above the floor and this close to the price under talk closes at the offer
 # 11-04: 4 deals in 24 h were lost when a raise past the ask came on the last turn and the shop asked to confirm
 OVER_RAISE = 1.2
@@ -590,7 +603,7 @@ def next_move(o, offer, steps, opening, accepted, over_seen=False, moved=True, s
         return {"close": False, "price": o["ask"], "step": o["step"], "final": o["step"] >= steps,
                 "opening": opening, "over": offer}
     if opening and offer is None:
-        return {"close": False, "price": o["ask"], "step": 0, "final": False, "opening": True}
+        return {"close": False, "price": o["ask"], "step": o["step"], "final": False, "opening": True}
     if offer is None and accepted:
         return {"close": True, "price": o["ask"], "step": o["step"], "final": True}
     if offer is not None and (offer >= o["ask"] or (o["step"] >= steps and offer >= close_floor(o))):
@@ -849,6 +862,8 @@ class Seller(AgentExecutor):
                                      "named": bool(NAMED_GRADE.search(text or "")), "wants_warranty": wants_w,
                                      "pv": p.get("version"), "bv": policy.load_playbook().get("version")}
         for k, o in opts.items():
+            if tight(o):
+                o["step"] = deal["steps"]              # TIGHT_GAP: final from the first reply
             u = o["unit"]
             log(f"[task {task_id[:8]}] {k} {u['sku']} {u.get('grade')} cost {u['cost']} list "
                 f"{u['list_price']}: ask {o['ask']} (arm {arm}), floor {o['floor']}, warranty {o['warranty']} h")
