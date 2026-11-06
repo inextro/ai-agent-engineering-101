@@ -56,6 +56,16 @@ STUCK_FLOOR = 0.95        # its floor as a share of its ask (the SKU's market me
 UW_UNDER = 0.01           # an underwater unit opens this far under the market's price for its SKU and grade
 UW_FLOOR = 0.95           # its floor as a share of that ask
 UW_FLOOR_COST = 1.00      # ... never under this share of its cost (0.85 until 11-05: a small loss then, a loss in book now)
+UW_STORAGE_DAY = 0.01     # ... less the storage it would pay to the round's end: 1% of its cost a day (rules_shop.md)
+# 11-06 12 h (owner): held at cost, an A of 다우닝 플라나 4인 at 0.814 of list asked 0.814 where the market paid 0.766
+# and never sold. Kept to the end it pays 1% of its cost a day (11.5 days left: 11.5%); sold just under the market it
+# loses 0.3-7.2% of cost (13 units held over cost, 0.57M at the ask). So its floor is cost x (1 - 0.01 x days left):
+# 0.885 now, the cost on the last day. restock.UW_A_UNCOUNTED buys a new A for the SKU meanwhile.
+
+
+def uw_floor_cost(now):
+    """The share of its cost an underwater unit may sell at: UW_FLOOR_COST less the storage to the round's end."""
+    return max(0.0, UW_FLOOR_COST - UW_STORAGE_DAY * policy.hours_left(now) / 24)
 UW_HELD_H = 1             # ... and only once held this long (11-05 01:40 review: 66 of 124 underwater opens were
                           # units under 3 h old, some 0.01 h; a fresh unit gets an hour at its usual floor first)
 # 11-05 03:45 KST the board's ALL moved from cash to book (cash + cost of unsold units): a sale under cost now lowers
@@ -162,7 +172,7 @@ def terms(u, now=None, c_discount=0.0, floor=None):
     if (m and floor and floor > m * u["list_price"]
             and now - (u.get("supplied_at") or now) >= UW_HELD_H * 3600):
         ask = m * u["list_price"] * (1 - UW_UNDER)
-        out.append({"ask": ask, "floor": max(UW_FLOOR_COST * cost, UW_FLOOR * ask)})
+        out.append({"ask": ask, "floor": max(uw_floor_cost(now) * cost, UW_FLOOR * ask)})
     if stale(u, now):
         share = _stale["sku"].get(u.get("sku")) or _stale["category"].get(u.get("category"))
         if m:     # just under the market's price for its grade, as underwater (with m - ASK_UNDER a C asked 0.61 of

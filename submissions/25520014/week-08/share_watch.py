@@ -12,7 +12,8 @@ KST), with the numbers in data/share_watch.json. Signals, each against the 3 hou
      지누스 at 17 h, 자코모 at 22 h; session 56's audit);
   4. top SKUs: of the market's top 10 SKUs by revenue in the hour, those where our share is under 5%, with our stock,
      talks and deals on each (out of stock, or held and losing), added when 1 or 2 rings;
-  5. warranty: buyers starting to want one on goods B/C (patch 3.4), see warranty_watch.
+  5. warranty: buyers starting to want one on goods B/C (patch 3.4), see warranty_watch;
+  6. new SKUs: first supplied in the last 6 h and 3%+ of the market's revenue in the last hour, see new_skus.
 (Our opening ask sits over the market's paid price by design, so the price signal uses the floor: with the ask it
 rang on 5 SKUs in every half hour of 11-04.)
 It changes nothing the shop reads; the owner decides. A signal repeats at most once an hour.
@@ -241,6 +242,47 @@ def warranty_signal(w):
               "default (refund about 65k a unit against a 126k margin; C's refund takes its margin)")
 
 
+# 6. new SKUs (owner, 11-06 12 h): 다우닝 플라나 4인 G24f5f979 and 자코모 와드 4인 G47788edd first came to the market
+# at 07:22; by 10 h new SKUs made 21-28% of the market's revenue an hour (플라나 589M by 12 h, ours 21%), and nothing
+# said they were new. A SKU whose first market supply is within NEW_H hours (none in the NEW_LOOKBACK_D days before)
+# rings once its last hour reaches NEW_SHARE of the market's revenue, with our share, stock and talks on it.
+NEW_H, NEW_LOOKBACK_D, NEW_SHARE = 6, 3, 0.03
+
+
+def new_skus(now, db):
+    first = {}
+    for ts, d in db.execute("select ts, data from ledger where kind = 'supply' and ts >= ? and ts < ? order by ts",
+                            (now - NEW_LOOKBACK_D * 86400, now)):
+        sku = json.loads(d).get("sku")
+        if sku and sku not in first:
+            first[sku] = ts
+    new = {s: t for s, t in first.items() if t >= now - NEW_H * 3600}
+    if not new:
+        return []
+    s, names = settles(db, now - 3600, now)
+    total = sum(x["amount"] for x in s) or 1
+    held = held_units()
+    talks = collections.Counter(d.get("sku") for d in opens(now - 3600, now))
+    out = []
+    for sku, t in new.items():
+        rows = [x for x in s if x["sku"] == sku]
+        rev = sum(x["amount"] for x in rows)
+        ours = [x for x in rows if x["shop"] == OURS]
+        out.append({"sku": sku, "name": (names.get(sku) or "?")[:24], "first": kst(t), "market_1h": rev,
+                    "units_1h": len(rows), "of_market": round(rev / total, 3), "ours_units": len(ours),
+                    "share": round(sum(x["amount"] for x in ours) / rev, 3) if rev else 0.0,
+                    "stock": held.get(sku, 0), "talks": talks.get(sku, 0)})
+    return sorted(out, key=lambda x: -x["market_1h"])
+
+
+def new_signals(rows):
+    return [(f"new_{x['sku']}", f"new SKU: {x['sku']} {x['name']} first supplied {x['first']}, {x['units_1h']} sold in "
+             f"the last hour, {x['market_1h'] / 1e6:.0f}M = {x['of_market']:.0%} of the market's revenue; ours "
+             f"{x['ours_units']} ({x['share']:.0%}), stock {x['stock']}, talks {x['talks']}. restock buys it on its "
+             f"own; report it to the owner and check that it does (stock, deals, our floor against the market's)")
+            for x in rows if x["of_market"] >= NEW_SHARE]
+
+
 def shortage_note(now):
     """model.shortage() as restock sees it (session 56, a9c5f03), recorded only; None when unavailable."""
     try:
@@ -257,12 +299,14 @@ def run(now=None, write=True, live=True):
     try:
         m = measure(now, db, live)
         m["warranty"] = warranty_watch(now, db)
+        m["new"] = new_skus(now, db)
     finally:
         db.close()
     sig = signals(m)
     ws = warranty_signal(m["warranty"])
     if ws:
         sig.append(ws)
+    sig += new_signals(m["new"])
     if not write:
         return m, sig
     state = load(STATE, {})

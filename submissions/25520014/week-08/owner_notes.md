@@ -365,6 +365,18 @@ the code does, so the managers do not read a deliberate effect as a fault and un
 - 11-06 11:32 (owner, both managers restarted). No likes any more: upvote() sends nothing (manager.UPVOTES_OFF), for
   the shop and the buyer. Patch 3.4 scores buyers by stances from other accounts, so our likes lifted rival buyers'
   forum. Leave "upvote" empty; we never dislike either.
+- 11-06 11:53 (restock, clearance, share_watch; kit restarted 11:53-11:55). An A unit whose floor is over the
+  market's A price for its SKU (bought dear: top of the A cost range with surge) no longer counts as the SKU's
+  stock, so restock buys a fresh A; the seller offers the cheapest A first. The dear one goes on underwater
+  clearance after 1 h, just under the market, and may now sell under cost down to cost x (1 - 0.01 x days left)
+  (0.885 now, the cost on the last day): kept to the end it would pay 1% a day in storage. Small losses on such
+  units are by design, not a fault. New alert "new SKU" in alerts.md: a SKU first supplied in the last 6 h that
+  made 3%+ of the market's revenue in the last hour; report it to the owner with our share and stock.
+
+- 11-06 13:10 (manager restarted). competition.quotes_our_buyer_got_last_hour now holds only quotes for the SKU the
+  order closed on: before, a cheaper SKU's ask was divided by this SKU's list price and read as an under-cost quote
+  (lee-sungsoo "0.406" on G24f5f979 was 1,550,000 for G8ec51935). Records before 13:10 have no quote_skus: none shown.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
@@ -436,3 +448,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
 - 11-06 11:32 (owner). No likes from us (shop or buyer): our likes raised rivals' forum (we had liked shaun0927 8
   times, BJEon01 and SungJinho once, all now above us). Our forum fell 0.915 -> 0.892 between 11:10 and 11:20, the only
   buyer that moved, likely one new dislike stance (voters are not public). Leave "upvote" empty; never dislike.
+- 11-06 13:10 (buyer_manager restarted; market_buyer runs fresh per order). The haggle names another shop's quote only
+  for the same SKU. A quote round often asks shops for different SKUs of the category (1,046 of 1,875 rounds), and
+  "X quoted me Y for this" used a cheaper SKU's price, which was untrue. orders_last_hour now shows sku and quote_skus.
+- 11-06 13:10 (owner, buyer_manager restarted). Dislikes are no longer watched (buyer_manager.DISLIKES_OFF): the
+  account that dislikes every buyer post is known. No "싫어요 경보", no bombing line, no storm share in the record. Do
+  not report dislikes or the bombing.
+- 11-06 13:25 (owner, buyer_forum and buyer_manager restarted). Buyer posts stop again (buyer_forum.POSTING_PAUSED):
+  from the 10:40 resume our forum fell 0.915 -> 0.889 (percentile 0.99 -> 0.94) while it held through the 06:09-10:30
+  pause; each new post lets one more account open a dislike stance, and forum (0.3) loses more than the post count
+  (0.1) gains. The pause is intended: do not report it, do not propose resuming without a new reason in the record.

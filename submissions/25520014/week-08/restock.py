@@ -116,6 +116,13 @@ BOOK_NEWSVENDOR = False
 SHORT_OWN = False                               # off (owner, 11-05 08h): 56 replay of 33 short SKU-hours, 1 h of our rate +0.5M (a third of it over 10 h) for 30M more stock; one window -2.3M
 SHORT_OWN_MIN = 3
 SHORT_STOCK_MAX = 40e6
+# An A unit whose floor is over the market's A price for its SKU (underwater, as clearance.terms) does not count
+# toward the SKU's units (owner, 11-06 11:55). 다우닝 플라나 4인 G24f5f979: an A at 0.814 of list (09:21, top of the
+# A range with surge) had a floor of 0.906 against the market's A 0.766; from 09:46 every A talk was offered it,
+# our deals fell from 11 to 1 per 30 min while the market kept selling 20-30, and with 1 B and 3 C it filled the
+# cap of 5, so nothing more was bought (and the in-stock rate, then the cap, fell with the sales). 23 of 71 goods
+# SKUs held such an A (34 units, 27.9M). clearance.UW_FLOOR_COST lets it go just under the market meanwhile.
+UW_A_UNCOUNTED = True
 GRADE_CAP = False                               # a goods SKU's B and C count only up to their share of its cap
 GRADE_SHARE_H = 6                               # our goods settles this recent give the grade shares
 # 11-04 21:15, offline only, not deployed (off): the seller sells the best grade first, so the cap filled with B and C left no room for A: 자코모 4인
@@ -291,6 +298,15 @@ def old_c(u, cat, now):
             and now - (u.get("supplied_at") or now) >= OLD_C_H * 3600)
 
 
+def underwater_a(u, mkt, premium_a, margin):
+    """A goods unit of grade A whose own floor (cost x (1 + min_margin) + the A break premium, seller.floor_price)
+    is over what the market pays for an A of its SKU (UW_A_UNCOUNTED)."""
+    m = (mkt.get(u.get("sku")) or {}).get("A")
+    if u.get("grade") != "A" or not m or not u.get("list_price"):
+        return False
+    return u["cost"] * (1 + margin) + premium_a * m * u["list_price"] > m * u["list_price"]
+
+
 def grade_shares(est, cat, now):
     """{grade: its share of our goods settles over GRADE_SHARE_H}, B and C at least 0.02 (a SKU's cap keeps one)."""
     c = Counter()
@@ -409,6 +425,13 @@ def candidates(inv, cat, demand, est, p, now):
         except Exception as e:                          # no market prices: buy as before
             print(f"[restock] market grade prices unavailable: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
     premium_a = est.break_rate.get("A", 0.0) if p["warranty_hours"] > 0 and p.get("warranty_A") else 0.0
+    if UW_A_UNCOUNTED and mkt:
+        gone = lambda u: old_c(u, cat, now) or underwater_a(u, mkt, premium_a, p["min_margin"])
+        count_sku = Counter(u.get("sku") for u in units if not gone(u))
+        by_grade = {}
+        for u in units:
+            if not gone(u):
+                by_grade.setdefault(u.get("sku"), Counter())[u.get("grade")] += 1
     out = {}
     for s, x in cat.items():
         c, lp, kind = x["category"], x["list_price"], x["kind"]
