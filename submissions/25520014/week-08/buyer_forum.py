@@ -73,7 +73,10 @@ ONLY_MAIN = True          # owner 11-04 01:4x: for now only those three shapes, 
 # Owner 11-05 08:10: no buyer posts at all until the owner has seen the dislike bombing end (totato2203, about every
 # forum post since 02 h, ours stopped 03:39 when each MAIN kind had a dislike). Without this the kinds came back by
 # themselves once their disliked posts were VOTES_H old (13:20). buyer_manager reports when the bombing fades.
-POSTING_PAUSED = False    # owner 11-06 10:40: posts resume. Patch 3.4 (06:00) counts one stance per voting account
+# Owner 11-06 13:25: posts stop again. From the 10:40 resume our forum fell 0.915 -> 0.889 (percentile 0.99 -> 0.94)
+# in 2.5 h while it held at 0.915 through the 06:09-10:30 pause: each new post lets one more account open a dislike
+# stance. Forum (0.3, scores packed at 0.83-0.91) loses more than the post count (0.1, about +0.06 ALL by the end).
+POSTING_PAUSED = True     # (was False from 11-06 10:40: posts resume. Patch 3.4 (06:00) counts one stance per voting account
                           # per author, so the bomber's dislikes weigh 1 in all however many posts we write (our
                           # forum 0.343 -> 0.915 at 06:00 with the bombing still on), and posts count 0.1
 SKIP_DISLIKED = False     # patch 3.4: a post's own dislike no longer moves the rating (stances per author), so a

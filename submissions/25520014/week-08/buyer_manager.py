@@ -261,8 +261,7 @@ def forum_alerts(db, now, us):
     # 5. posting stopped: no buyer post for 30 min (the three shapes ran out of material, or buyer_forum is down);
     # during the bombing the pause is the owner's, line 6 says so
     if now - last > 1800 and not on and FORUM_PAUSED:
-        out.append("글 정지(소유자 지시, 의도): 마지막 buyer 글이 " + (f"{(now - last) / 60:.0f}분 전" if last else "6시간 넘게 전")
-                   + "입니다. 재개는 소유자가 정합니다")
+        pass                            # owner 11-06 13:25: the pause is known, no hourly "글 정지" line
     elif now - last > 1800 and not on:
         out.append("글 멈춤: 마지막 buyer 글이 " + (f"{(now - last) / 60:.0f}분 전" if last else "6시간 넘게 전") + "입니다")
     return {"alerts": out, "forum_score": score, "forum_percentile": None if pct is None else round(pct, 2),
@@ -271,7 +270,8 @@ def forum_alerts(db, now, us):
 
 STORM_ON, STORM_OFF = 0.30, 0.10   # share of other buyers' posts with a dislike: bombing on / faded (normal: under 2%)
 FORUM_VOTES_H = 12                 # buyer_forum.VOTES_H: a kind with a disliked post waits this long (not imported: its loop)
-FORUM_PAUSED = False               # buyer_forum.POSTING_PAUSED (owner 11-05 08:10 paused; 11-06 10:40 resumed, patch 3.4)
+FORUM_PAUSED = True                # buyer_forum.POSTING_PAUSED (owner 11-06 13:25 paused again; no hourly line)
+# was: buyer_forum.POSTING_PAUSED (owner 11-05 08:10 paused; 11-06 10:40 resumed, patch 3.4)
 # (owner 11-06 13:10) dislikes are not watched any more: the bombing account dislikes every buyer post and is known,
 # and the alert asked the same question every hour. No storm share, no "싫어요 경보", no hourly bombing line.
 DISLIKES_OFF = True
