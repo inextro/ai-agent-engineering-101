@@ -484,8 +484,10 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   the rating itself (Wilson lower bound of the like share, 0 to 1), not its percentile, for all of Round 3. Saved,
   deals and posts stay percentiles. "percentile_among_buyers.forum" and the "순위 하락: forum 백분위" alert no
   longer score: judge the forum by its value, 0.3 x the change (0.889 -> 0.887 costs 0.0006). Top buyers sit at
-  0.87-0.91, so one dislike stance barely moves the rank now, and posts (0.1, a percentile) weigh relatively more.
-  (2) A dislike can be bought with weight N on one author: unit x (N - 1)^2 in all, unit = 3% of the account's
-  largest Book (at least 20,000), paid from the shop's cash, needs 50 settled deals. A rival with a large Book may
-  buy a heavy dislike on us; report it if our forum value drops by more than 0.01 within an hour. We do not buy
+  0.87-0.91, so the rank no longer swings on a small gap, but the value itself still moves: with no dislikes
+  0.889 is a like weight of about 31, and one more dislike weight takes the Wilson bound to about 0.84 (0.3 x 0.05
+  = 0.015 of Buyer ALL). (2) A dislike can be bought with weight N on one author: unit x (N - 1)^2 in all, unit = 3%
+  of the voter's own account's largest Book (at least 20,000), paid from its shop's cash, needs 50 settled deals.
+  So a rival with a small Book buys weight cheaply (Book 1M: unit 30,000, N = 5 costs 480,000); ours costs about
+  19M per unit. Report it if our forum value drops by more than 0.01 within an hour. We do not buy
   or cast dislikes (owner); leave "upvote" empty as before.
