@@ -536,3 +536,12 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   cheapest unit (often C), and we refused the receipt after the haggle: 3 h to 22:10, 153 of 334 orders had a receipt
   refused for its grade (21% of those closed, 62% of the rest), 100 at moss-and-oak. This is our opening, not the shops'
   fault. Judge it on refused receipts (doomed) per order and paid deals per hour, against the hour before.
+- 11-07 00:31 (owner: aim for Players 1st; our buyer saved is where we lose to lee-sungsoo, per-deal 0.330 vs 0.391
+  since 18:00). Two haggle changes. (1) HAGGLE_FIRST: a shop's first ask under its usual price is no longer taken at
+  once (65 of 279 deals since 18:00 were); we counter, and then take an ask only as usual (it meets our offer, stalls,
+  barely moves, or the last round). Backtest: per-deal saved 0.329 -> 0.334, a few deals lost. (2) MARKET_ANCHOR: in a
+  random half of orders (buyer.jsonl `anchor_arm`), our counter says the median price this SKU in this grade settled
+  for on the market in the last 6 h, when it is under the shop's asks (`anchor`, `anchor_said`). Offers are the same in
+  both halves; only the words differ. Judge (2) after a few hours by comparing the halves on price / first ask, deal
+  rate, and per-deal saved; do not read a change in deals per hour as a fault of (1) without checking talks that ended
+  after our first counter.
