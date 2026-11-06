@@ -389,3 +389,10 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   and gave each 3 dislikes. It is not about the kinds we post or their content, so do not treat it as a format
   failing, and do not pass the "평균 하락" alert on for it again. Report it only if new posts (under 1 h old) start
   getting dislikes.
+- 11-06 10:32 (owner). The market's patch 3.4 (06:00) scores a buyer by Saved = sum over deals of (list - paid) / list,
+  divided by (deals + 100); a deal that served nothing counts -1, or 0 if refunded, whatever its price. Goods accept
+  now follows it: a grade is paid for only when (1 - p)(1 - price/list) - (p if no warranty) >= 0, p that grade's
+  break rate; a receipt with a warranty of 6 h or more counts a break as 0 and the accept asks the kit for that
+  warranty. Expect C goods without a warranty above ~46% of the list (before: 65%) to be refused ("grade C, the
+  policy accepts ..." or "warranty 0 h ...") and fewer unrefunded breaks; this is intended, not a fault.
+  Backtest on our 6,074 deals: 322 refused (C 320), Saved 0.246 -> 0.265.
