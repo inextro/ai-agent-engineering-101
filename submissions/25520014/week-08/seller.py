@@ -506,9 +506,22 @@ MKT_BASE = 0.95          # a goods ask starts from at least this share of the ma
 WANTS_WARRANTY = re.compile(r"warrant|guarantee|보증|보장", re.I)
 
 
-def option(u, p, arm, wants_warranty=True):
+# Kiro729 rates every shop by the price alone (11-06 24 h, 1,829 paid deals): paid/list <= 0.700 gets 5 stars,
+# >= 0.708 gets 4, whatever the grade or warranty (ours: 0.661-0.700 all 43 at 5, 0.708-0.717 all 14 at 4). It is
+# 1 of 46 accounts in the board's star ranking (+1 star on its mean = +0.02), 151 deals a day here at 4.58. Its goods
+# first message is its own: this template matched 499 paid talks here in 48 h, all Kiro729's. Its price is held at
+# STAR_CAP x list, never under break-even (cost + the warranty refund expected at that price): 65 deals a day over
+# it, about 1.8M a day; its mean here goes 4.48 -> 4.72 by 11-17 (+0.005 on the ranking). Owner, 11-06 18 h. Kiro729
+# also walked 126 talks a day after offering under our floor (67 of them at 0.70-0.75 of list): about 51 would
+# have met the capped price, so more deals as well.
+STAR_BUYER = re.compile(r"\. Please include a \d+(?:\.\d+)?-hour warranty\.")
+STAR_CAP = 0.695
+
+
+def option(u, p, arm, wants_warranty=True, capped=False):
     """One unit the shop can offer, with its own asking price, floor and concession step. wants_warranty: the buyer
-    asked for a warranty (WARRANTY_ON_ASK grades get one only then)."""
+    asked for a warranty (WARRANTY_ON_ASK grades get one only then). capped: a STAR_BUYER, whose ask (and so every
+    price the talk can close at) is held at STAR_CAP x list, the floor lowered to it but never under break-even."""
     kind = u.get("kind", "goods")
     warranty = int(p["warranty_hours"]) if kind == "goods" and p.get(f"warranty_{u.get('grade')}") else 0
     if u.get("grade") in WARRANTY_ON_ASK and not wants_warranty:
@@ -534,8 +547,15 @@ def option(u, p, arm, wants_warranty=True):
     floor = floor_price(u, p, warranty, ask)
     if clear:
         floor = max(1, min(floor, round(clear["floor"])))
+    cap = None
+    if capped and u.get("list_price"):
+        cap = int(STAR_CAP * u["list_price"])
+        # never under break-even: the cost plus the refund the warranty is expected to pay at the capped price
+        even = floor_price(u, dict(p, min_margin=0.0), warranty, cap)
+        floor = min(floor, max(cap, even))
+        ask = min(ask, cap)
     return {"unit": u, "ask": max(round(ask), floor), "floor": floor, "step": 0, "warranty": warranty,
-            "clearance": bool(clear)}
+            "clearance": bool(clear), "cap": cap}
 
 
 SMALL_GAP = 0.02   # an offer at or above the floor and this close to the price under talk closes at the offer
@@ -748,7 +768,7 @@ class Seller(AgentExecutor):
                     and x["unit"] not in held and x["unit"] != u["unit"]), None)
         if alt is None:
             return False
-        new = option(alt, policy.load(), deal["arm"], deal.get("wants_warranty", True))
+        new = option(alt, policy.load(), deal["arm"], deal.get("wants_warranty", True), deal.get("capped", False))
         o["unit"], o["floor"] = new["unit"], max(o["floor"], new["floor"])
         log(f"[task {task_id[:8]}] unit {u['unit']} was taken meanwhile; offering {alt['unit']}")
         return True
@@ -778,10 +798,10 @@ class Seller(AgentExecutor):
                 c = dict(c, _pool_cost=sum(x["cost"] for x in cs) / len(cs))
             else:                                    # the cheapest on its own cost, as find_units (POOL_FLOOR)
                 c = min(cs, key=lambda x: (x["cost"], x.get("supplied_at") or 0))
-            co = option(c, policy.load(), deal["arm"], deal.get("wants_warranty", True))
+            co = option(c, policy.load(), deal["arm"], deal.get("wants_warranty", True), deal.get("capped", False))
             if offer < close_floor(co):
                 continue
-            co["ask"], co["step"] = max(round(offer), co["floor"]), deal["steps"]
+            co["ask"], co["step"] = max(min(round(offer), co["cap"] or round(offer)), co["floor"]), deal["steps"]
             deal["fb_done"], deal["fb_last"] = deal.get("fb_done", 0) + 1, co["ask"]
             return co
         return None
@@ -808,7 +828,8 @@ class Seller(AgentExecutor):
         arm = await asyncio.to_thread(lambda: model.pick_arm(kind, bandit_stats_cached()))   # a stale cache reads
         # the whole negotiations file: in the thread, not on the event loop (11-05 01:40 review)
         wants_w = bool(WANTS_WARRANTY.search(text or ""))
-        opts = {g: option(u, p, arm, wants_w) for g, u in by_grade.items()}
+        capped = kind == "goods" and bool(STAR_BUYER.search(text or ""))
+        opts = {g: option(u, p, arm, wants_w, capped) for g, u in by_grade.items()}
         if len(opts) > 1:
             # one grade, chosen by the code: the best we hold, since buyers' kits refuse to pay for low grades
             # (11-04, 6 h of our receipts: unpaid food A 0 of 33, B 29 of 105, C 34 of 58; goods C 6 of 11),
@@ -822,7 +843,8 @@ class Seller(AgentExecutor):
             g, alt = next(iter(opts)), None
         deal = self.open[task_id] = {"opts": opts, "cur": g, "alt": alt, "arm": arm,
                                      # a clearance price is not the arm's: the bandit must not learn from it
-                                     "log_arm": "clearance" if opts[g]["clearance"] else arm,
+                                     "log_arm": "clearance" if opts[g]["clearance"] else "star_cap" if capped else arm,
+                                     "capped": capped,
                                      "steps": int(p["max_concessions"]), "lines": [], "t0": time.time(),
                                      "named": bool(NAMED_GRADE.search(text or "")), "wants_warranty": wants_w,
                                      "pv": p.get("version"), "bv": policy.load_playbook().get("version")}
@@ -886,7 +908,8 @@ class Seller(AgentExecutor):
             if key == alt or not opening:    # chosen, or not asked for on the first reply: the talk has one unit
                 opts = deal["opts"] = {key: opts[key]}
                 deal["alt"] = None
-                deal["log_arm"] = "clearance" if opts[key]["clearance"] else deal["arm"]
+                deal["log_arm"] = ("clearance" if opts[key]["clearance"] else "star_cap" if deal.get("capped")
+                                   else deal["arm"])
             u, m = opts[key]["unit"], moves[key]
             sit, tmpl = situation(m), template(u, m)
             if key == alt and not m["close"]:      # the first price of the lower unit, not a held one

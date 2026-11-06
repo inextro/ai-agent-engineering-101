@@ -392,6 +392,11 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   costs unit x (N - 1)^2 in all (only the difference when raised), unit = 3% of the account's largest Book, at least
   20,000 (inventory.json dislike_power_unit). It leaves the shop's cash, lowers Book, never comes back, needs 50
   settled deals. The owner does not buy dislikes: if one is ever asked of the shop's cash, say so under 결정 필요.
+- 11-06 18:30 (owner; seller restarted). Kiro729 rates every shop by price alone: paid/list 0.700 or under gets 5
+  stars, 0.708 or over gets 4. Its goods talks (first message "... Please include a N-hour warranty.") are now
+  priced at most 0.695 of list, never under break-even (cost + expected warranty refund); about 1.8M a day of margin
+  for +0.005 on the star ranking, by design. These talks log arm "star_cap": lower prices there are not a fault.
+  Report Kiro729's mean stars here and its deals over 0.70 of list if the cap stops holding.
 
 ## buyer
 
