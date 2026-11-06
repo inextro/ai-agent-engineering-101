@@ -358,6 +358,10 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   design. shaun0927 (also low, "Certificate attached, please.") is kept for now: it buys 127M a day. New alert
   "warranty" in alerts.md: buyers may want a warranty on goods B/C (patch 3.4 scores an unrefunded break -1); when it
   rings, put it in 결정 필요 for the owner (giving B one by default), do not change WARRANTY_ON_ASK yourself.
+- 11-06 11:10 (seller, kit restarted at 11:10). shaun0927 is blocked too, by its templates "Certificate attached,
+  please." and "... certificate attached." (95% of its paid deals here): since 01:21 it rates us 1.4-1.7 with or
+  without a warranty while other shops get about 3.9 from it in the same hours. It bought 127M a day (7.5% of our
+  revenue, 24.5M margin), so expect revenue and goods talks to drop by about that; it is by design, not a fault.
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
@@ -422,3 +426,7 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   plan. The owner's projection on the last 24 h of our deals (lost deals dropped, lower closing prices not counted):
   final Saved about 0.278 at 0.20, 0.290 at 0.25, 0.298 at 0.30, 0.289 at 0.35; within 24 h every value lands near
   0.255, so judge a move over a day, not an hour. Saved moves slowly because 6,100 past deals hold the mean.
+- 11-06 11:12 (owner). open_under 0.80 -> 0.75 (policy version 5) as a trial of a lower first offer; min_saved 0.25
+  and raise 0.40 unchanged. Each window now has "haggle": compare policy 5 with 4 on paid_over_first_ask (baseline
+  last hour 0.927), deals_at_our_first_offer (5 of 84), lost_with_an_ask_under_cap (11) and deals per hour. Give it
+  two hours before you move it; after that open_under is yours within its range, one of open_under/raise at a time.

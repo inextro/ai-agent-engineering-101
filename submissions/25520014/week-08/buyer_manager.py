@@ -81,6 +81,23 @@ def refusal_kind(why):
     return "other: " + why[:120]
 
 
+def haggle_stats(rs, deals):
+    """What the first offer (open_under) did (owner 11-06: the manager tunes it from these). A deal closed at our first
+    offer means the shop would likely have taken less; an order lost while some ask was under our cap means we pushed
+    too hard or too slowly."""
+    lost = [r for r in rs if r.get("end") != "deal" and r.get("asks") and r.get("cap")
+            and min(r["asks"]) <= r["cap"]]
+    return {"policy_versions": dict(Counter(r.get("policy") for r in rs)),
+            "paid_over_first_ask": round(sum(r["price"] / r["asks"][0] for r in deals if r.get("asks"))
+                                         / max(1, sum(1 for r in deals if r.get("asks"))), 3) if deals else None,
+            "deals_at_our_first_offer": sum(1 for r in deals if r.get("offers") and r.get("asks")
+                                            and r["price"] <= r["offers"][0] < r["asks"][0]),
+            "lost_with_an_ask_under_cap": len(lost),
+            "lost_ends": dict(Counter(str(r.get("end"))[:40] for r in lost).most_common(4)),
+            "mean_offers_per_deal": round(sum(len(r.get("offers") or []) for r in deals) / len(deals), 2)
+            if deals else None}
+
+
 def window(since, until):
     """One window of the buyer, from its own order log."""
     every = [r for r in jsonl(ORDERS, since) if r["ts"] < until]
@@ -115,6 +132,7 @@ def window(since, until):
             # patch 3.4 scores the mean of (list - paid) / list, not the sum in won (breaks not yet known here)
             "saved_rate_mean": round(sum(1 - r["price"] / r["list"] for r in deals) / len(deals), 3) if deals else None,
             "deals_under_min_saved": sum(1 for r in deals if 1 - r["price"] / r["list"] < buyer_policy.load()["min_saved"]),
+            "haggle": haggle_stats(rs, deals),
             "mean_secs": round(sum(r.get("secs", 0) for r in rs) / len(rs), 1) if rs else None,
             "second_shop_tried": sum(1 for r in rs if (r.get("tried") or 0) > 1),
             "messages_by_model": msgs.get("model", 0), "messages_by_template": msgs.get("template", 0)}
@@ -368,6 +386,13 @@ grade whose expected saved (break counted as -1 without a warranty, 0 with one) 
 Saved (0.5) and loses deals (0.1); lowering it does the reverse. Aim it near what the record says a deal can still
 add: about our current Saved, lower while deals' percentile falls, higher while saved_rate_mean stays above it and
 paid deals hold. Judge by the board's percentiles, not by surplus in won.
+
+open_under (owner 11-06 11 h: set to 0.75 from 0.80 as a trial, yours to move after): the first offer as a share of
+the lower of the ask and the usual price. It raises Saved per deal without dropping deals as long as shops keep
+talking. Read "haggle" in each window (orders carry the policy version, so compare versions): lower paid_over_first_ask
+is the gain; many deals_at_our_first_offer say shops take our opening, so go lower; a rise in
+lost_with_an_ask_under_cap or in deals per hour falling against the hour before says we push too hard, so go back up.
+Move open_under and raise one at a time, so the effect of each can be told apart.
 
 Policy now, with the allowed range of each number (a change moves at most a quarter of the range):
 {policy}
