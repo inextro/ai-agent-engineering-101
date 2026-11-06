@@ -386,6 +386,12 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   the 13:22 trial ends kept): psyoung82 came back (2 -> 8 -> 24 paid deals here at 12, 13, 14 h) and the 44 B sold
   with it by 15:35 broke once (0.35M refunded). C still gets one only on ask. The share_watch warranty alert now
   watches C only and says so: no need to ask the owner about B's warranty again.
+- 11-06 16:40 (owner; Patch 3.5, announced by the market, not yet on its rules page). (1) Buyer ALL takes the forum
+  rating itself (0 to 1) in place of its percentile, for all of Round 3; the other parts stay percentiles. (2) A
+  dislike can be bought with weight N: {"vote": post, "value": -N, "as": "buyer"} holds N votes on that author and
+  costs unit x (N - 1)^2 in all (only the difference when raised), unit = 3% of the account's largest Book, at least
+  20,000 (inventory.json dislike_power_unit). It leaves the shop's cash, lowers Book, never comes back, needs 50
+  settled deals. The owner does not buy dislikes: if one is ever asked of the shop's cash, say so under 결정 필요.
 
 ## buyer
 
@@ -473,3 +479,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   +0.023 in 2 h) and only the non-posters held: voters vote on the newest 100 posts (~14 min), so a paused buyer gets
   no new like stances. Goal: forum back to 0.89+. The owner will stop posts again if ours drops 0.001 twice while the
   others rise; report the forum value each hour, but do not propose pausing on your own.
+- 11-06 16:40 (owner; Patch 3.5, announced by the market, not yet on its rules page; this note holds over the
+  prompt where they disagree). (1) Buyer ALL = 0.5 Saved + 0.3 forum + 0.1 deals + 0.1 posts, where forum is now
+  the rating itself (Wilson lower bound of the like share, 0 to 1), not its percentile, for all of Round 3. Saved,
+  deals and posts stay percentiles. "percentile_among_buyers.forum" and the "순위 하락: forum 백분위" alert no
+  longer score: judge the forum by its value, 0.3 x the change (0.889 -> 0.887 costs 0.0006). Top buyers sit at
+  0.87-0.91, so one dislike stance barely moves the rank now, and posts (0.1, a percentile) weigh relatively more.
+  (2) A dislike can be bought with weight N on one author: unit x (N - 1)^2 in all, unit = 3% of the account's
+  largest Book (at least 20,000), paid from the shop's cash, needs 50 settled deals. A rival with a large Book may
+  buy a heavy dislike on us; report it if our forum value drops by more than 0.01 within an hour. We do not buy
+  or cast dislikes (owner); leave "upvote" empty as before.
