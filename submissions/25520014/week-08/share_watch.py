@@ -182,6 +182,8 @@ def signals(m):
 # and after 06:00), no result carried an `accept` with warranty_hours, and our B/C talks whose buyer did not ask
 # closed 85-100% per 3 h. Rings when one of these moves; then B by default is the first step (a B's refund, 12% x
 # 538k = 65k, fits its 126k margin; a C's, 39% x 503k = 196k, takes its 207k).
+# 11-06 15:50: B gets one by default since 13:22 (seller.WARRANTY_ON_ASK = ("C",), owner kept it), so only C is watched
+ON_ASK = ("C",)
 W_NOASK_MIN, W_NOASK_RATE = 15, 0.70
 W_MARKET = {"B": 0.60, "C": 0.45}
 
@@ -227,19 +229,19 @@ def warranty_watch(now, db):
 def warranty_signal(w):
     why = []
     for g, x in w["noask_talks"].items():
-        if x["n"] >= W_NOASK_MIN and x["deal_rate"] is not None and x["deal_rate"] < W_NOASK_RATE:
+        if g in ON_ASK and x["n"] >= W_NOASK_MIN and x["deal_rate"] is not None and x["deal_rate"] < W_NOASK_RATE:
             why.append(f"our goods {g} talks whose buyer asked no warranty closed {x['deal_rate']:.0%} of {x['n']} in 3 h "
                        f"(85-100% through 11-06 11 h)")
     for g, s in w["market_share_warranty"].items():
-        if s is not None and s > W_MARKET[g]:
+        if g in ON_ASK and s is not None and s > W_MARKET[g]:
             why.append(f"the market's goods {g} settled with a warranty {s:.0%} in 3 h (11-06: B 48-50%, C 33-34%)")
     if w["accept_warranty_1h"]:
         why.append(f"{w['accept_warranty_1h']} buyer results in the last hour carried an accept with warranty_hours")
     if not why:
         return None
-    return ("warranty", "warranty: buyers may now want one on B/C (patch 3.4, unrefunded break -1): " + "; ".join(why)
-            + ". We give B/C a warranty only on ask (seller.WARRANTY_ON_ASK); ask the owner whether to give B one by "
-              "default (refund about 65k a unit against a 126k margin; C's refund takes its margin)")
+    return ("warranty", "warranty: buyers may now want one on C (patch 3.4, unrefunded break -1): " + "; ".join(why)
+            + ". B gets one by default since 11-06 13:22; C only on ask (seller.WARRANTY_ON_ASK), since a C's refund "
+              "(39% x 503k = 196k) takes about all its 207k margin: report it, the owner decides")
 
 
 # 6. new SKUs (owner, 11-06 12 h): 다우닝 플라나 4인 G24f5f979 and 자코모 와드 4인 G47788edd first came to the market

@@ -382,6 +382,10 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   the 72 h warranty without asking, priced as before (a 3 h trial to win back psyoung82, about 10M a day more
   refunds); more B refunds are expected, not a fault. At 16:30 report whether psyoung82 came back (visits line
   in alerts.md or visit_watch) so the owner can keep or revert it.
+- 11-06 16:10 (share_watch restarted; seller comment only). Goods B keeps the 72 h warranty without asking (owner,
+  the 13:22 trial ends kept): psyoung82 came back (2 -> 8 -> 24 paid deals here at 12, 13, 14 h) and the 44 B sold
+  with it by 15:35 broke once (0.35M refunded). C still gets one only on ask. The share_watch warranty alert now
+  watches C only and says so: no need to ask the owner about B's warranty again.
 
 ## buyer
 

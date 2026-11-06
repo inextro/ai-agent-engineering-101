@@ -499,6 +499,8 @@ WARRANTY_ON_ASK = ("C",)
 # moss-and-oak, which gives 12 h on every grade. A B given one unasked carries no break premium in its floor
 # (B_NO_PREMIUM), so its price stays where it was. Cost: 24 h to 13 h, 499 B sold (margin 69.9M), 11.1% broke within
 # 6 h, 9.9M of them unrefunded: about 10M a day more refunds. Revert to ("B", "C") if psyoung82 does not come back.
+# 11-06 15:50 the owner kept it: psyoung82 came back (2 -> 8 -> 24 paid deals here at 12, 13, 14 h) and the 44 B
+# sold with it by 15:35 broke once (0.35M refunded). C still gets one only on ask.
 B_NO_PREMIUM = True
 MKT_BASE = 0.95          # a goods ask starts from at least this share of the market's price for its SKU and grade
 WANTS_WARRANTY = re.compile(r"warrant|guarantee|보증|보장", re.I)
