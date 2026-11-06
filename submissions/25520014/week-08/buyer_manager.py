@@ -216,7 +216,7 @@ def forum_alerts(db, now, us):
     # 6. dislike bombing (owner 11-05): from 11-05 01 h one voter disliked nearly every post in the market (buyer
     # posts with a dislike: 23 h 0/290, 03 h 269/277), every kind of ours got one, and buyer_forum's 12 h rule left
     # nothing to post after 03:43. The owner holds our posts while it lasts and wants to hear when it fades.
-    storm = dislike_share(db, now, us, votes)
+    storm = [] if DISLIKES_OFF else dislike_share(db, now, us, votes)
     last = max((r.get("ts", 0) for r in jsonl(POSTS, now - 6 * 3600)), default=0)
     # buyer_forum posts again once one kind's newest disliked post is FORUM_VOTES_H old: the earliest kind decides
     hit = {}
@@ -233,7 +233,7 @@ def forum_alerts(db, now, us):
     # bomber's one dislike a post is expected and weighs 1 in all, so only a post with BOMB_DISLIKES or more (another
     # account too) is reported; with no bombing any dislike is reported. Reported, not paused: a stance stays
     # whether or not we keep posting, so the owner decides.
-    if STANCES:
+    if STANCES and not DISLIKES_OFF:
         recent = [(i, votes[i][1]) for i, t in mine if t > now - DISLIKE_LOOK_H * 3600 and i in votes]
         state = "진행" if on else "없음"
         if storm and storm[0]["share"] is not None:
@@ -272,6 +272,9 @@ def forum_alerts(db, now, us):
 STORM_ON, STORM_OFF = 0.30, 0.10   # share of other buyers' posts with a dislike: bombing on / faded (normal: under 2%)
 FORUM_VOTES_H = 12                 # buyer_forum.VOTES_H: a kind with a disliked post waits this long (not imported: its loop)
 FORUM_PAUSED = False               # buyer_forum.POSTING_PAUSED (owner 11-05 08:10 paused; 11-06 10:40 resumed, patch 3.4)
+# (owner 11-06 13:10) dislikes are not watched any more: the bombing account dislikes every buyer post and is known,
+# and the alert asked the same question every hour. No storm share, no "싫어요 경보", no hourly bombing line.
+DISLIKES_OFF = True
 STANCES = True                     # patch 3.4: forum rating = one stance per account per author, not per post
 BOMB_DISLIKES = 2                  # during the bombing a post of ours with this many dislikes is reported (owner 11-06)
 DISLIKE_LOOK_H = 2                 # our posts this many hours back are checked for dislikes (votes land within minutes)
@@ -337,7 +340,7 @@ def summary(md, now):
         "last_6_hours": window(now - 6 * 3600, now),
         "shops_skipped_now_for_refusing_us_at_the_first_question": read_avoid(),
         "orders_last_hour": [{k: r.get(k) for k in ("category", "kind", "use_within_hours", "budget", "shop", "list", "cap", "expect",
-                                                     "quotes", "asks", "offers", "end", "price", "secs", "tried")}
+                                                     "sku", "quotes", "quote_skus", "asks", "offers", "end", "price", "secs", "tried")}
                              for r in last],
         "our_reviews_6h": {"stars": dict(Counter(r.get("stars") for r in bought)),
                            "false_grade_claims": sum(1 for r in bought if r.get("claim_honest") is False)},
@@ -424,11 +427,8 @@ Review, in this order:
    percentile fell, posting stopped). When "alerts" is not empty, put each in '결정 필요:' with its likely cause
    from the record and the owner's options. Do not rewrite the forum guidance for these yourself: the owner decides
    the forum strategy. Since patch 3.4 the rating takes one stance per account per author, and one account has
-   disliked nearly every buyer post since 11-05 01 h; our posts go out every 5 minutes on purpose. The code raises
-   "싫어요 경보" only for dislikes past that account (2+ on a post while the bombing is on, any while it is off);
-   other single dislikes are not a problem. Every hour, say in one line under 상황 whether the bombing is on,
-   fading or over, from "market_dislike_share_by_hour_newest_first" (share of other buyers' posts with a dislike,
-   under 2% before 11-05 01 h).
+   disliked nearly every buyer post since 11-05 01 h; our posts go out every 5 minutes on purpose. The owner knows
+   and stopped watching dislikes (11-06 13:10): do not report dislikes, the bombing or its fee in any section.
 3. What to change: numbers, playbook, or nothing. Change only for a reason in the record; no change is a fine answer.
    Mind the trade: lower offers and a higher min_saved raise Saved per deal but lose deals.
 4. Findings ('발견'): read the orders and posts for what the code cannot count, and report only what is new: a

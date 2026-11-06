@@ -537,7 +537,7 @@ def main():
     m = Models(cat)
     rec = {"ts": started, "policy": P.get("version"), "playbook": buyer_policy.load_playbook().get("version"), "order": order.get("order"), "category": order.get("item"), "budget": order.get("budget"),
            "kind": order.get("kind"), "use_within_hours": order.get("use_within_hours"), "shops": len(shops),
-           "asks": [], "offers": [], "quotes": {}}
+           "asks": [], "offers": [], "quotes": {}, "quote_skus": {}}
     result = {"shop": shops[0]["url"] if shops else "", "receipt": None, "stars": 3, "review": ""}
     timer = threading.Timer(max(1, time_left()), out_of_time, (rec, result))
     timer.daemon = True                         # it must not keep the process alive after the result is printed
@@ -585,6 +585,7 @@ def main():
             if task is None:
                 continue
             rec["quotes"][c["shop"]] = ask
+            rec["quote_skus"][c["shop"]] = c["sku"]
             state = task["status"]["state"]
             if state == "TASK_STATE_INPUT_REQUIRED" and short_food(c, task, need_h):
                 said(rec, c["shop"], task)
@@ -620,7 +621,11 @@ def main():
             rpc_url, task, ask = open_talk(c, c["url"], need_h)
             if task is None:
                 continue
-        quoted = [(o[0]["shop"], o[3]) for o in live if o[0] is not c and o[3] is not None]
+        # only a quote for the same SKU (11-06 13 h): 1,046 of the last 1,875 quote rounds asked shops for different
+        # SKUs of the category, and the message said "{shop} quoted me {ask} for this" with a cheaper SKU's price
+        # (o-823d23b385d4: lee-sungsoo's 1,550,000 for G8ec51935 named to moss-and-oak for G24f5f979, list 3,816,000)
+        quoted = [(o[0]["shop"], o[3]) for o in live
+                  if o[0] is not c and o[3] is not None and o[0]["sku"] == c["sku"]]
         other = min(({"shop": s, "ask": q} for s, q in quoted), key=lambda o: o["ask"], default=None)
         rec.update(shop=c["shop"], sku=c["sku"], list=c["list"], cap=c["cap"], expect=c["expect"], es=c["es"],
                    tried=i + 1)

@@ -354,13 +354,15 @@ def competition(db, now, cat):
             c[1] += r["outcome"] == "deal"
             c[2] += r["outcome"] != "deal" and len(ts_) <= 1
     # what other shops quoted our own buyer last hour for SKUs we sell: the buyer asks several shops per order
-    # (buyer.jsonl `quotes`, shop -> first ask; the grade is not recorded)
+    # (buyer.jsonl `quotes`, shop -> first ask; the grade is not recorded). Only quotes for the SKU the order closed
+    # on (`quote_skus`, 11-06 13 h): a round asks shops for different SKUs of the category, and a cheaper SKU's ask
+    # over this list price read as an under-cost quote (lee-sungsoo "0.406" on G24f5f979 was 1,550,000 for G8ec51935)
     q = {}
     for r in jsonl(policy.DATA / "buyer.jsonl", now - 3600):
         s, lp = r.get("sku"), r.get("list")
         if s in mine and lp and isinstance(r.get("quotes"), dict):
             for shop, v in r["quotes"].items():
-                if isinstance(v, (int, float)) and v > 0:
+                if (r.get("quote_skus") or {}).get(shop) == s and isinstance(v, (int, float)) and v > 0:
                     q.setdefault(s, {}).setdefault(shop, []).append(v / lp)
     quotes = [{"sku": s, "name": (cat.get(s) or {}).get("name", "")[:24],
                "first_ask_over_list_by_shop": {k: med(v) for k, v in sorted(by.items(), key=lambda kv: med(kv[1]))},
