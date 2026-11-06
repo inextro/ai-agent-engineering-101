@@ -525,3 +525,9 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   an hour ago (12 h replay: fires once, 10:40 0.915 -> 0.891). The percentile is shown for reference only.
 - 11-06 21:05 (owner; buyer_manager restarted). The 19:12 "값 하락" forum check above was in the file but not in your
   process until this restart; reports 19:05 and 20:05 still ran the old percentile check.
+- 11-06 22:22 (owner; market_buyer.py, GRADE_OPENING). The goods opening now names the grades we take, at the
+  expected price, as the accept policy decides: A always, B/C when they save min_saved there, and those that do only
+  under a warranty "only with a warranty of at least 6 hours". Before, openings named no grade, shops quoted their
+  cheapest unit (often C), and we refused the receipt after the haggle: 3 h to 22:10, 153 of 334 orders had a receipt
+  refused for its grade (21% of those closed, 62% of the rest), 100 at moss-and-oak. This is our opening, not the shops'
+  fault. Judge it on refused receipts (doomed) per order and paid deals per hour, against the hour before.

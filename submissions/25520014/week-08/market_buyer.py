@@ -262,8 +262,11 @@ def candidates(order, shops, cat, m):
             value, cap = value_cap(x, order, m)
             expect = min(lp * m.ratio(s["name"]), cap - EDGE * lp)
             es = m.p_deal(s["name"]) * m.p_within(s["name"], cap, lp) * (value - expect) / lp
-            out.append({"shop": s["name"], "url": s["url"], "sku": o["sku"], "name": x["name"], "kind": x.get("kind"),
-                        "list": lp, "value": round(value), "cap": int(cap), "expect": round(expect), "es": round(es, 4)})
+            c = {"shop": s["name"], "url": s["url"], "sku": o["sku"], "name": x["name"], "kind": x.get("kind"),
+                 "list": lp, "value": round(value), "cap": int(cap), "expect": round(expect), "es": round(es, 4)}
+            if x.get("kind") == "goods":
+                c["grades"], c["grades_w"] = grade_terms(expect / lp, m)
+            out.append(c)
     return sorted(out, key=lambda c: -c["es"])
 
 
@@ -354,7 +357,32 @@ def opening(c, need_h):
     if c.get("kind") == "food" and need_h:
         text += (f" I need it to last {need_h:g} hours: please offer only a unit with at least "
                  f"{need_h + FOOD_MARGIN_H:g} hours of shelf life left, with the market's certificate.")
+    if c.get("kind") == "goods" and c.get("grades") and len(c["grades"]) < 3:
+        plain, warr = c["grades"], c.get("grades_w") or []
+        no = [g for g in "ABC" if g not in plain and g not in warr]
+        text += f" I buy grade {' or '.join(plain)}."
+        if warr:
+            text += f" Grade {' or '.join(warr)} only with a warranty of at least {BREAK_WINDOW_H} hours on the receipt."
+        if no:
+            text += f" I will not buy grade {' or '.join(no)}: please quote a grade I buy."
     return text + " What is your price?"
+
+
+# 11-06 22 h: goods openings named no grade, so shops quoted their cheapest unit (often C), we haggled, accepted, and
+# the kit's accept policy then refused the receipt: 3 h to 22:10, 153 of 334 orders had a receipt refused for its
+# grade (21% of them closed, 62% of the rest), 100 of those at moss-and-oak. The opening now names the grades the
+# accept policy takes at the expected price: A always (its fallback), B or C when they save MIN_SAVED there, and
+# those that do only under a warranty with that condition. Undo: GRADE_OPENING = False.
+GRADE_OPENING = True
+
+
+def grade_terms(r, m):
+    """(grades accepted with no warranty, grades accepted only under one) at price ratio r, as accept_policy does."""
+    if not GRADE_OPENING:
+        return ["A", "B", "C"], []
+    plain = ["A"] + [g for g in "BC" if goods_saved(m.breaks[g], r, False) >= MIN_SAVED]
+    warr = [g for g in "BC" if g not in plain and goods_saved(m.breaks[g], r, True) >= MIN_SAVED]
+    return plain, warr
 
 
 def short_food(c, task, need_h):
