@@ -73,7 +73,11 @@ ONLY_MAIN = True          # owner 11-04 01:4x: for now only those three shapes, 
 # Owner 11-05 08:10: no buyer posts at all until the owner has seen the dislike bombing end (totato2203, about every
 # forum post since 02 h, ours stopped 03:39 when each MAIN kind had a dislike). Without this the kinds came back by
 # themselves once their disliked posts were VOTES_H old (13:20). buyer_manager reports when the bombing fades.
-POSTING_PAUSED = True
+POSTING_PAUSED = False    # owner 11-06 10:40: posts resume. Patch 3.4 (06:00) counts one stance per voting account
+                          # per author, so the bomber's dislikes weigh 1 in all however many posts we write (our
+                          # forum 0.343 -> 0.915 at 06:00 with the bombing still on), and posts count 0.1
+SKIP_DISLIKED = False     # patch 3.4: a post's own dislike no longer moves the rating (stances per author), so a
+                          # kind is not left out for one; the bomber dislikes every new post once (11-06: 754/787)
 LIKE_PRIOR_W = 2          # posts' worth of weight on LIKE_TARGET in a kind's expected likes
 
 
@@ -580,7 +584,7 @@ def kind_order(db, now):
     score, off = {}, []
     for k in KINDS:
         v = votes.get(k, [])
-        if any(d for _, d in v):
+        if SKIP_DISLIKED and any(d for _, d in v):
             off.append(k)
             continue
         score[k] = (sum(l for l, _ in v) + LIKE_TARGET * LIKE_PRIOR_W) / (len(v) + LIKE_PRIOR_W)

@@ -396,3 +396,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   warranty. Expect C goods without a warranty above ~46% of the list (before: 65%) to be refused ("grade C, the
   policy accepts ..." or "warranty 0 h ...") and fewer unrefunded breaks; this is intended, not a fault.
   Backtest on our 6,074 deals: 322 refused (C 320), Saved 0.246 -> 0.265.
+- 11-06 10:40 (owner). Buyer posts resume (POSTING_PAUSED False) and a disliked post no longer benches its kind:
+  patch 3.4 rates the forum by one stance per voting account per author, so the account that dislikes nearly every
+  buyer post weighs 1 in all however many posts we write (our forum 0.343 -> 0.915 at 06:00 with the bombing on).
+  Posts count 0.1 of the score (ours 345, percentile 0.62). Per-post dislike alerts are off; judge the forum by
+  its score and percentile only. Do not pause posts for dislikes. This replaces the 11-05 notes on pausing posts.
+- 11-06 10:40 (owner). The buyer now picks shops by expected saved rate (surplus / list price), and min_saved
+  (start 0.20, yours to move in 0.10-0.30) caps the price (food list x (1 - min_saved); goods the price where an A
+  unit under a warranty still saves it) and is the goods accept threshold. Expect fewer deals (backtest at 0.20:
+  -24%) and a higher Saved (0.246 -> about 0.29); that drop in deals is intended. Weigh Saved (0.5) against deals
+  (0.1) by their board percentiles in our_buyer_score_now.

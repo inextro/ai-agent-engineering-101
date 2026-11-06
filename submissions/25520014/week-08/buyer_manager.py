@@ -172,8 +172,10 @@ def forum_alerts(db, now, us):
     snaps = [json.loads(r[0]) for r in db.execute("SELECT raw FROM board WHERE ts > ? ORDER BY ts", (now - 6 * 3600,))]
     score, pct = our_forum(snaps[-1], us) if snaps else (None, None)
     # 1. a dislike: our three shapes have had none since 11-04 02:05; votes land within 5 min, so one hour's posts
+    # 1, 2 and 6 judge posts one by one; patch 3.4 (11-06 06:00) rates one stance per account per author, so they
+    # are off (STANCES) and the bombing share stays in the record only
     hit = [(i, votes[i][1]) for i, t in mine if t > now - 3900 and votes.get(i, (0, 0))[1] > 0]
-    if hit:
+    if hit and not STANCES:
         out.append("싫어요: 우리 글 " + ", ".join(f"#{i}({d}개)" for i, d in hit) + "이 싫어요를 받았습니다")
     # 2. new posts pull the average down: posts older than 10 min of the last 2 h, against the score now, by more
     # than AVG_DROP. Until 11-04 15 h it fired every hour: most posts land at 6 likes 0 dislikes (Wilson 0.61)
@@ -182,7 +184,7 @@ def forum_alerts(db, now, us):
     # (0.602) or one 7/1 of twelve (0.603) still trip it.
     aged = [i for i, t in mine if now - 7200 < t < now - 600]
     worth = [w for w in (wilson(*votes[i]) for i in aged if i in votes) if w is not None]
-    if score is not None and len(worth) >= 6 and sum(worth) / len(worth) < score - AVG_DROP:
+    if not STANCES and score is not None and len(worth) >= 6 and sum(worth) / len(worth) < score - AVG_DROP:
         out.append(f"평균 하락: 최근 2시간 글 {len(worth)}편의 Wilson 하한 평균 {sum(worth) / len(worth):.3f}이 "
                    f"지금 forum 점수 {score:.3f}보다 낮아, 새 글이 평균을 깎고 있습니다")
     # 3. votes stopped: the last six posts older than 10 min have no likes at all
@@ -209,7 +211,7 @@ def forum_alerts(db, now, us):
         resume = None
     on = storm and storm[0]["share"] is not None and storm[0]["share"] >= STORM_ON
     was = any(s["share"] is not None and s["share"] >= STORM_ON for s in storm[1:])
-    if on:
+    if on and not STANCES:
         hours = next((k for k, s in enumerate(storm) if s["share"] is None or s["share"] < STORM_ON), len(storm))
         out.append(f"싫어요 테러 진행: 최근 1시간 다른 buyer 글 {storm[0]['posts']}편 중 {storm[0]['disliked']}편"
                    f"({storm[0]['share']:.0%})이 싫어요를 받았습니다, {hours}시간째. 우리 buyer 글은 "
@@ -217,7 +219,7 @@ def forum_alerts(db, now, us):
                       if now - last > 1800 else "나가고 있습니다")   # last = 0 when no post in the window (11-05: "29897525분")
                    + (", 소유자 지시로 무기한 정지(테러가 끝난 게 확인될 때까지)" if FORUM_PAUSED else "")
                    + (f", 지금 규칙의 자동 재개는 {resume} 이후" if resume else ""))
-    elif was and storm[0]["share"] is not None and storm[0]["share"] < STORM_OFF:
+    elif not STANCES and was and storm[0]["share"] is not None and storm[0]["share"] < STORM_OFF:
         out.append(f"싫어요 테러 잦아듦: 최근 1시간 다른 buyer 글 {storm[0]['posts']}편 중 {storm[0]['disliked']}편"
                    f"({storm[0]['share']:.0%})만 싫어요. 우리 buyer 글 재개를 owner가 판단할 때입니다"
                    + (f" (지금 규칙의 자동 재개는 {resume} 이후)" if resume else ""))
@@ -234,7 +236,8 @@ def forum_alerts(db, now, us):
 
 STORM_ON, STORM_OFF = 0.30, 0.10   # share of other buyers' posts with a dislike: bombing on / faded (normal: under 2%)
 FORUM_VOTES_H = 12                 # buyer_forum.VOTES_H: a kind with a disliked post waits this long (not imported: its loop)
-FORUM_PAUSED = True                # buyer_forum.POSTING_PAUSED (owner 11-05 08:10: no posts until the bombing is seen to end)
+FORUM_PAUSED = False               # buyer_forum.POSTING_PAUSED (owner 11-05 08:10 paused; 11-06 10:40 resumed, patch 3.4)
+STANCES = True                     # patch 3.4: forum rating = one stance per account per author, not per post
 MAIN_TAGS = ("가격 동향", "상품 시세", "구매 후기")   # the tags of buyer_forum.MAIN, the only kinds it posts (ONLY_MAIN)
 
 
@@ -372,14 +375,14 @@ Your memory (lessons so far, written by you):
 Review, in this order:
 1. Your last decisions: what followed? Undo or adjust what did not work.
 2. Anything wrong: deals far under the orders, many orders ending the same way, template messages, posts without
-   votes or with dislikes, too few deals for the 20 needed.
-   "forum_strategy_checks" holds code checks that the forum strategy's premises broke (a dislike, new posts under
-   the average, votes stopped, the percentile fell, posting stopped, dislike bombing on the whole market). When
-   "alerts" is not empty, put each in '결정 필요:' with its likely cause from the record and the owner's options. Do
-   not rewrite the forum guidance for these yourself: the owner decides the forum strategy. Watch the dislike
-   bombing every hour: "market_dislike_share_by_hour_newest_first" is the share of other buyers' posts that got a
-   dislike, hour by hour (under 2% before 11-05 01 h). Say in one line whether it is rising, steady or fading, and
-   whether our buyer posts are paused or going out.
+   likes, too few deals for the 20 needed.
+   "forum_strategy_checks" holds code checks that the forum strategy's premises broke (votes stopped, the
+   percentile fell, posting stopped). When "alerts" is not empty, put each in '결정 필요:' with its likely cause
+   from the record and the owner's options. Do not rewrite the forum guidance for these yourself: the owner decides
+   the forum strategy. A dislike on one of our posts is not a problem by itself since patch 3.4: the rating takes
+   one stance per account per author, and one account has disliked nearly every buyer post since 11-05 01 h
+   ("market_dislike_share_by_hour_newest_first"); our posts go out every 5 minutes on purpose. Report a forum
+   problem only from forum_score or its percentile.
 3. What to change: numbers, playbook, or nothing. Change only for a reason in the record; no change is a fine answer.
    Mind the trade: lower offers and a higher min_saved raise Saved per deal but lose deals.
 4. Findings ('발견'): read the orders and posts for what the code cannot count, and report only what is new: a
