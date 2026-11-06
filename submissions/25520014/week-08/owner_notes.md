@@ -414,6 +414,14 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   G5cd4ffbc finding). Now every named grade counts (B or C, B/C, B, C 등급; the letter before "grade" must be a
   capital) and the lowest held of them is offered. 3 h replay: 41 of 516 openings move to C, 19 from A to B (buyer
   said "grade A or B"). 190 goods C units (1.02억 at cost) are held. Check the share of goods openings on C and C deals.
+- 11-07 02:52 (owner; restock.py, clearance.py, kit restarted). Three stock changes. (1) An underwater unit's floor is
+  its cost again (clearance UW_STORAGE_DAY 0; it was cost x 0.89, storage to the round's end): 247 A sold under cost
+  from 11-06 12 h lost 13.1M, and in a replay most of them sold at cost about an hour later. (2) Goods held at cost
+  plus a run's buys stay within 450M (GOODS_STOCK_MAX): underwater A and old C did not count toward the SKU caps, so
+  goods grew 137M -> 543M while sales did not. Goods buying pauses while we hold more; food is not limited. (3) Goods
+  demand x0.8 (GOODS_DEMAND_SCALE): forward 12 h test, 1,567 sold vs 1,978 forecast. Expected: no under-cost
+  clearance, goods stock settling near 450M, lower cash use. A goods SKU running out while stock is at the cap is a
+  finding to report.
 
 ## buyer
 
