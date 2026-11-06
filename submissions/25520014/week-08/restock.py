@@ -122,7 +122,12 @@ SHORT_STOCK_MAX = 40e6
 # our deals fell from 11 to 1 per 30 min while the market kept selling 20-30, and with 1 B and 3 C it filled the
 # cap of 5, so nothing more was bought (and the in-stock rate, then the cap, fell with the sales). 23 of 71 goods
 # SKUs held such an A (34 units, 27.9M). clearance.UW_FLOOR_COST lets it go just under the market meanwhile.
-UW_A_UNCOUNTED = True
+UW_A_UNCOUNTED = False
+# True -> False (owner, 11-07 03 h). Since 02:52 an underwater unit's floor is its cost (clearance UW_STORAGE_DAY 0), so
+# it is stock on sale, and with GOODS_STOCK_MAX the uncounted units filled the 450M cap. Replay from 11-06 13 h (1,801
+# goods settles, caps x0.8 demand, cap 450M, an underwater A sells to an A buyer with chance rho;
+# ~/wk8-test/uw_count_replay.py): uncounted, the cap held 188-351M of underwater A and cut 27-37 refills; counted,
+# stock 258-275M, never at the cap, sales -0.5 pt at rho 1 and +3.5 / +1.7 pt at rho 0.5 / 0.25.
 # A goods SKU's demand is at least our sales of it per hour we held a sellable A (an A whose floor is under the market's
 # A price) over the last A_RATE_H hours (owner, 11-06 13 h). The in-stock hours of own_sku_rate count any grade, so a
 # SKU whose buyers take only A read low while we held only B, C or a dear A: 12 h to 11-06 13 h, 프리미엄 앤 모달

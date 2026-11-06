@@ -422,6 +422,9 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   demand x0.8 (GOODS_DEMAND_SCALE): forward 12 h test, 1,567 sold vs 1,978 forecast. Expected: no under-cost
   clearance, goods stock settling near 450M, lower cash use. A goods SKU running out while stock is at the cap is a
   finding to report.
+- 11-07 03:00 (owner; restock.py). Underwater A units count toward a SKU's units again (UW_A_UNCOUNTED False): with
+  their floor at cost they are stock on sale, and uncounted they filled the 450M cap (replay: 188-351M of it, 27-37
+  refills cut). Counted, the replay held 258-275M and sold the same or more. Expect goods stock under the cap.
 
 ## buyer
 
