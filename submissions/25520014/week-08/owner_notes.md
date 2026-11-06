@@ -502,3 +502,8 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   1 below 0 or a false claim / unusable unit. Raising min_saved makes the stars stricter at once (T 0.20 mean 4.13,
   0.25 3.71, 0.30 3.20 on the last 2,000 purchases); weigh that when you move it. Lower stars to other shops are by
   design, not a fault.
+- 11-06 18:44 (owner; review.py scp only). Goods bought without a warranty: the stars above, 2 lower, never under 2
+  (1 stays for a false claim, an unusable unit or a price over list), and the review says why ("No warranty, so N
+  stars off ..."). Food is not touched. The buyer still buys without a warranty: accept and pricing are unchanged.
+  Since patch 3.4 a break without a refund counts -1 in Saved. yms979 sells all goods without one, so most of our
+  reviews there become 2 stars (replay to 11-17: its stars_rank -0.028); known and intended. Not a fault.

@@ -31,6 +31,13 @@ BAND = 0.05                     # "ratio" rubric: within 5 points of the market'
 RUBRIC = "saved"                # "saved": expected saved rate against the buyer's target (11-06 16:44); "ratio": old
 STEP = 0.10                     # a star per 10 points of saved rate around the target
 T_DEFAULT = 0.25
+# Goods sold without a warranty: the stars above, NO_WARRANTY_DROP lower, never under 2 (1 stays for a false grade,
+# a useless unit or a loss), and the review says why (owner, 11-06 19 h). Since patch 3.4 a break without a refund
+# counts -1 in Saved, the buyer's main score, so a warranty is worth more to this buyer than its break rate alone.
+# Known and accepted: yms979 sells every goods unit without one (179 of our 188 deals there in 24 h); replay on 24 h
+# to 11-17: its stars_rank -0.028 (4.37 -> about 4.34), Lee-sungsoo -0.019, Choo-chu -0.022, 11im -0.010, shops
+# that give warranties about 0. 69% of our reviews at yms979 become 2 stars.
+NO_WARRANTY_DROP = 2
 BREAK_PATH = policy.DATA / "review_breaks.json"
 BREAK_TTL = 600                 # break rates rebuilt from the ledger at most every 10 minutes
 
@@ -87,14 +94,20 @@ def stars_saved(price, list_price, settled, kind, rates, t):
     g = settled.get("grade")
     said = [f"grade {g}" + (", as claimed" if settled.get("claim_honest") else "")] if g else []
     said.append(f"paid {round(100 * r)}% of list")
+    no_w = kind == "goods" and not settled.get("warranty_hours")
     if kind == "goods":
         if settled.get("warranty_hours"):
             said.append(f"{settled['warranty_hours']} h warranty")
         else:
             s -= rates.get(g, max(rates.values())) * r
-            said.append("no warranty")
     stars = 5 if s >= t + STEP else 4 if s >= t else 3 if s >= t - STEP else 2 if s >= 0 else 1
-    return stars, f"{name}: " + ", ".join(said) + "."
+    off = min(NO_WARRANTY_DROP, stars - 2) if no_w and stars > 2 else 0
+    stars -= off
+    text = f"{name}: " + ", ".join(said) + "."
+    if no_w:
+        text += (" No warranty" + (f", so {off} star{'s' if off > 1 else ''} off" if off else "")
+                 + ": goods can break within 6 h of the sale and without a warranty the whole price is lost.")
+    return stars, text
 
 
 def stars_for(price, list_price, settled, market):
