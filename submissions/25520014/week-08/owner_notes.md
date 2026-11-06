@@ -418,3 +418,7 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   other buyers' posts disliked in the last hour) only a post of ours with 2+ dislikes is raised, since the bomber's
   one dislike weighs 1 in all; with no bombing any dislike is raised. Put it under 결정 필요; posts are not paused
   by code, the owner decides. Say each hour whether the bombing is on, fading or over.
+- 11-06 10:54 (owner). min_saved range is now 0.15-0.35 (was 0.10-0.30). Your 10:42 move to 0.25 matches the owner's
+  plan. The owner's projection on the last 24 h of our deals (lost deals dropped, lower closing prices not counted):
+  final Saved about 0.278 at 0.20, 0.290 at 0.25, 0.298 at 0.30, 0.289 at 0.35; within 24 h every value lands near
+  0.255, so judge a move over a day, not an hour. Saved moves slowly because 6,100 past deals hold the mean.

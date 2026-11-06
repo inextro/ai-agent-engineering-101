@@ -21,7 +21,7 @@ NUMBERS = {
     "raise":          (0.35, 0.20, 0.60),   # each new offer closes this share of the gap to min(ask, cap)
     "quotes":         (3, 2, 4),            # shops that get the opening message
     "next_shop_secs": (90, 60, 150),        # time a second shop needs; with less left the order ends with no deal
-    "min_saved":      (0.20, 0.10, 0.30),   # patch 3.4 (11-06): least expected saved rate (list - paid) / list a deal
+    "min_saved":      (0.20, 0.15, 0.35),   # patch 3.4 (11-06; range 0.10-0.30 until 10:54): least expected saved rate (list - paid) / list a deal
                                             # must bring; it sets the cap (food: list x (1 - this)) and the goods
                                             # accept. Saved is the mean over deals, so a deal under the mean lowers it
 }   # the buyer's post interval is fixed in buyer_forum.POST_EVERY_S (11-04: every 5 min to the end; not the manager's)
