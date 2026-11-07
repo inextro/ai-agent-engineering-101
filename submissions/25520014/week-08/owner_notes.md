@@ -568,7 +568,7 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   26 (by 10.5% of list), so a fourth should still find cheaper food. Goods keep three. Watch order time (`secs`) and the
   food deal rate; a slower opening is the cost. Food orders turned down by every shop are not helped: most had one shop
   listing the SKU.
-- 11-07 11:2x buyer.jsonl now has `shop_ends`: every shop's end in the order tried ("shop: why"), not only the last
+- 11-07 11:12 buyer.jsonl now has `shop_ends`: every shop's end in the order tried ("shop: why"), not only the last
   shop's `end`. Your summary has `first_shop_end_when_moved_on` (numbers as N): how the first shop ended in orders that
   went on to another shop. It answers your 11:05 question (a first shop met our offer and then did not close). Records
-  before 11:2x have no `shop_ends`. Logging only; no buying behavior changed.
+  before 11:12 have no `shop_ends`. Logging only; no buying behavior changed.
