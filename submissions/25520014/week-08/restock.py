@@ -123,16 +123,6 @@ SHORT_STOCK_MAX = 40e6
 # cap of 5, so nothing more was bought (and the in-stock rate, then the cap, fell with the sales). 23 of 71 goods
 # SKUs held such an A (34 units, 27.9M). clearance.UW_FLOOR_COST lets it go just under the market meanwhile.
 UW_A_UNCOUNTED = True
-# True -> False (owner, 11-07 03 h). Since 02:52 an underwater unit's floor is its cost (clearance UW_STORAGE_DAY 0), so
-# it is stock on sale, and with GOODS_STOCK_MAX the uncounted units filled the 450M cap. Replay from 11-06 13 h (1,801
-# goods settles, caps x0.8 demand, cap 450M, an underwater A sells to an A buyer with chance rho;
-# ~/wk8-test/uw_count_replay.py): uncounted, the cap held 188-351M of underwater A and cut 27-37 refills; counted,
-# stock 258-275M, never at the cap, sales -0.5 pt at rho 1 and +3.5 / +1.7 pt at rho 0.5 / 0.25.
-# False -> True (owner, 11-07 11 h). The replay was wrong: counted, 215 of 283 held A were underwater (220M) and filled
-# the caps, so none of the market's top 30 goods SKUs (6 h revenue) had room (12 held only underwater A). Our share of
-# the goods sales on SKUs we held fell 19.4% -> 10.6% (20-02 h vs 03-10 h), A revenue 91M -> 40M an hour, with the SKUs
-# held unchanged (93%). Dry run on the live stock (~/wk8-test/dry1107.py): top 30 with room 0 -> 24, goods bought now
-# 5M -> 61M. No underwater A was held 24 h+ (they sell at their cost floor within a day).
 # A goods SKU's demand is at least our sales of it per hour we held a sellable A (an A whose floor is under the market's
 # A price) over the last A_RATE_H hours (owner, 11-06 13 h). The in-stock hours of own_sku_rate count any grade, so a
 # SKU whose buyers take only A read low while we held only B, C or a dear A: 12 h to 11-06 13 h, 프리미엄 앤 모달
@@ -147,22 +137,6 @@ A_RATES = {}
 # x1.5 818M / +116.0M / 189M; A_RATE and x2 852M / +118.2M / 246M. With today's estimate as the truth x2 gave
 # +61M revenue at the same book. 1.5 for now (owner).
 GOODS_CAP_X = 1.5
-# Goods held at cost plus what a run buys stay within GOODS_STOCK_MAX (owner, 11-07 03 h). The per-SKU caps count only
-# some units: an underwater A (UW_A_UNCOUNTED) and a C held OLD_C_H are left out, and A_CHECK_MARGIN False buys an A
-# up to the market's A price while underwater_a judges it at cost x (1 + min_margin), so most new A left the count at
-# once. 11-07 02 h: 681 goods held, 289 underwater A and 145 old C uncounted, 247 counted against caps of 318; goods
-# stock 137M (11-06 12 h) -> 543M, cash 465M -> 152M, sales and book growth unchanged. Food is not limited.
-# 450M -> 600M (owner, 11-07 11 h) with UW_A_UNCOUNTED back on: goods were 371M, 220M of it underwater A, so 450M would
-# bind again at once. Unbounded, stock stops near book minus the reserve (~650M); 600M keeps ~100M cash for refills.
-# Storage at 600M: 6M a day. Goods held 24 h+: 11M (C mostly).
-GOODS_STOCK_MAX = 600e6
-# Goods demand x GOODS_DEMAND_SCALE (owner, 11-07 03 h). Forward test over the 12 h to 11-07 02 h (ledger cut at each
-# hour, next hour's settles of the goods SKUs we held, ~/wk8-test/arate_bt.py): 1,567 sold against 1,978 forecast
-# (0.79). Taking the larger of own+asked and A_RATE per SKU picks the noisier one's high side: own+asked alone 1,538
-# (1.02) but under where A_RATE is higher (677 vs 835) and over elsewhere (860 vs 732); their mean 1,758 (0.89,
-# deviance 1,396); x0.8 1,582 (0.99, deviance 1,389, the lowest; current 1,481). Its posterior keeps the same weight
-# (candidates: a = own's alpha + (rate - own rate) x beta), so P_k follows the scaled mean.
-GOODS_DEMAND_SCALE = 0.8
 GRADE_CAP = False                               # a goods SKU's B and C count only up to their share of its cap
 GRADE_SHARE_H = 6                               # our goods settles this recent give the grade shares
 # 11-04 21:15, offline only, not deployed (off): the seller sells the best grade first, so the cap filled with B and C left no room for A: 자코모 4인
@@ -201,7 +175,7 @@ A_CHECK_TOP = True
 A_COST = 0.66                                   # mean cost / list of a goods A unit (828 supplied before 21:27: 0.55-0.75)
 SUPPLY_MIX = {"A": 0.60, "B": 0.24, "C": 0.16}  # goods grades as supplied to us (1,378 units before 21:27)
 GRADE_REL = {"A": 1.0, "B": 0.87, "C": 0.75}    # a grade the market has too few sales of: this x its A price
-WARRANTY_ASKED = {"B": 0.33, "C": 0.0}   # 11-07 11 h: B on ask again (136 of 407 paid B since 11-06 13:22 asked), C never (seller.NO_WARRANTY); was B 1.0, C 0.08        # share of our first messages asking for a warranty (11-04, 24 h)
+WARRANTY_ASKED = {"B": 1.0, "C": 0.08}   # B: always from 11-06 13 h (seller.WARRANTY_ON_ASK); was 0.13         # share of our first messages asking for a warranty (11-04, 24 h)
 SURGE_FREE, SURGE_STEP, SURGE_MAX = 50, 0.002, 1.5
 SURGE_WINDOW = 3600
 SUPPLY_OPEN_S = 180                             # a window stays open 3 minutes
@@ -296,12 +270,6 @@ def asked(units, by_cat, median, skip, p, balance, cat, demand, now):
 
 
 def sku_demand(est, sku):
-    """sku_demand_raw x GOODS_DEMAND_SCALE for goods (food as is)."""
-    rate = sku_demand_raw(est, sku)
-    return rate * GOODS_DEMAND_SCALE if (est.cat.get(sku) or {}).get("kind") == "goods" else rate
-
-
-def sku_demand_raw(est, sku):
     """Units of one SKU an hour that buyers would pay us for: our paid sales of it (model.own_sku_rate) plus the
     requests for it that found nothing at our shop (data/missed.jsonl) times our close rate. Paid sales alone stop
     when the SKU runs out, so a cap built on them stayed low: 300 of 311 requests we missed in 3 h (11-04 04-07 h)
@@ -647,17 +615,13 @@ def ranked(cands, p, hours, left):
     return out
 
 
-def allocate(units, cands, room, goods_room=float("inf")):
-    """Take units from the top while `room` (cash, at the top cost with its surge) lasts, goods also within
-    `goods_room` (GOODS_STOCK_MAX less the goods held, at cost): {sku: new units}."""
+def allocate(units, cands, room):
+    """Take units from the top while `room` (cash, at the top cost with its surge) lasts: {sku: new units}."""
     target = Counter()
     for _, _, s, k in units:
         top = unit_cost(cands[s], k - cands[s]["have"])[1]
-        goods = cands[s]["kind"] == "goods"
-        if top <= room and (not goods or top <= goods_room):
+        if top <= room:
             room -= top
-            if goods:
-                goods_room -= top
             target[s] += 1
     return target
 
@@ -675,9 +639,6 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
     if left < policy.LAST_HOURS_BELOW_COST or room <= 0:   # the last hours sell at cost: buy nothing
         return [], dict(plan, target={}, cycle_minutes=None)
     cands, units, have_sku, by_cat, median, skip = candidates(inv, cat, demand, est, p, now)
-    goods_held = sum(u.get("cost") or 0 for u in units if (cat.get(u.get("sku")) or {}).get("kind") == "goods")
-    goods_room = GOODS_STOCK_MAX - goods_held                # GOODS_STOCK_MAX: goods bought this run stay within it
-    plan.update(goods_stock=round(goods_held), goods_room=round(goods_room))
     sold = {k for k in have_sku if est.sku_rate(k) > 0 or est.asked_sku.get(k, 0.0) > 0}
     cycle = every_min                                       # refill cycle: start at one window, then settle
     # P_k looks at most CAP_HOURS[1] ahead: with a line per SKU the mean cycle over all SKUs kept passed 3.5 h
@@ -686,7 +647,7 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
     horizon = lambda cyc: min(cyc, 60 * CAP_HOURS[1]) / 60
     for _ in range(5):
         order = ranked(cands, p, horizon(cycle), left)
-        target = allocate(order, cands, room, goods_room)
+        target = allocate(order, cands, room)
         keep = len(set(target) | sold)                      # a line is one SKU: SKUs to keep refilled
         nxt = math.ceil(max(keep, 1) / lines_w) * every_min
         if nxt == cycle:
@@ -694,25 +655,24 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
         cycle = nxt
     else:                                                   # did not settle: rank once more on the last cycle
         order = ranked(cands, p, horizon(cycle), left)
-        target = allocate(order, cands, room, goods_room)
+        target = allocate(order, cands, room)
     # this run: money chose the target (value per won); lines are what this run is short of, so the lines worth
     # most go first
     value = Counter()
     for _, v, s, k in order:
         if k - cands[s]["have"] <= target[s]:
             value[s] += v
-    buy, spent, goods_spent = {}, 0.0, 0.0
+    buy, spent = {}, 0.0
     short_g = {s for s in est.shortage() if cat.get(s, {}).get("kind") == "goods"} if SHORT_OWN and SHORTAGE_ENTRY else set()
     short_room = SHORT_STOCK_MAX - sum(u.get("cost") or 0 for u in units if u.get("sku") in short_g)
     for s in sorted(target, key=lambda s: -value[s]):
         if len(buy) >= MAX_LINES:
             break
         x = cands[s]
-        g_left = goods_room - goods_spent if x["kind"] == "goods" else float("inf")
         qty, top, exp = 0, 0.0, 0.0                         # units at their top cost, each with its own surge
         while qty < target[s]:
             c, w, _ = unit_cost(x, qty + 1)
-            if spent + top + w > room or top + w > g_left or (s in short_g and exp + c > short_room):
+            if spent + top + w > room or (s in short_g and exp + c > short_room):
                 break
             qty, top, exp = qty + 1, top + w, exp + c
         if qty <= 0:
@@ -723,17 +683,11 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
                   "k_first": x["have"] + 1, "value": round(value[s] * qty / target[s]),
                   "surge_u": x["surge_u"], "surge_last": round(surge_factor(x["surge_u"] + qty), 3)}
         spent += top
-        if x["kind"] == "goods":
-            goods_spent += top
     if left >= p["liquidate_hours"]:
         for w in asked(units, by_cat, median, skip, p, balance, cat, demand, now):
-            goods = w["kind"] == "goods"
-            if (len(buy) < MAX_LINES and w["sku"] not in buy and spent + w["worst_cost"] <= room
-                    and (not goods or goods_spent + w["worst_cost"] <= goods_room)):
+            if len(buy) < MAX_LINES and w["sku"] not in buy and spent + w["worst_cost"] <= room:
                 buy[w["sku"]] = w
                 spent += w["worst_cost"]
-                if goods:
-                    goods_spent += w["worst_cost"]
     by_c = Counter()                                        # the manager reads the target per category
     for k, n in have_sku.items():
         if k in sold:

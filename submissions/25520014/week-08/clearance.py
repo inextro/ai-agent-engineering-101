@@ -56,12 +56,7 @@ STUCK_FLOOR = 0.95        # its floor as a share of its ask (the SKU's market me
 UW_UNDER = 0.01           # an underwater unit opens this far under the market's price for its SKU and grade
 UW_FLOOR = 0.95           # its floor as a share of that ask
 UW_FLOOR_COST = 1.00      # ... never under this share of its cost (0.85 until 11-05: a small loss then, a loss in book now)
-# UW_STORAGE_DAY (below uw_floor_cost): less the storage it would pay to the round's end, 1% of its cost a day
-# 0.01 -> 0 (owner, 11-07 03 h): the rule weighed the loss against storage to the round's end, as if the unit would
-# never sell, and applied after 1 h held. 247 A clearance deals under cost from 11-06 12 h (13.1M, median 0.957 of
-# cost); replayed at a floor of cost (other shops' later A settles of the SKU at or over it, our 0.17 share, units of
-# a SKU in a queue, sold at the floor): 152 sell later (median wait 1.2 h), 95 still held (115M), book +12.8M
-# (~/wk8-test/uw_floor_replay2.py). The units left go to restock.GOODS_STOCK_MAX, not back on the shelf.
+UW_STORAGE_DAY = 0.01     # ... less the storage it would pay to the round's end: 1% of its cost a day (rules_shop.md)
 # 11-06 12 h (owner): held at cost, an A of 다우닝 플라나 4인 at 0.814 of list asked 0.814 where the market paid 0.766
 # and never sold. Kept to the end it pays 1% of its cost a day (11.5 days left: 11.5%); sold just under the market it
 # loses 0.3-7.2% of cost (13 units held over cost, 0.57M at the ask). So its floor is cost x (1 - 0.01 x days left):
@@ -69,40 +64,8 @@ UW_FLOOR_COST = 1.00      # ... never under this share of its cost (0.85 until 1
 
 
 def uw_floor_cost(now):
-    """The share of its cost an underwater unit may sell at: UW_FLOOR_COST, less the storage to the round's end
-    while goods stock is near restock's cap (goods_tight)."""
-    day = UW_STORAGE_DAY if goods_tight(now) else 0.0
-    return max(0.0, UW_FLOOR_COST - day * policy.hours_left(now) / 24)
-
-
-# Under cost only when the cap binds (owner, 11-07 14 h). 03:00 set UW_STORAGE_DAY 0 on a replay that found holding
-# an underwater unit at its cost paid +12.8M (152 of 247 sold later at cost), but the 95 left (115M) sat under
-# restock.GOODS_STOCK_MAX, which the replay did not model: from 03 h goods refills fell 146-204M an hour -> 0-62M,
-# missed requests 92-169 -> 220-363 an hour, our goods share 15-24% -> 7-11%. 13:50: 134 units over the market's price,
-# 133 of them within 10% of it (164M), 10.4 days of storage left (10.4%). So: hold at cost while restock has room,
-# and when goods_room (restock_state.json, written each run) is under UW_ROOM_LOW (about one hour of goods refills,
-# 96-215M an hour after 11 h), let them go down to cost less the storage to the end, making room for SKUs that sell.
-# UW_ROOM_LOW 100M -> 0 = off (owner, 11-07 15 h). 14:13-15:13 it was on the whole hour (room 82-97M) yet the cap
-# did not bind (69M bought with 97M room, ~23M a run): 20 A clearance sold under cost (0.95, -1.47M), A clearance
-# deals 28 (31-55 an hour before), margin -1.3M (+0.4-1.6M before), room and refills did not recover.
-UW_STORAGE_DAY = 0.01
-UW_ROOM_LOW = 0
-UW_STATE_MAX_AGE = 3600   # a restock_state.json older than this: treat as room (hold at cost)
-_room = {"t": 0.0, "tight": False}
-
-
-def goods_tight(now=None):
-    """True when restock's last plan left goods_room under UW_ROOM_LOW. Read at most once a minute."""
-    now = now or time.time()
-    if now - _room["t"] > 60:
-        _room["t"] = now
-        try:
-            st = json.loads((policy.DATA / "restock_state.json").read_text(encoding="utf-8"))
-            _room["tight"] = (now - st.get("ts", 0) < UW_STATE_MAX_AGE
-                              and st.get("goods_room") is not None and st["goods_room"] < UW_ROOM_LOW)
-        except (OSError, ValueError):
-            _room["tight"] = False
-    return _room["tight"]
+    """The share of its cost an underwater unit may sell at: UW_FLOOR_COST less the storage to the round's end."""
+    return max(0.0, UW_FLOOR_COST - UW_STORAGE_DAY * policy.hours_left(now) / 24)
 UW_HELD_H = 1             # ... and only once held this long (11-05 01:40 review: 66 of 124 underwater opens were
                           # units under 3 h old, some 0.01 h; a fresh unit gets an hour at its usual floor first)
 # 11-05 03:45 KST the board's ALL moved from cash to book (cash + cost of unsold units): a sale under cost now lowers

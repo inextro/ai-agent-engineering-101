@@ -452,6 +452,15 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   hold at cost again. In its hour the room was 82-97M but the cap did not bind (69M bought), 20 A clearance sold under
   cost (-1.47M) with no more deals. Stop reporting goods_room and under-cost sales; the 14:13 note no longer applies.
 
+- 11-07 15:47 (owner; restock.py, clearance.py, seller.py restored to 01:08 (fe48c70), kit restarted). Every shop change
+  since 02:44 is undone: no goods stock cap (GOODS_STOCK_MAX), goods demand not scaled x0.8, underwater goods go down
+  to cost less storage again, warranties as at 01:08 (B by default, C on ask), no clearance B warranty premium. The
+  11:00, 11:47, 14:13 and 15:12 notes no longer apply; do not report b_warranty_talks_by_hour against them. Why: since
+  03 h our revenue share fell from 13-22% to 6.5-11% with the market's total unchanged, and Book stopped growing (700-715M,
+  +1M an hour vs +5-14M before). Report each hour: our revenue share, revenue, Book change. Expected within 3 h: share
+  13%+, revenue 90M+ an hour, Book +5M+ an hour. The owner will hold other changes meanwhile; do not propose shop policy
+  changes before 19 h unless something breaks.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
