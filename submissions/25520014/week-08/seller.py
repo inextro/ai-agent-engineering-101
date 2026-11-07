@@ -509,7 +509,6 @@ def choose_reply(deal, moves, history, buyer_text, how=None):
 # no refund; with one 0.681 paid, 0.203 refunded (ours 0.666 / 0.200); B 0.721 / 0 against 0.727 / 0.069 (ours
 # 0.726 / 0.109). Buyers do not pay for it and stars come at the sale, before any break. Of our first messages 8%
 # (C), 13% (B), 31% (A) ask for a warranty; with one B and C still clear their cost, so those buyers keep it.
-WARRANTY_ON_ASK = ("C",)
 # B gets the warranty always from 11-06 13 h (owner, a 3 h trial): psyoung82 (about 17 paid deals an hour here 03-09 h)
 # left us at 10 h and since buys goods almost only with a warranty (B 0 h 22 -> 12 h 20, C 0 h 9 -> 12 h 18), at
 # moss-and-oak, which gives 12 h on every grade. A B given one unasked carries no break premium in its floor
@@ -517,6 +516,14 @@ WARRANTY_ON_ASK = ("C",)
 # 6 h, 9.9M of them unrefunded: about 10M a day more refunds. Revert to ("B", "C") if psyoung82 does not come back.
 # 11-06 15:50 the owner kept it: psyoung82 came back (2 -> 8 -> 24 paid deals here at 12, 13, 14 h) and the 44 B
 # sold with it by 15:35 broke once (0.35M refunded). C still gets one only on ask.
+# 11-07 11 h (owner): B back to on ask, C never. Our goods sold 11-06 13:22 to 11-07 05 h (breaks all land within 6 h):
+# B with a warranty net (margin - refunds) -1.5% of revenue, C with one -31% (break 46%), A +7.9%. The B trial was for
+# psyoung82, which asks for a warranty in its first message (12 of its 12 B), so it keeps one; 271 of 407 B did not ask
+# (sergiobuilds, ddolcom, myeonggi, lee-sungsoo, YAHO1212: 5.00 stars here with or without one), 1.57M an hour of
+# refunds. C warranties all went to buyers who asked (dae-yangkim, thisjonghoon, nocha12): 2.15M an hour refunded
+# against 0.81M of margin. ~/wk8-test/wty1107.py, ask1107.py, bst1107.py.
+WARRANTY_ON_ASK = ("B",)
+NO_WARRANTY = ("C",)
 B_NO_PREMIUM = True
 MKT_BASE = 0.95          # a goods ask starts from at least this share of the market's price for its SKU and grade
 WANTS_WARRANTY = re.compile(r"warrant|guarantee|보증|보장", re.I)
@@ -540,7 +547,7 @@ def option(u, p, arm, wants_warranty=True, capped=False):
     price the talk can close at) is held at STAR_CAP x list, the floor lowered to it but never under break-even."""
     kind = u.get("kind", "goods")
     warranty = int(p["warranty_hours"]) if kind == "goods" and p.get(f"warranty_{u.get('grade')}") else 0
-    if u.get("grade") in WARRANTY_ON_ASK and not wants_warranty:
+    if (u.get("grade") in WARRANTY_ON_ASK and not wants_warranty) or u.get("grade") in NO_WARRANTY:
         warranty = 0
     if B_NO_PREMIUM and u.get("grade") == "B" and not wants_warranty:
         u = dict(u, _no_premium=True)

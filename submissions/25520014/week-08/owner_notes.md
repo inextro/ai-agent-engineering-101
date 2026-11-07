@@ -426,6 +426,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   their floor at cost they are stock on sale, and uncounted they filled the 450M cap (replay: 188-351M of it, 27-37
   refills cut). Counted, the replay held 258-275M and sold the same or more. Expect goods stock under the cap.
 
+- 11-07 11:00 (owner; restock.py, seller.py, kit restarted). (1) Underwater A uncounted again (UW_A_UNCOUNTED True)
+  and goods stock cap 450M -> 600M: counted, 215 underwater A (220M) filled the caps and none of the market's top 30
+  goods SKUs could be refilled; our share on SKUs we held fell 19.4% -> 10.6%. (2) C goods never get a warranty
+  (seller.NO_WARRANTY): with one they lost 31% of revenue (46% broke). (3) B gets one only when the buyer asks, as A
+  stays default (WARRANTY_ON_ASK ("B",)): unasked B with one netted -1.5%; psyoung82 asks, so it keeps it. Do not
+  propose a warranty on C again. Expect: A sales and share back up, refunds down ~3M an hour.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)

@@ -122,12 +122,17 @@ SHORT_STOCK_MAX = 40e6
 # our deals fell from 11 to 1 per 30 min while the market kept selling 20-30, and with 1 B and 3 C it filled the
 # cap of 5, so nothing more was bought (and the in-stock rate, then the cap, fell with the sales). 23 of 71 goods
 # SKUs held such an A (34 units, 27.9M). clearance.UW_FLOOR_COST lets it go just under the market meanwhile.
-UW_A_UNCOUNTED = False
+UW_A_UNCOUNTED = True
 # True -> False (owner, 11-07 03 h). Since 02:52 an underwater unit's floor is its cost (clearance UW_STORAGE_DAY 0), so
 # it is stock on sale, and with GOODS_STOCK_MAX the uncounted units filled the 450M cap. Replay from 11-06 13 h (1,801
 # goods settles, caps x0.8 demand, cap 450M, an underwater A sells to an A buyer with chance rho;
 # ~/wk8-test/uw_count_replay.py): uncounted, the cap held 188-351M of underwater A and cut 27-37 refills; counted,
 # stock 258-275M, never at the cap, sales -0.5 pt at rho 1 and +3.5 / +1.7 pt at rho 0.5 / 0.25.
+# False -> True (owner, 11-07 11 h). The replay was wrong: counted, 215 of 283 held A were underwater (220M) and filled
+# the caps, so none of the market's top 30 goods SKUs (6 h revenue) had room (12 held only underwater A). Our share of
+# the goods sales on SKUs we held fell 19.4% -> 10.6% (20-02 h vs 03-10 h), A revenue 91M -> 40M an hour, with the SKUs
+# held unchanged (93%). Dry run on the live stock (~/wk8-test/dry1107.py): top 30 with room 0 -> 24, goods bought now
+# 5M -> 61M. No underwater A was held 24 h+ (they sell at their cost floor within a day).
 # A goods SKU's demand is at least our sales of it per hour we held a sellable A (an A whose floor is under the market's
 # A price) over the last A_RATE_H hours (owner, 11-06 13 h). The in-stock hours of own_sku_rate count any grade, so a
 # SKU whose buyers take only A read low while we held only B, C or a dear A: 12 h to 11-06 13 h, 프리미엄 앤 모달
@@ -147,7 +152,10 @@ GOODS_CAP_X = 1.5
 # up to the market's A price while underwater_a judges it at cost x (1 + min_margin), so most new A left the count at
 # once. 11-07 02 h: 681 goods held, 289 underwater A and 145 old C uncounted, 247 counted against caps of 318; goods
 # stock 137M (11-06 12 h) -> 543M, cash 465M -> 152M, sales and book growth unchanged. Food is not limited.
-GOODS_STOCK_MAX = 450e6
+# 450M -> 600M (owner, 11-07 11 h) with UW_A_UNCOUNTED back on: goods were 371M, 220M of it underwater A, so 450M would
+# bind again at once. Unbounded, stock stops near book minus the reserve (~650M); 600M keeps ~100M cash for refills.
+# Storage at 600M: 6M a day. Goods held 24 h+: 11M (C mostly).
+GOODS_STOCK_MAX = 600e6
 # Goods demand x GOODS_DEMAND_SCALE (owner, 11-07 03 h). Forward test over the 12 h to 11-07 02 h (ledger cut at each
 # hour, next hour's settles of the goods SKUs we held, ~/wk8-test/arate_bt.py): 1,567 sold against 1,978 forecast
 # (0.79). Taking the larger of own+asked and A_RATE per SKU picks the noisier one's high side: own+asked alone 1,538
@@ -193,7 +201,7 @@ A_CHECK_TOP = True
 A_COST = 0.66                                   # mean cost / list of a goods A unit (828 supplied before 21:27: 0.55-0.75)
 SUPPLY_MIX = {"A": 0.60, "B": 0.24, "C": 0.16}  # goods grades as supplied to us (1,378 units before 21:27)
 GRADE_REL = {"A": 1.0, "B": 0.87, "C": 0.75}    # a grade the market has too few sales of: this x its A price
-WARRANTY_ASKED = {"B": 1.0, "C": 0.08}   # B: always from 11-06 13 h (seller.WARRANTY_ON_ASK); was 0.13         # share of our first messages asking for a warranty (11-04, 24 h)
+WARRANTY_ASKED = {"B": 0.33, "C": 0.0}   # 11-07 11 h: B on ask again (136 of 407 paid B since 11-06 13:22 asked), C never (seller.NO_WARRANTY); was B 1.0, C 0.08        # share of our first messages asking for a warranty (11-04, 24 h)
 SURGE_FREE, SURGE_STEP, SURGE_MAX = 50, 0.002, 1.5
 SURGE_WINDOW = 3600
 SUPPLY_OPEN_S = 180                             # a window stays open 3 minutes
