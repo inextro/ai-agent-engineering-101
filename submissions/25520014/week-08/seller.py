@@ -525,6 +525,13 @@ def choose_reply(deal, moves, history, buyer_text, how=None):
 WARRANTY_ON_ASK = ("B",)
 NO_WARRANTY = ("C",)
 B_NO_PREMIUM = True
+# A clearance unit's floor replaced the usual one, break premium and all, so a B sold on clearance with a warranty
+# paid the refunds out of a clearance price (owner, 11-07 12 h). 24 h to 11:40: B with a warranty outside clearance
+# 115 deals, none under break-even (cost / (1 - 0.127)), net +7.2M; on clearance 105, 52 under it, net +1.9M, and
+# since 11:00 6 of 6 floors under it. Share of the break premium (break rate x ask) added on top of a clearance
+# floor when the unit carries a warranty, by grade. The manager reports B warranty clearance deals an hour; lower
+# this if they fall off (owner decides). ~/wk8-test/waterfall1107.py, break_rate1107.py.
+CLEAR_WARRANTY_PREMIUM = {"B": 1.0}
 MKT_BASE = 0.95          # a goods ask starts from at least this share of the market's price for its SKU and grade
 WANTS_WARRANTY = re.compile(r"warrant|guarantee|보증|보장", re.I)
 
@@ -570,6 +577,9 @@ def option(u, p, arm, wants_warranty=True, capped=False):
     floor = floor_price(u, p, warranty, ask)
     if clear:
         floor = max(1, min(floor, round(clear["floor"])))
+        share = CLEAR_WARRANTY_PREMIUM.get(u.get("grade"), 0.0) if warranty and not u.get("_no_premium") else 0.0
+        if share:      # the warranty's expected refund on top of the clearance floor (CLEAR_WARRANTY_PREMIUM)
+            floor = round(floor + share * BREAK.get(u.get("grade"), max(BREAK.values())) * max(ask, floor))
     cap = None
     if capped and u.get("list_price"):
         cap = int(STAR_CAP * u["list_price"])

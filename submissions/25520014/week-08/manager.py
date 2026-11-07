@@ -461,6 +461,27 @@ def market_gaps(est, now, cat):
             "orders_our_buyer_saw": seen, "orders_no_shop_could_fill_by_category": dict(none.most_common(6))}
 
 
+def b_warranty_by_hour(negs, now):
+    """Goods B talks opened with a warranty in each of the last 6 hours, clearance and not: opened, deals, mean deal
+    price over list. Since 11-07 12 h a clearance B with a warranty carries the break premium on its floor
+    (seller.CLEAR_WARRANTY_PREMIUM); owner_notes asks for these counts to see whether those deals fell off."""
+    opened = {r["task"]: r for r in negs if r["outcome"] == "open" and r.get("grade") == "B"
+              and r.get("kind") == "goods" and r.get("warranty")}
+    deals = {r["task"]: r for r in negs if r["outcome"] == "deal" and r["task"] in opened}
+    out = []
+    for h in range(6, 0, -1):
+        t0, t1 = now - h * 3600, now - (h - 1) * 3600
+        row = {"hour_from": time.strftime("%H:%M", time.localtime(t0))}
+        for name, clear in (("clearance", True), ("other", False)):
+            ts = [t for t, r in opened.items() if t0 <= r["ts"] < t1 and bool(r.get("clearance")) == clear]
+            ds = [deals[t] for t in ts if t in deals]
+            row[name] = {"opened": len(ts), "deals": len(ds),
+                         "deal_price_over_list": round(sum(d["price"] / d["list_price"] for d in ds) / len(ds), 3)
+                         if ds else None}
+        out.append(row)
+    return out
+
+
 def summary(md, now):
     """What opus sees: numbers by code, plus the newest forum posts and our reviews as text."""
     p = policy.load()
@@ -507,6 +528,7 @@ def summary(md, now):
                             "deal_margin_over_cost": round(sum(d["price"] / d["cost"] - 1 for d in deals) / len(deals), 3)
                             if deals else None,
                             "steps_at_close": dict(Counter(d.get("step") for d in deals))},
+        "b_warranty_talks_by_hour": b_warranty_by_hour(negs, now),
         "price_bandit_mean_reward": {f"{k}@{a}": round(v[0] / sum(v), 3) for (k, a), v in bandit.items()},
         "requests_for_items_not_in_stock_last_hour": len(missed),
         "market": {"settles_in_window": len(est.sales), "lambda0_per_category_per_hour": round(est.lambda0, 3), "prior_weight_h": round(est.prior_weight_h, 3),

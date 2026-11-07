@@ -433,6 +433,14 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   stays default (WARRANTY_ON_ASK ("B",)): unasked B with one netted -1.5%; psyoung82 asks, so it keeps it. Do not
   propose a warranty on C again. Expect: A sales and share back up, refunds down ~3M an hour.
 
+- 11-07 11:47 (owner; seller.py, manager.py, kit restarted). A B sold on clearance with a warranty now carries the
+  break premium on top of its clearance floor (seller.CLEAR_WARRANTY_PREMIUM {"B": 1.0}, about +13% of the price):
+  the clearance floor had replaced the usual floor and its premium, so 52 of 105 such deals in 24 h sold under
+  break-even. B outside clearance already had the premium, unchanged. Report every hour from
+  b_warranty_talks_by_hour: clearance B opened and deals per hour against the 6 hours before 11:47 (about 6 opened
+  and 4.3 deals an hour). If clearance deals fall under half of that for two hours in a row, propose lowering
+  CLEAR_WARRANTY_PREMIUM["B"] (e.g. 1.0 -> 0.5) in the report; the owner changes it, you cannot.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
