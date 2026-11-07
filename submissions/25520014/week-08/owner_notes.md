@@ -441,6 +441,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   and 4.3 deals an hour). If clearance deals fall under half of that for two hours in a row, propose lowering
   CLEAR_WARRANTY_PREMIUM["B"] (e.g. 1.0 -> 0.5) in the report; the owner changes it, you cannot.
 
+- 11-07 14:13 (owner; clearance.py, kit restarted). An underwater goods unit may sell under its cost (down to cost x
+  (1 - 1% x days left), 0.896 now) only while restock's goods_room is under 100M (clearance.goods_tight); with room it
+  holds at cost as since 03:00. 03:00's hold-at-cost replay left 115M unsold under the stock cap and goods refills
+  fell to 0-62M an hour, our goods share 15-24% -> 7-11%. 134 units sat over the market's price, 133 within 10%. Report
+  each hour: goods_room, goods bought last hour, our goods share, and how much we sold under cost (count, loss). Expect
+  goods_room back over 100M within hours, refills 150M+ an hour, share up. Do not propose raising GOODS_STOCK_MAX.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
