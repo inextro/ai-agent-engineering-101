@@ -127,6 +127,10 @@ def window(since, until):
                 f"{why} (order use_within_hours {r.get('use_within_hours')}, kind {r.get('kind')})"
                 for r, why in refused if refusal_kind(why) == k][:2]} for k, n in kinds.most_common()},
             "ends": dict(Counter(str(r.get("end"))[:60] for r in rs).most_common(8)),
+            # 11-07: how the first shop ended when we moved on to another (numbers as N); shop_ends from 11-07 11 h
+            "first_shop_end_when_moved_on": dict(Counter(
+                re.sub(r"\d+", "N", str(r["shop_ends"][0]))[:80] for r in rs
+                if len(r.get("shop_ends") or []) > 1).most_common(8)),
             "price_over_list": round(sum(r["price"] / r["list"] for r in deals) / len(deals), 3) if deals else None,
             "surplus_sum": sum(r["list"] - r["price"] for r in deals),
             # patch 3.4 scores the mean of (list - paid) / list, not the sum in won (breaks not yet known here)

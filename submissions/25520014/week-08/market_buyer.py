@@ -712,6 +712,7 @@ def main():
                 break
             rpc_url, task, ask = open_talk(c, c["url"], need_h)
             if task is None:
+                rec.setdefault("shop_ends", []).append(f"{c['shop']}: could not open the talk again")
                 continue
         # only a quote for the same SKU (11-06 13 h): 1,046 of the last 1,875 quote rounds asked shops for different
         # SKUs of the category, and the message said "{shop} quoted me {ask} for this" with a cheaper SKU's price
@@ -737,6 +738,7 @@ def main():
             if not isinstance(price, (int, float)) or price > cap:
                 log(f"receipt price {price} above our cap {cap}: not taking it")
                 rec["end"], receipt = f"receipt price {price} above the cap", None
+                rec.setdefault("shop_ends", []).append(f"{c['shop']}: {rec['end']}")
                 continue                        # try the next shop while time is left
             acc = accept_policy(order, c, price, m, receipt, (cat.get(item) or {}).get("list_price") if item else None)
             why = doomed(receipt, acc, cat.get(item or c["sku"]) or {})
@@ -744,11 +746,16 @@ def main():
                 log(f"{c['shop']}: receipt {why}: not taking it")
                 rec.setdefault("doomed", []).append(f"{c['shop']}: {why}")
                 rec["end"], receipt = f"receipt {why}", None
+                rec.setdefault("shop_ends", []).append(f"{c['shop']}: {rec['end']}")
                 continue
             rec["end"], rec["price"] = "deal", price
             result["accept"] = acc
             rec["accept"] = result["accept"]
+            rec.setdefault("shop_ends", []).append(f"{c['shop']}: deal")
             break
+        # every shop's end in order (11-07): rec["end"] keeps only the last, so a first shop that met our offer and then
+        # did not close left no trace when the next shop was tried
+        rec.setdefault("shop_ends", []).append(f"{c['shop']}: {rec.get('end')}")
     with LOCK:
         result["receipt"] = receipt
     result["review"] = "Deal agreed." if receipt else f"No deal: {rec.get('end')}."
