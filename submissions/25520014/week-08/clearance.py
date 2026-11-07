@@ -82,8 +82,11 @@ def uw_floor_cost(now):
 # 133 of them within 10% of it (164M), 10.4 days of storage left (10.4%). So: hold at cost while restock has room,
 # and when goods_room (restock_state.json, written each run) is under UW_ROOM_LOW (about one hour of goods refills,
 # 96-215M an hour after 11 h), let them go down to cost less the storage to the end, making room for SKUs that sell.
+# UW_ROOM_LOW 100M -> 0 = off (owner, 11-07 15 h). 14:13-15:13 it was on the whole hour (room 82-97M) yet the cap
+# did not bind (69M bought with 97M room, ~23M a run): 20 A clearance sold under cost (0.95, -1.47M), A clearance
+# deals 28 (31-55 an hour before), margin -1.3M (+0.4-1.6M before), room and refills did not recover.
 UW_STORAGE_DAY = 0.01
-UW_ROOM_LOW = 100e6
+UW_ROOM_LOW = 0
 UW_STATE_MAX_AGE = 3600   # a restock_state.json older than this: treat as room (hold at cost)
 _room = {"t": 0.0, "tight": False}
 

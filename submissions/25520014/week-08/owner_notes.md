@@ -448,6 +448,10 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   each hour: goods_room, goods bought last hour, our goods share, and how much we sold under cost (count, loss). Expect
   goods_room back over 100M within hours, refills 150M+ an hour, share up. Do not propose raising GOODS_STOCK_MAX.
 
+- 11-07 15:12 (owner; clearance.py, kit restarted). The 14:13 under-cost rule is off (UW_ROOM_LOW 0): underwater goods
+  hold at cost again. In its hour the room was 82-97M but the cap did not bind (69M bought), 20 A clearance sold under
+  cost (-1.47M) with no more deals. Stop reporting goods_room and under-cost sales; the 14:13 note no longer applies.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
