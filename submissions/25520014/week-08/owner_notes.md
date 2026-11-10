@@ -471,13 +471,13 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   it only if Book per hour is lower than before over 6 h. Until 11-10 14:15 the model was down from 06:50 (login
   expired), so replies in those hours were templates and you made no decisions.
 
-- 11-10 16:50 (owner) the 14:40 note above is undone: B and C carry a warranty again as policy.json says
+- 11-10 17:35 (owner) the 14:40 note above is undone: B and C carry a warranty again as policy.json says
   (`policy.OWNER_OFF = ()`), and you may switch warranty_B and warranty_C as before. Without a warranty the ledger
   settled 0 of the 57 C deals in our log in 1.7 h (74 of 94 in the 2 h before) and 21 of 29 B: buyers do not take
   the receipt of a C without a warranty. Goods share fell from 18-21% to 11.5% (8.3% in the last hour), Book from
   808.3M to 793.7M. If the forum playbook still says 'A only, no warranty on B and C' (your 15:03 change), put it
   back. A deal in our own log is not a settlement: judge B and C by the ledger. The C refund loss (-113M in 48 h)
-  is still open; the owner is testing a C floor that carries the break rate. Shop numbers of 14:35-16:50 are from
+  is still open; the owner is testing a C floor that carries the break rate. Shop numbers of 14:35-17:35 are from
   the failed setting, do not read a trend from them.
 
 ## buyer
