@@ -122,7 +122,36 @@ SHORT_STOCK_MAX = 40e6
 # our deals fell from 11 to 1 per 30 min while the market kept selling 20-30, and with 1 B and 3 C it filled the
 # cap of 5, so nothing more was bought (and the in-stock rate, then the cap, fell with the sales). 23 of 71 goods
 # SKUs held such an A (34 units, 27.9M). clearance.UW_FLOOR_COST lets it go just under the market meanwhile.
-UW_A_UNCOUNTED = True
+# Off 11-10 (owner): with seller.MKT_PRICING a dear A sells at the market's price like any other, so it is stock like
+# any other. Uncounted, 327 such A (291M of 755M at cost, 11-10 20 h) sat outside the caps while their SKUs were bought again.
+UW_A_UNCOUNTED = False
+# 11-10 (owner): the goods stock follows our sales, not our cash. restock spent everything above the reserve in every
+# window, so the stock grew with the book: 11-10 20 h cash 20M, stock 756M (97% of book, 9.3 h of sales, 56% of it
+# held 6 h+, storage 7.5M a day); yms979 34%, SungJinho 22%, Kiro729 15%, seochanit 2%. Past STOCK_HOURS of our goods
+# sales (the last STOCK_RATE_H hours, at the prices paid) a window buys at most STOCK_REFILL of what we sold since
+# the last one, so the stock runs down without the shelf going empty; under it, as before.
+STOCK_TARGET = True
+STOCK_HOURS = 5.0
+STOCK_RATE_H = 6
+STOCK_REFILL = 0.7
+
+
+def stock_room(inv, est, now, every_min, runs=1.0):
+    """(the most this run may spend under STOCK_TARGET or None, goods stock at cost, our goods sales per hour).
+    runs: restock runs in a window (the window's allowance is split among them)."""
+    db = getattr(est, "db", None)
+    cat = est.cat or {}
+    ours = model.our_urls(db)
+    sold = 0.0
+    for ts, d in model.entries(db, "settle", now - STOCK_RATE_H * 3600):
+        if d.get("shop") in ours and (cat.get(model.sku_of(d)) or {}).get("kind", "goods") == "goods":
+            sold += model.amount_of(d) or 0
+    rate = sold / STOCK_RATE_H
+    stock = sum(u.get("cost") or 0 for u in inv.get("units", [])
+                if u.get("kind", "goods") == "goods" and u.get("grade") != "expired")
+    if stock <= STOCK_HOURS * rate:
+        return None, stock, rate
+    return STOCK_REFILL * rate * every_min / 60 / runs, stock, rate
 # A goods SKU's demand is at least our sales of it per hour we held a sellable A (an A whose floor is under the market's
 # A price) over the last A_RATE_H hours (owner, 11-06 13 h). The in-stock hours of own_sku_rate count any grade, so a
 # SKU whose buyers take only A read low while we held only B, C or a dear A: 12 h to 11-06 13 h, 프리미엄 앤 모달
@@ -636,6 +665,14 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
     room = balance - reserve
     plan = {"lines_per_window": lines_w, "window_minutes": round(every_min, 1), "reserve": round(reserve),
             "refunds_expected": round(refunds[0]), "refunds_sd": round(refunds[1]), "cash_to_spend": round(room)}
+    if STOCK_TARGET:
+        try:
+            cap, stock, rate = stock_room(inv, est, now, every_min, max(1.0, lines_w / MAX_LINES))
+            plan.update(goods_stock=round(stock), goods_sales_per_h=round(rate), stock_cap=None if cap is None else round(cap))
+            if cap is not None:
+                room = min(room, cap)
+        except Exception as e:                              # no sales rate: spend as before
+            print(f"[restock] stock target unavailable: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
     if left < policy.LAST_HOURS_BELOW_COST or room <= 0:   # the last hours sell at cost: buy nothing
         return [], dict(plan, target={}, cycle_minutes=None)
     cands, units, have_sku, by_cat, median, skip = candidates(inv, cat, demand, est, p, now)

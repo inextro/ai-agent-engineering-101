@@ -534,6 +534,24 @@ STAR_BUYER = re.compile(r"\. Please include a \d+(?:\.\d+)?-hour warranty\.")
 STAR_CAP = 0.695
 
 
+# 11-10 (owner): goods are priced from the market, not from the unit's cost. The market draws an A's cost anywhere in
+# 0.55-0.75 of list (rules_shop.md) while buyers pay about 0.706 whatever it cost. With the floor at cost x 1.08 +
+# warranty, 61 h to 11-10 13:00 (5,404 A sold): units that cost 0.55-0.59 sold at 0.654 within 0.9 h (+62k each, 91%
+# of them 3%+ under other shops' median for the SKU), units that cost 0.71-0.75 waited 7.1 h and sold at 0.691 (-72k
+# each); A in all -10M. Our A price was 0.954 of other shops' median for the same SKU (90th percentile 1.009); theirs
+# 1.00-1.13 (90th 1.07-1.20). Buyers haggle to the floor, so the floor decides: real talks by floor / market price m,
+# paid rate and price: 0.90-0.93 48% at 0.936 m, 0.93-0.96 43% at 0.959, 0.96-0.99 33% at 0.984, 0.99-1.02 26% at
+# 1.008, 1.02-1.06 25% at 1.037. Re-pricing every talk on that curve (~/wk8-test/mktbt.py): floor 0.95 m +0.41M/h and
+# 4% more sales, 0.97 m +1.76M/h and 22% fewer, 1.00 m +2.50M/h and 38% fewer.
+# A: floor = MKT_FLOOR x m whatever the unit cost (a dear unit goes under its cost, paid for by the cheap ones), never
+# under MKT_COST_GUARD x cost (a wrong m); ask = MKT_ASK x m. B and C: the floor and the ask are only raised to those
+# (their own floors carry the warranty). No market price for the SKU and grade (under 5 settles a day): as before.
+MKT_PRICING = True
+MKT_FLOOR = 0.98
+MKT_ASK = 1.04
+MKT_COST_GUARD = 0.85
+
+
 def option(u, p, arm, wants_warranty=True, capped=False):
     """One unit the shop can offer, with its own asking price, floor and concession step. wants_warranty: the buyer
     asked for a warranty (WARRANTY_ON_ASK grades get one only then). capped: a STAR_BUYER, whose ask (and so every
@@ -563,6 +581,17 @@ def option(u, p, arm, wants_warranty=True, capped=False):
     floor = floor_price(u, p, warranty, ask)
     if clear:
         floor = max(1, min(floor, round(clear["floor"])))
+    m = clearance.market_ratio(u) if MKT_PRICING and kind == "goods" else None
+    if m:
+        # the market's price for the SKU and grade sets the price, not the unit's cost (MKT_PRICING)
+        mp = m * u["list_price"]
+        mfloor = round(MKT_FLOOR * mp)
+        if u.get("grade") == "A":
+            floor = max(mfloor, round(MKT_COST_GUARD * (u.get("_pool_cost") or u["cost"])))
+            ask = min(u["list_price"], MKT_ASK * mp)
+        else:
+            floor = max(floor, mfloor)
+            ask = max(ask, min(u["list_price"], MKT_ASK * mp))
     cap = None
     if capped and u.get("list_price"):
         cap = int(STAR_CAP * u["list_price"])
