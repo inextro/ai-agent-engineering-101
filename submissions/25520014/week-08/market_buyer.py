@@ -34,6 +34,7 @@ import argparse
 import concurrent.futures as cf
 import json
 import os
+import pickle
 import random
 import re
 import sys
@@ -209,16 +210,58 @@ def avoid_list(now=None):
     return out
 
 
+# 11-10 (owner: the buyer's throughput): every order built model.Prices (2.6 s: six days of settles) and the whole of
+# model.Estimates (8.3 s) for three break rates, 11 s of the 36 s an order took (an order with no candidate, which
+# never touches the network, took 11.4 s; 2,009 orders a day = 6 h of 20). Both are kept for MODELS_TTL seconds in
+# data/buyer_models.pkl (one buyer process at a time; written to a temp file, then renamed); the break rates come
+# from review.py's 10-minute file when it is fresh. Undo: MODELS_TTL = 0.
+MODELS_TTL = 600
+MODELS_CACHE = policy.DATA / "buyer_models.pkl"
+BREAKS_FILE = policy.DATA / "review_breaks.json"
+
+
+def cached_models(cat, now=None):
+    """(model.Prices, break rates by grade), from the cache while it is under MODELS_TTL old."""
+    now = now or time.time()
+    if MODELS_TTL:
+        try:
+            with open(MODELS_CACHE, "rb") as f:
+                at, prices, breaks = pickle.load(f)
+            if 0 <= now - at < MODELS_TTL:
+                return prices, breaks
+        except Exception:
+            pass
+    db = model.connect()
+    p = policy.load()
+    prices = model.Prices(db, cat=cat, half_life_h=p["half_life_h"])
+    breaks = None
+    try:
+        b = json.loads(BREAKS_FILE.read_text(encoding="utf-8"))
+        if 0 <= now - b["at"] < 1800 and all(0 < b["r"][g] < 1 for g in "ABC"):
+            breaks = {g: float(b["r"][g]) for g in "ABC"}
+    except Exception:
+        pass
+    if breaks is None:
+        breaks = dict(model.Estimates(db, pol=p, cat=cat).break_rate)
+    prices.db = None                                    # a connection cannot be pickled, and nothing reads it later
+    if MODELS_TTL:
+        try:
+            tmp = MODELS_CACHE.with_suffix(".tmp")
+            with open(tmp, "wb") as f:
+                pickle.dump((now, prices, breaks), f)
+            os.replace(tmp, MODELS_CACHE)
+        except Exception as e:
+            log(f"models cache not written: {type(e).__name__}: {e}")
+    return prices, breaks
+
+
 class Models:
     """The shop's models, read once per order; any failure falls back to priors (the buyer must still buy)."""
 
     def __init__(self, cat):
         self.prices, self.breaks = None, dict(model.BREAK_PRIOR)
         try:
-            db = model.connect()
-            p = policy.load()
-            self.prices = model.Prices(db, cat=cat, half_life_h=p["half_life_h"])
-            self.breaks = model.Estimates(db, pol=p, cat=cat).break_rate
+            self.prices, self.breaks = cached_models(cat)
         except Exception as e:
             log(f"models unavailable ({type(e).__name__}: {e}); market priors only")
         self.deals = paid_by_shop()
@@ -569,6 +612,33 @@ QUIT_OVER_CAP = True
 QUIT_LEAVE_SECS = 2         # at most this long for each CancelTask before the order ends
 
 
+# 11-10: the cap was the best case (an A under a warranty) whatever the shop offered, so we haggled a B or C down to
+# a price only an A is worth and then refused the receipt: 72 h, 803 orders (621 C, 166 B; psyoung82 185, nocha12
+# 178, moss-and-oak 150, nkjunbc 120), 600 of them ended with no deal after 50 s each (2.8 h a day), and in 780 of
+# 787 the first ask was already over what that grade is worth without a warranty. When the shop's first message
+# names the grade, the cap is that grade's under a warranty (the receipt may still bring one: 164 of our 178 B and C
+# deals in 24 h had it, and accept_policy checks it): the lowest ask was over that in 507 of the 787. A message
+# that names no grade leaves the cap as it was. Undo: False.
+GRADE_CAP = True
+WARRANTY_IN = re.compile(r"warrant|보증", re.I)
+
+
+def grade_cap(c, text, m, rec):
+    """Lower c["cap"] to what the grade named in the shop's first message is worth (accept_policy's rule)."""
+    g = GRADE_IN.search(text)
+    if not g:
+        return
+    g = g.group(1).upper()
+    p = m.breaks[g]
+    r = 1 - MIN_SAVED / (1 - p)                         # goods_saved(p, r, True) = MIN_SAVED
+    rec.setdefault("quote_grades", {})[c["shop"]] = g + ("w" if WARRANTY_IN.search(text) else "")
+    cap = int(max(0, c["list"] * r))
+    if cap < c["cap"]:
+        rec.setdefault("grade_caps", {})[c["shop"]] = [c["cap"], cap]
+        c["cap"] = cap
+        c["expect"] = min(c["expect"], cap)
+
+
 def over_cap(t):
     """t = (candidate, rpc_url, task, first ask): the shop named a price and it is over our cap for that SKU."""
     return t[3] is not None and t[3] > t[0]["cap"]
@@ -705,13 +775,18 @@ def main():
                 continue
             if ask is None and state == "TASK_STATE_COMPLETED":
                 ask = (buyer.receipt(task) or {}).get("price")
+            if GRADE_CAP and c.get("kind") == "goods" and state == "TASK_STATE_INPUT_REQUIRED":
+                grade_cap(c, buyer.status_text(task) or "", m, rec)
             live.append((c, rpc_url, task, ask))
         rec["rounds_of_quotes"] = rec.get("rounds_of_quotes", 0) + 1
     # where to haggle: an ask within our cap first, then the most surplus at the ask we heard (no ask: the expected
     # price). 11-04 19 h to 11-05 07 h: 29 orders haggled first with a shop asking over our cap while another asked
     # under it; 20 closed (69%) against 1,278 of 1,334 (96%) that started under the cap.
+    # 11-10: by the saved rate, (value - ask) / list, as candidates() ranks since patch 3.4; this sort still took the
+    # most won. 72 h: 771 orders had quotes within the cap on different SKUs, 309 haggled where ask / list was not
+    # the lowest (median gap 0.063 of list), 302 of them closed: +0.0066 saved per deal over all deals.
     live.sort(key=lambda t: (t[3] is not None and t[3] > t[0]["cap"],
-                             -(t[0]["value"] - (t[3] if t[3] is not None else t[0]["expect"]))))
+                             -(t[0]["value"] - (t[3] if t[3] is not None else t[0]["expect"])) / t[0]["list"]))
     if QUIT_OVER_CAP and order.get("kind") == "goods" and live and all(over_cap(t) for t in live):
         c, _, _, ask = live[0]                   # the sort put the most surplus first
         rec.update(shop=c["shop"], sku=c["sku"], list=c["list"], cap=c["cap"], expect=c["expect"], es=c["es"],

@@ -149,9 +149,13 @@ def stock_room(inv, est, now, every_min, runs=1.0):
     rate = sold / STOCK_RATE_H
     stock = sum(u.get("cost") or 0 for u in inv.get("units", [])
                 if u.get("kind", "goods") == "goods" and u.get("grade") != "expired")
+    sold_w = rate * every_min / 60 / runs               # what a run's share of a window sells
     if stock <= STOCK_HOURS * rate:
-        return None, stock, rate
-    return STOCK_REFILL * rate * every_min / 60 / runs, stock, rate
+        # 11-10 22 h: under the target this returned None (all the cash above the reserve again), so the stock
+        # would have jumped back past the target in one window once it got there; now the gap to the target plus
+        # what the window sells
+        return STOCK_HOURS * rate - stock + sold_w, stock, rate
+    return STOCK_REFILL * sold_w, stock, rate
 # A goods SKU's demand is at least our sales of it per hour we held a sellable A (an A whose floor is under the market's
 # A price) over the last A_RATE_H hours (owner, 11-06 13 h). The in-stock hours of own_sku_rate count any grade, so a
 # SKU whose buyers take only A read low while we held only B, C or a dear A: 12 h to 11-06 13 h, 프리미엄 앤 모달
@@ -644,13 +648,17 @@ def ranked(cands, p, hours, left):
     return out
 
 
-def allocate(units, cands, room):
-    """Take units from the top while `room` (cash, at the top cost with its surge) lasts: {sku: new units}."""
+def allocate(units, cands, room, groom=None):
+    """Take units from the top while `room` (cash, at the top cost with its surge) lasts: {sku: new units}.
+    groom: the most goods may take of it (STOCK_TARGET); food is not held to it."""
     target = Counter()
     for _, _, s, k in units:
         top = unit_cost(cands[s], k - cands[s]["have"])[1]
-        if top <= room:
+        goods = groom is not None and cands[s]["kind"] == "goods"
+        if top <= room and (not goods or top <= groom):
             room -= top
+            if goods:
+                groom -= top
             target[s] += 1
     return target
 
@@ -665,12 +673,15 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
     room = balance - reserve
     plan = {"lines_per_window": lines_w, "window_minutes": round(every_min, 1), "reserve": round(reserve),
             "refunds_expected": round(refunds[0]), "refunds_sd": round(refunds[1]), "cash_to_spend": round(room)}
+    groom = None
     if STOCK_TARGET:
         try:
             cap, stock, rate = stock_room(inv, est, now, every_min, max(1.0, lines_w / MAX_LINES))
             plan.update(goods_stock=round(stock), goods_sales_per_h=round(rate), stock_cap=None if cap is None else round(cap))
             if cap is not None:
-                room = min(room, cap)
+                # goods only (11-10 22 h): the cap is made of goods sales and goods stock, and it also held food,
+                # which ranks first by value per won and is counted at 0.75 of list like goods (1.5 x its cost)
+                groom = max(0.0, cap)
         except Exception as e:                              # no sales rate: spend as before
             print(f"[restock] stock target unavailable: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
     if left < policy.LAST_HOURS_BELOW_COST or room <= 0:   # the last hours sell at cost: buy nothing
@@ -684,7 +695,7 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
     horizon = lambda cyc: min(cyc, 60 * CAP_HOURS[1]) / 60
     for _ in range(5):
         order = ranked(cands, p, horizon(cycle), left)
-        target = allocate(order, cands, room)
+        target = allocate(order, cands, room, groom)
         keep = len(set(target) | sold)                      # a line is one SKU: SKUs to keep refilled
         nxt = math.ceil(max(keep, 1) / lines_w) * every_min
         if nxt == cycle:
@@ -692,14 +703,14 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
         cycle = nxt
     else:                                                   # did not settle: rank once more on the last cycle
         order = ranked(cands, p, horizon(cycle), left)
-        target = allocate(order, cands, room)
+        target = allocate(order, cands, room, groom)
     # this run: money chose the target (value per won); lines are what this run is short of, so the lines worth
     # most go first
     value = Counter()
     for _, v, s, k in order:
         if k - cands[s]["have"] <= target[s]:
             value[s] += v
-    buy, spent = {}, 0.0
+    buy, spent, spent_g = {}, 0.0, 0.0
     short_g = {s for s in est.shortage() if cat.get(s, {}).get("kind") == "goods"} if SHORT_OWN and SHORTAGE_ENTRY else set()
     short_room = SHORT_STOCK_MAX - sum(u.get("cost") or 0 for u in units if u.get("sku") in short_g)
     for s in sorted(target, key=lambda s: -value[s]):
@@ -711,6 +722,8 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
             c, w, _ = unit_cost(x, qty + 1)
             if spent + top + w > room or (s in short_g and exp + c > short_room):
                 break
+            if groom is not None and x["kind"] == "goods" and spent_g + top + w > groom:
+                break
             qty, top, exp = qty + 1, top + w, exp + c
         if qty <= 0:
             continue
@@ -720,6 +733,8 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
                   "k_first": x["have"] + 1, "value": round(value[s] * qty / target[s]),
                   "surge_u": x["surge_u"], "surge_last": round(surge_factor(x["surge_u"] + qty), 3)}
         spent += top
+        if x["kind"] == "goods":
+            spent_g += top
     if left >= p["liquidate_hours"]:
         for w in asked(units, by_cat, median, skip, p, balance, cat, demand, now):
             if len(buy) < MAX_LINES and w["sku"] not in buy and spent + w["worst_cost"] <= room:
