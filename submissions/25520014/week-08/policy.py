@@ -48,7 +48,10 @@ FLAGS = {
 # nothing for a warranty (same SKU and grade, with against without, as a share of list: A +1.0%, B 0.0%, C +1.7%).
 # The 11-07 11:00 fix (C none, B on ask) was lost in the 15:47 rollback of seller.py. These flags stay off whatever
 # policy.json or the manager says (load, clip), so seller, restock, forum and manager all read the same. Undo: ().
-OWNER_OFF = ("warranty_B", "warranty_C")
+# 11-10 16:50 (owner): undone. In 1.7 h after the deploy the ledger settled 0 of the 57 C deals in our log (74 of 94
+# in the 2 h before) and 21 of 29 B: a buyer does not take the receipt of a C without a warranty (the order's accept
+# terms). Goods share 18-21% -> 11.5%, Book 808.3M -> 793.7M. A "deal" in negotiations.jsonl is not a settlement.
+OWNER_OFF = ()
 BANKRUPT_LINE = 500_000        # agent.md; inventory.json's bankrupt_line wins when present
 ARMS = (0.70, 0.80, 0.90, 1.00) # opening ask as a share of the list price; the bandit picks one per negotiation
 # Goods open at the floor x (1 + arm), at most the list price (owner, 11-05 00:30). With list x ARMS, the floor (cost
