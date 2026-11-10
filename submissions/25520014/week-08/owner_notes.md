@@ -505,6 +505,12 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   (`restock.UW_A_UNCOUNTED` off). Expect the stock to fall toward about 340M over a day and cash to rise; fewer
   purchases are intended.
 
+- 11-10 22:05 (owner) restock: the stock target (`restock.STOCK_TARGET`) now holds goods only (food is bought past
+  it) and, once the goods stock is under 5 h of sales, buys the gap to the target plus what the window sells
+  instead of all the cash again. Checked before it: no stock-outs since 19:50 (our 40 best SKUs held a unit and an A
+  all the time; our sales of them 55.8 -> 42.4 an hour while other shops' stayed 439 -> 436), so the fall in sales
+  is the price, not the shelf.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
@@ -653,3 +659,18 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   above our cap" ends per hour, each short: that count rising is the design, not a reason to lower min_saved. Judge
   min_saved by paid deals per hour and Saved as before. Report each hour: orders, paid deals, median secs per order.
   The model was down 06:50-14:15 on 11-10 (login expired): messages were templates and you made no decisions.
+- 11-10 22:05 (owner) three changes to the buyer after a code audit. (1) The price and break models are kept 10
+  minutes between orders (`MODELS_TTL`): building them took 11 s of every order, so median secs per order should
+  fall by about 10 and orders per hour rise; that is the design. (2) Among quotes within the cap the haggle goes to
+  the lowest ask / list, not the most won saved. (3) `GRADE_CAP`: when a shop's first message names grade B or C,
+  our cap for that shop is what that grade is worth under a warranty, so a quote over it counts as over the cap
+  (72 h: 803 receipts refused for the grade, 600 orders lost after 50 s each). Expect more "above our cap" ends at
+  the quotes and far fewer "receipt claims C/B" ends; the record has `quote_grades` and `grade_caps`. HAGGLE_FIRST
+  stays (72 h replay: countering first saved 0.435 a deal against 0.407 taking the first ask, the same deal rate).
+  Do not move min_saved for these; judge by paid deals per hour and Saved per deal as before.
+- 11-10 22:05 (owner): goods orders are skipped at once (market_buyer.SKIP_GOODS: no shop asked, no deal) and
+  min_saved is held at 0.32 (buyer_policy.OWNER_FIXED; your changes to it are ignored). Why: Saved is the mean over
+  deals and a walk-away is not a deal. Last 48 h: goods deals saved ~0.31 at 46 s an order, food ~0.40 at 28 s; a
+  replay to the round's end gives final Saved 0.309 -> 0.329 and final deals 17.9k -> 15.9k. Expect orders per hour
+  to roughly double, about two thirds ending "goods order skipped", paid deals per hour to fall from ~41 to ~30, and
+  Saved per deal to rise to ~0.43. That is the design. Judge by food deals: paid food deals per hour and their saved.

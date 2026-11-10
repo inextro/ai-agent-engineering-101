@@ -394,6 +394,11 @@ the rules page below has the current formula):
   dislike stance in an hour.
 "our_buyer_score_now" has each part with its percentile. The kit stops an order after 300 s.
 
+Owner, 11-10 22:30: goods orders end at once with no deal (the code skips them before asking any shop), so every deal
+is food; and min_saved is held at 0.32 by the owner (a change to it is ignored). Orders per hour rise and deals per
+hour fall on purpose: Saved is the mean over deals and a walk-away is not a deal. Do not report the skipped goods
+orders or the fixed min_saved as a problem; judge the other numbers by food deals.
+
 min_saved (patch 3.4, owner 11-06: start 0.20, yours to move): the least expected saving a deal must bring. It
 caps food at list x (1 - min_saved) and goods a little higher (A under a warranty), and the accept refuses a goods
 grade whose expected saved (break counted as -1 without a warranty, 0 with one) is under it. Raising it lifts

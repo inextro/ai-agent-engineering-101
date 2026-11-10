@@ -26,6 +26,10 @@ NUMBERS = {
                                             # accept. Saved is the mean over deals, so a deal under the mean lowers it
 }   # the buyer's post interval is fixed in buyer_forum.POST_EVERY_S (11-04: every 5 min to the end; not the manager's)
 GUIDE_KEYS = ("negotiation", "forum")
+# Numbers the owner holds whatever buyer_policy.json or the manager says (load, clip). 11-10 22:30 (owner): with goods
+# orders skipped (market_buyer.SKIP_GOODS) the food floor is 0.32; replay of our last 48 h (wk8-test/ownmax.py) is flat
+# from 0.30 to 0.36 and falls past 0.40. Hand over: {}.
+OWNER_FIXED = {"min_saved": 0.32}
 
 
 def defaults():
@@ -52,7 +56,7 @@ def clip(new, old=None):
             step = max(step, 1)
         v = min(max(v, old[k] - step, lo), old[k] + step, hi)
         out[k] = math.floor(v + 0.5) if whole else round(v, 4)
-    return out
+    return {**out, **OWNER_FIXED}
 
 
 def _load(path, base):
@@ -72,7 +76,7 @@ def _save(path, b, reason):
 
 
 def load():
-    return _load(PATH, defaults())
+    return {**_load(PATH, defaults()), **OWNER_FIXED}
 
 
 def save(p, reason):

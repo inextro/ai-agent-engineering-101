@@ -697,6 +697,13 @@ def doomed(receipt, acc, x):
     return None
 
 
+# 11-10 22:30 (owner): goods orders end at once, before any model or shop is touched. Saved is the mean over deals and a
+# walk-away is not a deal; goods deals average ~0.31 saved against food's ~0.40 and take 46 s an order against 28 s.
+# Replay of our last 48 h (wk8-test/ownmax.py, 170 h left): final Saved 0.309 -> 0.329 with this and min_saved 0.32
+# (buyer_policy.OWNER_FIXED), final deals 17.9k -> 15.9k. Off: False.
+SKIP_GOODS = True
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shops", required=True)
@@ -707,6 +714,12 @@ def main():
     started = STARTED
     order, shops = read_json(a.order, {}), read_json(a.shops, [])
     order.setdefault("budget", a.budget)
+    if SKIP_GOODS and order.get("kind") == "goods":
+        rec = {"ts": started, "policy": P.get("version"), "order": order.get("order"), "category": order.get("item"),
+               "budget": order.get("budget"), "kind": "goods", "use_within_hours": None, "shops": len(shops),
+               "skip_goods": True, "end": "goods order skipped (SKIP_GOODS)"}
+        finish(rec, {"shop": shops[0]["url"] if shops else "", "receipt": None, "stars": 3, "review": ""})
+        return
     cat = read_json(MARKET_DIR / "catalog.json", {})
     m = Models(cat)
     rec = {"ts": started, "policy": P.get("version"), "playbook": buyer_policy.load_playbook().get("version"), "order": order.get("order"), "category": order.get("item"), "budget": order.get("budget"),
