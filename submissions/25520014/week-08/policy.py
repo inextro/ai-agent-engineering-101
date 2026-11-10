@@ -29,6 +29,8 @@ NUMBERS = {
     "liquidate_hours":   (24, 12, 48),         # from this many hours before the end the floor falls to cost
     "half_life_h":       (24, 6, 72),          # demand memory: weight of a sale halves every this many hours
     "prior_hours":       (2.0, 0.5, 8),          # cap on the demand prior's weight in hours; the market's spread sets it below
+    "mkt_floor":         (0.98, 0.93, 1.02),   # a goods A's floor as a share of the market's price for its SKU and grade
+    "mkt_ask":           (1.04, 1.00, 1.10),   # its opening ask, same base (seller.MKT_PRICING, 11-10); OWNER_FIXED for now
     "warranty_hours":    (72, 72, 72),         # goods break within 6 h of the sale (agent.md), so 6 covered every
                                                # break; a longer one costs the same and is fixed (owner, 11-06 01 h):
                                                # buyers wrote "6 h is too short for a sofa" (11-05 56 reviews), and
@@ -55,6 +57,15 @@ FLAGS = {
 # refunds 122.3M (-34.2M); other shops sold 2,717 B without one at 0.650 of list against 0.647 with; in the 14:40-17:35
 # test 37 of our 41 B deals without a warranty settled. C keeps its warranty (0 of 57 settled without).
 OWNER_OFF = ("warranty_B",)
+# Numbers that stay at their initial value whatever policy.json or the manager says (load, clip), as OWNER_OFF does for
+# flags. 11-10 (owner): the market-based prices went live at 19:50; they stay at 0.98 / 1.04 until the owner has read
+# their effect, then the manager takes them over. Hand over: ().
+OWNER_FIXED = ("mkt_floor", "mkt_ask")
+
+
+def _owner(p):
+    """p with the owner's fixed flags and numbers applied."""
+    return {**p, **{k: False for k in OWNER_OFF}, **{k: NUMBERS[k][0] for k in OWNER_FIXED}}
 BANKRUPT_LINE = 500_000        # agent.md; inventory.json's bankrupt_line wins when present
 ARMS = (0.70, 0.80, 0.90, 1.00) # opening ask as a share of the list price; the bandit picks one per negotiation
 # Goods open at the floor x (1 + arm), at most the list price (owner, 11-05 00:30). With list x ARMS, the floor (cost
@@ -112,16 +123,15 @@ def clip(new, old=None):
     for k in FLAGS:
         if isinstance(new.get(k), bool):
             out[k] = new[k]
-    out.update({k: False for k in OWNER_OFF})
-    return out
+    return _owner(out)
 
 
 def load():
     try:
         p = json.loads(PATH.read_text(encoding="utf-8"))
-        return {**defaults(), **p, **{k: False for k in OWNER_OFF}}
+        return _owner({**defaults(), **p})
     except (OSError, ValueError):
-        return {**defaults(), **{k: False for k in OWNER_OFF}}
+        return _owner(defaults())
 
 
 def save(p, reason):

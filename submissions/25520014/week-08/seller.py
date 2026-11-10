@@ -546,6 +546,8 @@ STAR_CAP = 0.695
 # A: floor = MKT_FLOOR x m whatever the unit cost (a dear unit goes under its cost, paid for by the cheap ones), never
 # under MKT_COST_GUARD x cost (a wrong m); ask = MKT_ASK x m. B and C: the floor and the ask are only raised to those
 # (their own floors carry the warranty). No market price for the SKU and grade (under 5 settles a day): as before.
+# The two shares are policy numbers (mkt_floor, mkt_ask; policy.OWNER_FIXED holds them for now); these are the
+# values when a policy has none. A talk's log line carries `mkt`, the market's price it was priced from.
 MKT_PRICING = True
 MKT_FLOOR = 0.98
 MKT_ASK = 1.04
@@ -585,13 +587,14 @@ def option(u, p, arm, wants_warranty=True, capped=False):
     if m:
         # the market's price for the SKU and grade sets the price, not the unit's cost (MKT_PRICING)
         mp = m * u["list_price"]
-        mfloor = round(MKT_FLOOR * mp)
+        mfloor = round(p.get("mkt_floor", MKT_FLOOR) * mp)
+        mask = max(p.get("mkt_ask", MKT_ASK), p.get("mkt_floor", MKT_FLOOR)) * mp
         if u.get("grade") == "A":
             floor = max(mfloor, round(MKT_COST_GUARD * (u.get("_pool_cost") or u["cost"])))
-            ask = min(u["list_price"], MKT_ASK * mp)
+            ask = min(u["list_price"], mask)
         else:
             floor = max(floor, mfloor)
-            ask = max(ask, min(u["list_price"], MKT_ASK * mp))
+            ask = max(ask, min(u["list_price"], mask))
     cap = None
     if capped and u.get("list_price"):
         cap = int(STAR_CAP * u["list_price"])
@@ -600,7 +603,7 @@ def option(u, p, arm, wants_warranty=True, capped=False):
         floor = min(floor, max(cap, even))
         ask = min(ask, cap)
     return {"unit": u, "ask": max(round(ask), floor), "floor": floor, "step": 0, "warranty": warranty,
-            "clearance": bool(clear), "cap": cap}
+            "clearance": bool(clear), "cap": cap, "mkt": round(m * u["list_price"]) if m else None}
 
 
 # 11-06 19 h (owner): an ask within TIGHT_GAP of its floor is final from the first reply. With the goods arm at 0.0
@@ -1047,7 +1050,8 @@ class Seller(AgentExecutor):
                                   "unit": u["unit"], "kind": u.get("kind"), "grade": u.get("grade"),
                                   "arm": deal.get("log_arm", deal["arm"]), "list_price": u["list_price"], "cost": u["cost"],
                                   "pool_cost": round(u["_pool_cost"]) if u.get("_pool_cost") else None,
-                                  "ask": opts[key]["ask"], "floor": opts[key]["floor"], "chose": key,
+                                  "ask": opts[key]["ask"], "floor": opts[key]["floor"], "mkt": opts[key].get("mkt"),
+                                  "chose": key,
                                   "options": {k: o["unit"].get("grade") for k, o in opts.items()},
                                   "mentioned": deal.get("alt"), "clearance": bool(opts[key]["clearance"]),
                                   # share_watch's warranty signal reads these two (11-06 11 h)

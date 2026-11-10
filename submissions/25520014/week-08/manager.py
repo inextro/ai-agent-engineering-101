@@ -482,6 +482,61 @@ def b_warranty_by_hour(negs, now):
     return out
 
 
+MKT_H = 3              # market_pricing(): the window
+MKT_BANDS = ((0, 0.95), (0.95, 0.97), (0.97, 0.99), (0.99, 1.01), (1.01, 9))
+
+
+def market_pricing(negs, our_settles, units, inv, est, now):
+    """What the market-based goods prices did over the last MKT_H hours (seller.MKT_PRICING; policy mkt_floor, mkt_ask).
+    Talks by where the floor stood against the market's price for the SKU and grade (`mkt` on the talk's log line):
+    how many, the share paid in the ledger, the price paid over the market's, the margin over the unit's own cost.
+    Then per hour: goods revenue, margin over own cost, the refunds those sales are expected to bring (break rate of
+    the grade x price, sales with a warranty), and what is left; cash, goods stock at cost and how many hours of
+    sales it is. Refunds arrive up to 6 h after a sale, so the hour's balance alone misreads the hour."""
+    t0 = now - MKT_H * 3600
+    paid = {d.get("unit"): (ts, d) for ts, d in our_settles if ts >= t0 and d.get("expires_at") is None}
+    cost = {r["unit"]: r["cost"] for r in negs if r.get("unit") and r.get("cost")}
+    bands = {}
+    for r in negs:
+        if r["outcome"] != "open" or r["ts"] < t0 or r.get("kind") != "goods" or not r.get("mkt") or not r.get("floor"):
+            continue
+        f = r["floor"] / r["mkt"]
+        k = next(f"floor {a:.2f}-{b:.2f} x market" if b < 9 else f"floor {a:.2f}+ x market"
+                 for a, b in MKT_BANDS if a <= f < b)
+        x = bands.setdefault(k, {"talks": 0, "paid": 0, "_p": 0.0, "_m": 0.0, "_c": 0.0})
+        x["talks"] += 1
+        if r["unit"] in paid:
+            amt = model.amount_of(paid[r["unit"]][1]) or 0
+            x["paid"] += 1
+            x["_p"] += amt
+            x["_m"] += r["mkt"]
+            x["_c"] += r.get("cost") or 0
+    for x in bands.values():
+        x["paid_share"] = round(x["paid"] / x["talks"], 3)
+        x["price_over_market"] = round(x["_p"] / x["_m"], 3) if x["_m"] else None
+        x["margin_over_own_cost"] = round(x["_p"] / x["_c"] - 1, 3) if x["_c"] else None
+        for k in ("_p", "_m", "_c"):
+            del x[k]
+    rev = margin = refund = n = 0.0
+    for u, (ts, d) in paid.items():
+        amt = model.amount_of(d) or 0
+        if (est.cat.get(model.sku_of(d)) or {}).get("kind", "goods") != "goods" or u not in cost:
+            continue
+        n += 1
+        rev += amt
+        margin += amt - cost[u]
+        if d.get("warranty_hours"):
+            refund += est.break_rate.get(d.get("grade"), 0.0) * amt
+    goods = sum(u.get("cost", 0) for u in units if u.get("kind") == "goods")
+    return {"hours": MKT_H, "talks_by_floor_over_market": dict(sorted(bands.items())),
+            "goods_per_hour": {"sold": round(n / MKT_H, 1), "revenue": round(rev / MKT_H),
+                               "margin_over_own_cost": round(margin / MKT_H),
+                               "expected_refunds": round(refund / MKT_H),
+                               "expected_net": round((margin - refund) / MKT_H)},
+            "cash": inv.get("balance"), "goods_stock_at_cost": round(goods),
+            "goods_stock_in_hours_of_sales": round(goods / (rev / MKT_H), 1) if rev else None}
+
+
 def summary(md, now):
     """What opus sees: numbers by code, plus the newest forum posts and our reviews as text."""
     p = policy.load()
@@ -529,6 +584,7 @@ def summary(md, now):
                             if deals else None,
                             "steps_at_close": dict(Counter(d.get("step") for d in deals))},
         "b_warranty_talks_by_hour": b_warranty_by_hour(negs, now),
+        "market_pricing": market_pricing(negs, our_settles, units, inv, est, now),
         "price_bandit_mean_reward": {f"{k}@{a}": round(v[0] / sum(v), 3) for (k, a), v in bandit.items()},
         "requests_for_items_not_in_stock_last_hour": len(missed),
         "market": {"settles_in_window": len(est.sales), "lambda0_per_category_per_hour": round(est.lambda0, 3), "prior_weight_h": round(est.prior_weight_h, 3),
@@ -602,6 +658,19 @@ shops that hold stock in the ordered category. Our claims are always true and ce
 
 Policy now, with the allowed range of each number (a change moves at most a quarter of the range):
 {policy}
+
+Goods prices (since 11-10): the market draws a unit's cost at random (an A anywhere in 0.55-0.75 of list) and buyers
+pay about the same whatever it cost, so the code prices goods from the market's price for the SKU and grade (other
+shops' median over the last 2 h): an A's floor is mkt_floor x that price and its ask mkt_ask x, whatever the unit
+cost; B and C are only raised to those. A dear unit goes under its cost and a cheap one pays for it, so judge the
+whole, never one sale. min_margin sets a floor only where the market has no price for the SKU. Buyers haggle to the
+floor, so mkt_floor decides both how many talks are paid and what each pays: "market_pricing" in the record shows,
+for the last hours, the talks by floor over market (paid share, price, margin over own cost), goods revenue, margin,
+expected refunds and expected net per hour, cash and stock. The aim is book per hour (expected_net), not the share
+of the market's sales: a lower mkt_floor sells more and earns less a sale, and the share alone is no reason to lower
+it. Move mkt_floor only on at least three hours of the record that agree, one step at a time, and say in "why_ko"
+which expected_net you compare. restock keeps the goods stock near five hours of our goods sales; cash rising while
+the stock falls toward that is intended.
 
 Playbook now (text and categories the code runs on; you may rewrite it):
   negotiation guidance (added to haiku's prompt when it picks a grade and writes a reply): {negotiation}
@@ -773,7 +842,8 @@ def ask_model(prompt):
 
 
 def describe(p):
-    lines = [f"  {k} = {p[k]}  (range {lo} .. {hi})" for k, (_, lo, hi) in policy.NUMBERS.items()]
+    fixed = lambda k: "  [fixed by the owner for now: a change is dropped]" if k in policy.OWNER_FIXED else ""
+    lines = [f"  {k} = {p[k]}  (range {lo} .. {hi}){fixed(k)}" for k, (_, lo, hi) in policy.NUMBERS.items()]
     lines += [f"  {k} = {p[k]}  (true/false)" for k in policy.FLAGS]
     return "\n".join(lines)
 
