@@ -42,7 +42,14 @@ NUMBERS = {
 FLAGS = {
     "warranty_A": True, "warranty_B": True, "warranty_C": True,   # offer the warranty on goods of that grade
 }
-BANKRUPT_LINE = 500_000         # agent.md; inventory.json's bankrupt_line wins when present
+# 11-10 (owner): no warranty on goods B and C, whoever asks; A keeps it. 48 h to 11-10 14 h, our goods with a warranty:
+# A 4,121 sold, margin 241M, 3.3% broke, 108M refunded (+134M); B 1,219, 63M, 11.7%, 107M (-43M); C 626, 48M, 35.5%,
+# 161M (-113M): the shop's 48 h came to -36M on 4,621M revenue while yms979 made +207M on 2,462M. The market pays
+# nothing for a warranty (same SKU and grade, with against without, as a share of list: A +1.0%, B 0.0%, C +1.7%).
+# The 11-07 11:00 fix (C none, B on ask) was lost in the 15:47 rollback of seller.py. These flags stay off whatever
+# policy.json or the manager says (load, clip), so seller, restock, forum and manager all read the same. Undo: ().
+OWNER_OFF = ("warranty_B", "warranty_C")
+BANKRUPT_LINE = 500_000        # agent.md; inventory.json's bankrupt_line wins when present
 ARMS = (0.70, 0.80, 0.90, 1.00) # opening ask as a share of the list price; the bandit picks one per negotiation
 # Goods open at the floor x (1 + arm), at most the list price (owner, 11-05 00:30). With list x ARMS, the floor (cost
 # x 1.08 + break premium) overrode the arm in half the goods talks (arm 0.7: 76%), so the bandit learned the floor's
@@ -99,15 +106,16 @@ def clip(new, old=None):
     for k in FLAGS:
         if isinstance(new.get(k), bool):
             out[k] = new[k]
+    out.update({k: False for k in OWNER_OFF})
     return out
 
 
 def load():
     try:
         p = json.loads(PATH.read_text(encoding="utf-8"))
-        return {**defaults(), **p}
+        return {**defaults(), **p, **{k: False for k in OWNER_OFF}}
     except (OSError, ValueError):
-        return defaults()
+        return {**defaults(), **{k: False for k in OWNER_OFF}}
 
 
 def save(p, reason):

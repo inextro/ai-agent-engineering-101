@@ -461,6 +461,16 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   13%+, revenue 90M+ an hour, Book +5M+ an hour. The owner will hold other changes meanwhile; do not propose shop policy
   changes before 19 h unless something breaks.
 
+- 11-10 14:40 (owner) no warranty on goods B and C, whoever asks; A keeps the 72 h warranty. `policy.OWNER_OFF` holds
+  warranty_B and warranty_C false whatever policy.json says, so do not try to switch them: the change is dropped.
+  48 h to 11-10 14 h, our goods under a warranty: A +134M after refunds (3.3% broke), B -43M (11.7%), C -113M (35.5%);
+  the shop came to -36M on 4,621M revenue and Book stood at 807-812M from 11-08. The market pays nothing for a
+  warranty (same SKU and grade, with against without: A +1.0%, B 0.0%, C +1.7% of list). Expect fewer B and C deals
+  (the market's C settled with a warranty 46-60% of the time). Report each hour: B and C talks and deals, refunds
+  paid, Book per hour, our share. Do not propose bringing the B or C warranty back because their deals fell; propose
+  it only if Book per hour is lower than before over 6 h. Until 11-10 14:15 the model was down from 06:50 (login
+  expired), so replies in those hours were templates and you made no decisions.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
@@ -600,3 +610,12 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   shop's `end`. Your summary has `first_shop_end_when_moved_on` (numbers as N): how the first shop ended in orders that
   went on to another shop. It answers your 11:05 question (a first shop met our offer and then did not close). Records
   before 11:12 have no `shop_ends`. Logging only; no buying behavior changed.
+- 11-10 14:40 (owner) a goods shop whose first quote is over our cap is not haggled with (`QUIT_OVER_CAP`); when every
+  quote is over it the order ends after the quotes, with `quit_over_cap` true and `tried` 0 in buyer.jsonl and the
+  usual end "ask N above our cap M". Food is as before. Why: the kit gives the next order only when one ends; ours
+  took 36 s (median, 11-09) against 12 s on 11-04, so we got 73 orders/h where the top buyers got 126-166, and Saved
+  moved toward our recent per-deal rate (0.346) too slowly (Saved rank 17 -> 30 since 11-06). 72 h of goods orders
+  whose lowest first quote was over the cap: 1,895 orders, 53 s each, 11% closed. Expect more orders and more "ask
+  above our cap" ends per hour, each short: that count rising is the design, not a reason to lower min_saved. Judge
+  min_saved by paid deals per hour and Saved as before. Report each hour: orders, paid deals, median secs per order.
+  The model was down 06:50-14:15 on 11-10 (login expired): messages were templates and you made no decisions.
