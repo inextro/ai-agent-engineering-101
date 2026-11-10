@@ -559,6 +559,21 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
     return None
 
 
+# 11-10 (owner: Players rank fell 2nd -> 5th on the buyer): the kit hands out the next order only when this one ends,
+# and ours took 36 s (median, 11-09) against 12 s on 11-04, so we got 73 orders/h where lee-sungsoo, yms979, nocha12
+# and Kiro729 got 126-166. 72 h of goods orders to 11-10 06 h: when the lowest first quote was already over our cap,
+# 1,895 orders took 53 s each (29.6 h of the 49 h spent on goods) and 216 closed (11%, 465 s per deal); when one was
+# under it, 1,962 orders took 36 s and 1,550 closed. A goods shop whose first quote is over our cap is not haggled
+# with; when all are, the order ends after the quotes. Food is left as it was (not measured). Undo: False.
+QUIT_OVER_CAP = True
+QUIT_LEAVE_SECS = 2         # at most this long for each CancelTask before the order ends
+
+
+def over_cap(t):
+    """t = (candidate, rpc_url, task, first ask): the shop named a price and it is over our cap for that SKU."""
+    return t[3] is not None and t[3] > t[0]["cap"]
+
+
 BREAK_WINDOW_H = 6          # goods break up to 6 h after the sale (agent.md): a warranty this long covers every break
 MIN_SAVED = P["min_saved"]  # least expected saved rate of a deal (buyer_policy; the manager moves it): cap and accept
 
@@ -697,6 +712,25 @@ def main():
     # under it; 20 closed (69%) against 1,278 of 1,334 (96%) that started under the cap.
     live.sort(key=lambda t: (t[3] is not None and t[3] > t[0]["cap"],
                              -(t[0]["value"] - (t[3] if t[3] is not None else t[0]["expect"]))))
+    if QUIT_OVER_CAP and order.get("kind") == "goods" and live and all(over_cap(t) for t in live):
+        c, _, _, ask = live[0]                   # the sort put the most surplus first
+        rec.update(shop=c["shop"], sku=c["sku"], list=c["list"], cap=c["cap"], expect=c["expect"], es=c["es"],
+                   tried=0, quit_over_cap=True)
+        rec["asks"].append(ask)
+        rec["end"] = f"ask {ask} above our cap {c['cap']}"
+        rec["shop_ends"] = [f"{t[0]['shop']}: first quote {t[3]} above our cap {t[0]['cap']}, not haggled"
+                            for t in live]
+        log("every first quote is above our cap ("
+            + ", ".join("%s %s/%s" % (t[0]["shop"], t[3], t[0]["cap"]) for t in live) + "): no haggle")
+        leave = [threading.Thread(target=buyer.walk_away, args=(u, t["id"], "the price is over our budget"),
+                                  daemon=True) for _, u, t, _ in live if t["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"]
+        for th in leave:
+            th.start()
+        for th in leave:
+            th.join(QUIT_LEAVE_SECS)
+        result["review"] = f"No deal: {rec['end']}."
+        finish(rec, result)
+        return
     for c, rpc_url, task, ask in live[1:]:      # in the background: a slow shop must not hold up the haggle
         if task["status"]["state"] == "TASK_STATE_INPUT_REQUIRED":
             threading.Thread(target=buyer.walk_away, args=(rpc_url, task["id"], "bought elsewhere"),
@@ -710,6 +744,10 @@ def main():
         if i > 0:                       # the first shop did not deal: open the next one again while time is left
             if time.time() - started > DEADLINE - NEXT_SHOP_SECS:
                 break
+            if QUIT_OVER_CAP and order.get("kind") == "goods" and over_cap((c, rpc_url, task, ask)):
+                rec.setdefault("shop_ends", []).append(
+                    f"{c['shop']}: first quote {ask} above our cap {c['cap']}, not haggled")
+                continue
             rpc_url, task, ask = open_talk(c, c["url"], need_h)
             if task is None:
                 rec.setdefault("shop_ends", []).append(f"{c['shop']}: could not open the talk again")
