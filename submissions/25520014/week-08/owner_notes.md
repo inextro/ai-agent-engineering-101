@@ -487,6 +487,23 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   B deals without a warranty were paid (C: 0 of 57, so C keeps it). The forum playbook should say A carries a
   warranty, B none, C on request. This is a 2 h test judged by the ledger (B settled per hour, refunds, net per
   hour, share): do not propose bringing the B warranty back before the owner's reading at about 21:15.
+- 11-10 19:50 (owner) goods are priced from the market's price for the SKU and grade, not from the unit's cost
+  (`seller.MKT_PRICING`): an A's floor is 0.98 x that price whatever the unit cost (never under 0.85 x cost) and its
+  ask 1.04 x; B and C floors and asks are only raised to those. Why: the market draws an A's cost anywhere in
+  0.55-0.75 of list while buyers pay about 0.706 whatever it cost; 61 h to 11-10 13:00 A that cost 0.55-0.59 sold at
+  0.654 in 0.9 h (+62k each) and A that cost 0.71-0.75 waited 7.1 h and sold at 0.691 (-72k each), A in all -10M;
+  our A sold at 0.954 of other shops' median for the same SKU, theirs at 1.00-1.13. Expect fewer goods sales
+  (backtest on 13,408 talks: about 30% fewer, about +2M an hour) and a lower goods share: that is the price of it,
+  not a fault. min_margin no longer sets an A's floor while the market has a price for it, so do not change
+  min_margin, c_discount or the goods arm to win the share back, and do not tell the seller to go cheaper; judge
+  this by book per hour, not by share, and leave the numbers to the owner's reading at about 22:00.
+  The earlier grade figures in these notes (A earns, B and C lose on the warranty) used the supply lot's average
+  cost and were wrong: with each unit's own cost A -10.0M, B +50.6M, C with a warranty -6.6M, C without +27.1M.
+- 11-10 19:50 (owner) restock: the goods stock follows our sales (`restock.STOCK_TARGET`): past 5 h of our goods
+  sales at cost, a window buys at most 0.7 of what we sold since the last one. Cash was 20M against 756M of stock
+  (97% of book, 9.3 h of sales; yms979 34%, seochanit 2%). A dear A counts as stock again
+  (`restock.UW_A_UNCOUNTED` off). Expect the stock to fall toward about 340M over a day and cash to rise; fewer
+  purchases are intended.
 
 ## buyer
 
