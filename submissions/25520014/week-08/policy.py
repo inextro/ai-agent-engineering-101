@@ -51,7 +51,10 @@ FLAGS = {
 # 11-10 17:35 (owner): undone. In 1.7 h after the deploy the ledger settled 0 of the 57 C deals in our log (74 of 94
 # in the 2 h before) and 21 of 29 B: a buyer does not take the receipt of a C without a warranty (the order's accept
 # terms). Goods share 18-21% -> 11.5%, Book 808.3M -> 793.7M. A "deal" in negotiations.jsonl is not a settlement.
-OWNER_OFF = ()
+# 11-10 19:15 (owner): B only. 56.5 h to 11-10 08:30 from the ledger: B with a warranty 1,504 sold, margin 88.1M,
+# refunds 122.3M (-34.2M); other shops sold 2,717 B without one at 0.650 of list against 0.647 with; in the 14:40-17:35
+# test 37 of our 41 B deals without a warranty settled. C keeps its warranty (0 of 57 settled without).
+OWNER_OFF = ("warranty_B",)
 BANKRUPT_LINE = 500_000        # agent.md; inventory.json's bankrupt_line wins when present
 ARMS = (0.70, 0.80, 0.90, 1.00) # opening ask as a share of the list price; the bandit picks one per negotiation
 # Goods open at the floor x (1 + arm), at most the list price (owner, 11-05 00:30). With list x ARMS, the floor (cost

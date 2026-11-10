@@ -480,6 +480,14 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   is still open; the owner is testing a C floor that carries the break rate. Shop numbers of 14:35-17:35 are from
   the failed setting, do not read a trend from them.
 
+- 11-10 19:15 (owner) no warranty on goods B, whoever asks (`policy.OWNER_OFF = ("warranty_B",)`); A and C are as
+  policy.json says. You cannot switch warranty_B: the change is dropped. Why B alone: 56.5 h to 11-10 08:30 from
+  the ledger, B with a warranty 1,504 sold, margin 88.1M, refunds 122.3M (-34.2M); other shops sold 2,717 B
+  without a warranty at the same price (0.650 of list against 0.647 with); in the 14:40-17:35 test 37 of our 41
+  B deals without a warranty were paid (C: 0 of 57, so C keeps it). The forum playbook should say A carries a
+  warranty, B none, C on request. This is a 2 h test judged by the ledger (B settled per hour, refunds, net per
+  hour, share): do not propose bringing the B warranty back before the owner's reading at about 21:15.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
