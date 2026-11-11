@@ -48,6 +48,7 @@ import base64
 import json
 import os
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -149,11 +150,23 @@ MIN_RAISE = 0.01    # share of the current price a buyer's new offer must add to
 CLAIM_AHEAD = 30    # seconds from the close to the checkout (the buyer's kit checks out on the receipt)
 
 
+_catalog = {"mtime": None, "v": {}}
+
+
 def catalog():
+    """catalog.json, parsed again only when the file changes (11-11 16 h). find_units asks for it twice per food unit
+    held, on the event loop: with 301 food units and a 1.3 MB catalog one opening without stated hours took 5.1 s
+    during which no talk was answered, and at three openings a minute the shop stood still for minutes (11:10 to
+    13:50 and 15:45 on: up to 52 talks waiting, quotes after 111-442 s, 1.6% of those talks paid). A failed read
+    keeps the last catalog. Nobody changes the returned dict."""
+    path = MARKET_DIR / "catalog.json"
     try:
-        return json.loads((MARKET_DIR / "catalog.json").read_text(encoding="utf-8"))
+        m = path.stat().st_mtime_ns
+        if m != _catalog["mtime"]:
+            _catalog["v"], _catalog["mtime"] = json.loads(path.read_text(encoding="utf-8")), m
     except (OSError, ValueError):
-        return {}
+        pass
+    return _catalog["v"]
 
 
 def grade_now(u, now=None):
@@ -770,28 +783,38 @@ STATS_TTL = 60
 _stats = {"at": 0.0, "v": None}
 
 
-def bandit_stats_cached():
-    if _stats["v"] is None or time.time() - _stats["at"] >= STATS_TTL:
-        _stats["v"], _stats["at"] = model.bandit_stats(), time.time()
+_stats_lock = threading.Lock()
+
+
+def bandit_stats_cached(refresh=False):
+    """The bandit counts a talk reads: the last ones, however old. Only the warm thread (refresh) counts again, and
+    one thread at a time (11-11 16 h): model.bandit_stats takes 6.8 s of CPU on a 40 MB negotiations file, and every
+    talk that opened while the cache was over STATS_TTL old counted for itself, each slowing the others."""
+    if _stats["v"] is None or (refresh and time.time() - _stats["at"] >= STATS_TTL):
+        with _stats_lock:
+            if _stats["v"] is None or (refresh and time.time() - _stats["at"] >= STATS_TTL):
+                _stats["v"], _stats["at"] = model.bandit_stats(), time.time()
     return _stats["v"]
 
 
 def warm():
-    """The slow per-talk reads, refreshed off the talks (a thread every 30 s); a failure keeps the last values."""
-    for f in (refresh_break_rates, clearance.table, bandit_stats_cached):
+    """The slow per-talk reads, refreshed off the talks (a thread every 30 s); a failure keeps the last values.
+    Talks never rebuild them once they exist (11-11 16 h): they read what this thread left."""
+    for name, f in (("refresh_break_rates", lambda: refresh_break_rates(True)), ("clearance.table", lambda: clearance.table(True)),
+                    ("bandit_stats_cached", lambda: bandit_stats_cached(True))):
         try:
             f()
         except Exception as e:
-            log(f"[warm] {f.__name__}: {type(e).__name__}: {str(e)[:160]}")
+            log(f"[warm] {name}: {type(e).__name__}: {str(e)[:160]}")
 
 
 BREAK = dict(model.BREAK_PRIOR)   # refreshed from model.py at most every 10 minutes
 _break_at = 0
 
 
-def refresh_break_rates():
+def refresh_break_rates(warm=False):
     global _break_at
-    if time.time() - _break_at < 600:
+    if time.time() - _break_at < 600 or (_break_at and not warm):   # a talk never pays for the rebuild (8.5 s)
         return
     _break_at = time.time()
     try:
@@ -1172,5 +1195,6 @@ if __name__ == "__main__":
                 warm()
                 time.sleep(30)
         threading.Thread(target=warm_loop, name="warm", daemon=True).start()
+    clearance.BACKGROUND = True        # talks read the table the warm thread keeps; they never rebuild it
     watch_rules()
     uvicorn.run(build_app(args.port), host="127.0.0.1", port=args.port, log_level="warning")

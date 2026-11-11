@@ -34,6 +34,7 @@ The table is rebuilt from the collector's ledger at most every REFRESH seconds a
 for the managers and the owner.
 """
 import json
+import threading
 import time
 
 import model
@@ -119,10 +120,20 @@ def build(now=None):
     return out
 
 
-def table():
+_lock = threading.Lock()
+BACKGROUND = False   # the seller sets it (11-11 16 h): once there is a table only table(True), its warm thread, rebuilds
+                     # it. A rebuild takes 2.7 s; stale() and market_ratio() call table() on the seller's event loop,
+                     # and every talk open at the 10 minute mark rebuilt it for itself.
+
+
+def table(rebuild=False):
     global _table, _built
     now = time.time()
-    if now - _built >= REFRESH:
+    if now - _built < REFRESH or (BACKGROUND and _built and not rebuild):
+        return _table
+    with _lock:
+        if now - _built < REFRESH:         # rebuilt by another thread while this one waited
+            return _table
         try:
             _table = build(now)
             PATH.write_text(json.dumps({"ts": now, "fix_ts": FIX_TS, "min_rate": MIN_RATE, "max_rate": MAX_RATE, "ask_under": ASK_UNDER,

@@ -520,6 +520,15 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   2,263 A talks: +0.97M -> +1.93M an hour after refunds, A revenue 27.7M -> 33.6M. Expect: more A deals just under the
   market, some dear A staying in stock, share up a little. Judge by book per hour (was +2.4M) six hours on, not share.
 
+- 11-11 16:06 (owner) seller: a speed fix, no price or haggling rule changed. The shop stood still for minutes at a
+  time today (11:10 to 13:50, again 15:45 to 15:58): buyers' first messages waited 111-442 s for a quote, up to 52
+  at once, and 1.6% of those talks were paid (21% when the quote came within 10 s). Cause: every opening read the
+  1.3 MB catalog twice per food unit held (301), 5.1 s during which no talk was answered. Now the catalog is read
+  once per change, and the bandit counts, clearance table and break rates are rebuilt only by the background thread
+  (a talk reads the last ones). So talks, deals and revenue between 11 h and 16 h today are low for this reason, not
+  because of the 11:13 prices: do not read that stretch as the effect of `MKT_HOLD_GUARD` or `mkt_floor` 0.95. Judge
+  the 11:13 change on the hours after 16:10.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
