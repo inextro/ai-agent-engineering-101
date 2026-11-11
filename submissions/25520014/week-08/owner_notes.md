@@ -511,6 +511,15 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   all the time; our sales of them 55.8 -> 42.4 an hour while other shops' stayed 439 -> 436), so the fall in sales
   is the price, not the shelf.
 
+- 11-11 11:13 (owner: profit, not revenue) seller: a goods A is no longer sold for less than keeping it is worth
+  (`seller.MKT_HOLD_GUARD`): its floor is the higher of 0.95 x the market's price for its SKU (`MKT_FLOOR`, was 0.98)
+  and cost x (1 - 0.01 x days left) plus the expected warranty refund (Book counts an unsold unit at cost, storage is
+  1% a day). The cheapest A of a SKU is offered first. B and C floors stay at 0.98 x their market price. restock
+  leaves the A that this keeps (floor over the market's price: 179 units, 123M) out of the stock target
+  (`STOCK_SKIP_KEPT`). Why: at 0.98 the A that cost 0.98 x market or more sold 9.7 an hour at -0.59M; replay of
+  2,263 A talks: +0.97M -> +1.93M an hour after refunds, A revenue 27.7M -> 33.6M. Expect: more A deals just under the
+  market, some dear A staying in stock, share up a little. Judge by book per hour (was +2.4M) six hours on, not share.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
