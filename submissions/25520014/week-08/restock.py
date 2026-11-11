@@ -136,6 +136,31 @@ STOCK_RATE_H = 6
 STOCK_REFILL = 0.7
 
 
+# 11-11 (owner): seller.MKT_HOLD_GUARD keeps an A whose floor (what holding it is worth plus the warranty refund) is
+# over the market's price for its SKU; such a unit does not sell, so it is not stock that follows our sales. Counted,
+# the stock would never come down to the target and every window would buy STOCK_REFILL of the last one's sales (the
+# 11-07 loop the other way round). The per-SKU counts (candidates) still count it: UW_A_UNCOUNTED stays off.
+STOCK_SKIP_KEPT = True
+
+
+def kept_a(inv, est, now):
+    """The ids of the goods A units seller.MKT_HOLD_GUARD keeps: floor over the market's A price for the SKU."""
+    import clearance
+    try:
+        mkt = model.market_grade_prices(getattr(est, "db", None), now, est.cat or None)
+    except Exception as e:
+        print(f"[restock] market grade prices unavailable: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
+        return set()
+    share = clearance.uw_floor_cost(now) / (1 - est.break_rate.get("A", 0.0))
+    out = set()
+    for u in inv.get("units", []):
+        m = (mkt.get(u.get("sku")) or {}).get("A")
+        if (u.get("kind", "goods") == "goods" and u.get("grade") == "A" and m and u.get("list_price")
+                and (u.get("cost") or 0) * share > m * u["list_price"]):
+            out.add(u.get("unit"))
+    return out
+
+
 def stock_room(inv, est, now, every_min, runs=1.0):
     """(the most this run may spend under STOCK_TARGET or None, goods stock at cost, our goods sales per hour).
     runs: restock runs in a window (the window's allowance is split among them)."""
@@ -147,8 +172,9 @@ def stock_room(inv, est, now, every_min, runs=1.0):
         if d.get("shop") in ours and (cat.get(model.sku_of(d)) or {}).get("kind", "goods") == "goods":
             sold += model.amount_of(d) or 0
     rate = sold / STOCK_RATE_H
+    kept = kept_a(inv, est, now) if STOCK_SKIP_KEPT else set()
     stock = sum(u.get("cost") or 0 for u in inv.get("units", [])
-                if u.get("kind", "goods") == "goods" and u.get("grade") != "expired")
+                if u.get("kind", "goods") == "goods" and u.get("grade") != "expired" and u.get("unit") not in kept)
     sold_w = rate * every_min / 60 / runs               # what a run's share of a window sells
     if stock <= STOCK_HOURS * rate:
         # 11-10 22 h: under the target this returned None (all the cash above the reserve again), so the stock

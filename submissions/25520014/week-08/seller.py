@@ -331,7 +331,9 @@ def find_units(text, taken):
         named = [u for u in units if (u.get("category") or "").split(">")[-1].lower() in want]
     by_grade = {}
     now = time.time()                    # a goods unit held clearance.STALE_H hours goes first (11-04 16:50)
-    for u in sorted(named, key=lambda u: (u.get("expires_at") or 0, not clearance.stale(u, now),
+    # an A is offered cheapest first whatever its age (MKT_HOLD_GUARD): a dear one has a floor over the market's price
+    first = lambda u: not clearance.stale(u, now) or (MKT_HOLD_GUARD and MKT_PRICING and u.get("grade") == "A")
+    for u in sorted(named, key=lambda u: (u.get("expires_at") or 0, first(u),
                                           u["cost"] if u.get("kind") == "goods" else 0, u.get("supplied_at") or 0)):
         by_grade.setdefault(u["grade"], u)
     for g, u in by_grade.items():
@@ -549,9 +551,28 @@ STAR_CAP = 0.695
 # The two shares are policy numbers (mkt_floor, mkt_ask; policy.OWNER_FIXED holds them for now); these are the
 # values when a policy has none. A talk's log line carries `mkt`, the market's price it was priced from.
 MKT_PRICING = True
-MKT_FLOOR = 0.98
+MKT_FLOOR = 0.95
 MKT_ASK = 1.04
 MKT_COST_GUARD = 0.85
+# 11-11 (owner: profit, not revenue): an A is not sold for less than keeping it is worth. Book counts an unsold unit
+# at its cost and it pays 1% of that a day in storage (rules_shop.md), so kept to the end it is worth
+# cost x (1 - 0.01 x days left) (clearance.uw_floor_cost); the floor is that plus the refund the warranty is expected
+# to pay, and MKT_FLOOR x m where that is higher. 19:55 to 11-11 10 h, 2,263 A talks replayed on the buyers' own offers
+# (~/wk8-test/p1.py, p2.py, p3.py): the floor at 0.98 m sold 8.1 A an hour under cost (cost 0.98 m and over: 9.7
+# deals an hour, -0.59M) and made +0.97M an hour after refunds; lowering it alone gains nothing (0.95 m +0.03M, 0.92 m
+# -0.78M: more deals under cost, and B/C sales turned into A ones). With this guard 0.95 m makes +1.93M (40.8 deals,
+# revenue 27.7 -> 33.6M an hour) and +1.27M an hour more than now counting what the kept units are still worth; a
+# guard at cost + refund +2.27M but leaves every unit over the market unsold. The cheapest A of a SKU is offered
+# first (find_units), not the one held longest, so a dear unit waits behind the ones that sell.
+MKT_HOLD_GUARD = True
+MKT_FLOOR_BC = 0.98      # what a B's or C's floor is raised to, as a share of the market's price for its grade
+
+
+def hold_floor(cost, warranty, now=None):
+    """The lowest price an A may go at under MKT_HOLD_GUARD: what keeping it to the round's end is worth (its cost
+    less the storage still to pay) plus the refund its warranty is expected to pay at that price."""
+    keep = cost * clearance.uw_floor_cost(now or time.time())
+    return keep / (1 - (BREAK.get("A", 0.0) if warranty else 0.0))
 
 
 def option(u, p, arm, wants_warranty=True, capped=False):
@@ -590,10 +611,14 @@ def option(u, p, arm, wants_warranty=True, capped=False):
         mfloor = round(p.get("mkt_floor", MKT_FLOOR) * mp)
         mask = max(p.get("mkt_ask", MKT_ASK), p.get("mkt_floor", MKT_FLOOR)) * mp
         if u.get("grade") == "A":
-            floor = max(mfloor, round(MKT_COST_GUARD * (u.get("_pool_cost") or u["cost"])))
+            cost = u.get("_pool_cost") or u["cost"]
+            guard = MKT_COST_GUARD * cost
+            if MKT_HOLD_GUARD:
+                guard = max(guard, hold_floor(cost, warranty))
+            floor = max(mfloor, round(guard))
             ask = min(u["list_price"], mask)
         else:
-            floor = max(floor, mfloor)
+            floor = max(floor, round(MKT_FLOOR_BC * mp))     # B and C stay where they were (not replayed)
             ask = max(ask, min(u["list_price"], mask))
     cap = None
     if capped and u.get("list_price"):
