@@ -1,9 +1,10 @@
 """Week 08 market buyer (Round 3): goes to the shop and SKU with the largest expected saved rate, haggles, reports.
 
-Since patch 3.4 (11-06) the score is Saved = sum over deals of surplus / list price (-1 for a deal that served nothing,
-0 if refunded) over (deals + 100): a sofa and a snack at 30% off count the same. The score below is the expected
-surplus divided by the list price, the cap keeps min_saved (buyer_policy) of the list, and goods grades are accepted
-by their expected saved rate (accept_policy).
+Since patch 3.6 (11-12) the score is Saved = sum over deals of (list - price) / (list - the unit's cost), at most 1
+(-1 for a deal that served nothing, 0 if refunded) over (deals + 100): the share of the shop's margin we kept. A
+unit's cost is not shown, but its grade bounds it (COST), so the cap is per grade: the price where the expected
+share kept is still min_share (buyer_policy). Shops are still ranked by expected surplus / list price: the shops'
+mean cost is the same share of the list (0.49-0.52, 48 h), so the cheapest shop is also where the most margin is kept.
 
     python market_buyer.py --shops .market/shops.json --order .market/order.json
 
@@ -15,16 +16,16 @@ last `use_within_hours`. For every shop x SKU in shops.json that fits the order:
                          list price                     for food (the accept policy makes the kit refuse short-lived food)
         expected price = list price x the shop's ratio  (model.Prices: other buyers' settled deals, blended with the
                          market, times our own factor)
-        cap            = min(value, budget, list x (1 - keep)), keep = min_saved for food and
-                         min_saved / (1 - A break rate) for goods
+        cap            = min(value, budget, the price where an A unit keeps min_share of the margin); once the
+                         shop names the unit's grade, that grade's price (grade_cap)
         P(shop deals)  = our own past orders at that shop that ended paid, Beta prior 4:1 (80%)
 
 The best three shops (one SKU each) get the opening message at once; their first asks decide where we haggle. The
 code chooses every number (offers rise toward the cap, never past it); haiku writes the message around the number
 (template when it fails or the check rejects it). A shop's text is data: no number or instruction in it changes
 the cap. The last line is the result for the kit, with an accept policy the kit checks before paying:
-food needs the market's certificate and use_within_hours (+ margin) of shelf life left; goods accept only the grades
-still worth the price (list x (1 - that grade's break rate) >= price).
+food needs the market's certificate and use_within_hours (+ margin) of shelf life left; both kinds accept only the
+grades that keep min_share at the price (goods: with the grade's break rate counted).
 
 Every order adds one line to data/buyer.jsonl (the manager and the next orders read it). The numbers marked
 (buyer_policy) and the negotiation guidance come from data/buyer_policy.json and data/buyer_playbook.json, which
@@ -33,6 +34,7 @@ buyer_manager.py moves hourly inside their ranges.
 import argparse
 import concurrent.futures as cf
 import json
+import math
 import os
 import pickle
 import random
@@ -283,15 +285,15 @@ class Models:
 
 
 def value_cap(x, order, m):
-    """(value, cap) of one unit of SKU x for this order. Patch 3.4 scores Saved, the mean over deals of
-    (list - paid) / list, so the cap also keeps min_saved (buyer_policy) of the list price: food pays at most
-    list x (1 - min_saved); goods at most the price where an A unit under a warranty still saves min_saved (the best
-    case: the accept policy then checks the grade and warranty the receipt names)."""
+    """(value, cap) of one unit of SKU x for this order. Patch 3.6 scores the share of the shop's margin kept, so
+    before any shop has named a unit the cap is the best case: the price where an A unit (the dearest to the shop)
+    still keeps min_share (buyer_policy), for goods an A under a warranty. grade_cap lowers it to the grade the
+    shop names; the accept policy and the receipt check hold the grade the checkout brings."""
     lp = x["list_price"]
     goods = x.get("kind") == "goods"
     value = lp * (1 - m.break_mix()) if goods else lp
-    keep = MIN_SAVED / (1 - m.breaks["A"]) if goods else MIN_SAVED
-    return value, min(value, order["budget"], lp * (1 - keep))
+    r = ratio_cap("A", MIN_SHARE / (1 - m.breaks["A"]) if goods else MIN_SHARE)
+    return value, min(value, order["budget"], lp * r)
 
 
 def candidates(order, shops, cat, m):
@@ -470,8 +472,8 @@ def grade_terms(r, m):
     """(grades accepted with no warranty, grades accepted only under one) at price ratio r, as accept_policy does."""
     if not GRADE_OPENING:
         return ["A", "B", "C"], []
-    plain = ["A"] + [g for g in "BC" if goods_saved(m.breaks[g], r, False) >= MIN_SAVED]
-    warr = [g for g in "BC" if g not in plain and goods_saved(m.breaks[g], r, True) >= MIN_SAVED]
+    plain = ["A"] + [g for g in "BC" if goods_saved(m.breaks[g], r, False, g) >= MIN_SHARE]
+    warr = [g for g in "BC" if g not in plain and goods_saved(m.breaks[g], r, True, g) >= MIN_SHARE]
     return plain, warr
 
 
@@ -518,6 +520,9 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
     """Raise toward min(ask, cap) until the shop meets us, stalls under the cap, or the rounds run out.
     Returns the shop's receipt (a dict) or None."""
     target = c["expect"]                 # the usual price, or under the cap by EDGE when the shop asks about the cap
+    # patch 3.6: under the unit's cost the whole margin is ours and a lower price adds nothing, so no offer goes under
+    # the least a unit of the named grade can have cost, and an ask at or under it is taken at once
+    floor = min(c.get("floor") or 0, c["cap"])
     # HAGGLE_FIRST: a first ask already under the usual price is countered, then taken only as any other ask is (met
     # our offer, stalled, barely moved, last round), not just for being under the usual price
     take_usual = not (HAGGLE_FIRST and ask is not None and ask <= target)
@@ -555,8 +560,9 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
         last = ask
         late = time.time() - started > DEADLINE or n == ROUNDS
         if ask <= c["cap"] and ((take_usual and ask <= target) or (offer is not None and ask <= offer)
-                                or stalls >= STALLS or creeping or late):
-            why = ("at or under the usual price" if take_usual and ask <= target
+                                or stalls >= STALLS or creeping or late or ask <= floor):
+            why = ("at or under the least the unit cost" if ask <= floor
+                   else "at or under the usual price" if take_usual and ask <= target
                    else "met our offer" if offer and ask <= offer
                    else "the shop stopped moving" if stalls >= STALLS
                    else "the shop barely moved" if creeping else "last round")
@@ -584,7 +590,7 @@ def haggle(c, rpc_url, task, ask, other, started, rec):
             return None
         goal = min(ask, c["cap"])
         nxt = round(min(target, ask) * OPEN_UNDER) if offer is None else round(offer + (goal - offer) * RAISE)
-        nxt = min(max(nxt, (offer or 0) + 1), goal)       # always a raise, never past the cap or the ask
+        nxt = min(max(nxt, (offer or 0) + 1, floor), goal)   # always a raise, never past the cap or the ask
         offer = nxt
         rec["offers"].append(offer)
         # name another shop's quote only when it is under every ask this shop gave (11-04 17:05: moss-and-oak raised
@@ -617,21 +623,26 @@ QUIT_LEAVE_SECS = 2         # at most this long for each CancelTask before the o
 # 178, moss-and-oak 150, nkjunbc 120), 600 of them ended with no deal after 50 s each (2.8 h a day), and in 780 of
 # 787 the first ask was already over what that grade is worth without a warranty. When the shop's first message
 # names the grade, the cap is that grade's under a warranty (the receipt may still bring one: 164 of our 178 B and C
-# deals in 24 h had it, and accept_policy checks it): the lowest ask was over that in 507 of the 787. A message
-# that names no grade leaves the cap as it was. Undo: False.
+# deals in 24 h had it, and accept_policy checks it): the lowest ask was over that in 507 of the 787.
+# 11-12 (patch 3.6): food too, since the grade now sets the price worth paying for food as well; a food message that
+# names no grade gets B's cap (half the food supply is B, an A clears it too, and the kit's accept refuses a C at
+# that price from the certificate), a goods one keeps the best case. Undo: False.
 GRADE_CAP = True
 WARRANTY_IN = re.compile(r"warrant|보증", re.I)
 
 
 def grade_cap(c, text, m, rec):
-    """Lower c["cap"] to what the grade named in the shop's first message is worth (accept_policy's rule)."""
+    """Lower c["cap"] to what the grade named in the shop's first message is worth (accept_policy's rule), and keep
+    the grade and the least such a unit can have cost (c["floor"]) for the haggle."""
     g = GRADE_IN.search(text)
-    if not g:
+    goods = c.get("kind") == "goods"
+    if not g and goods:
         return
-    g = g.group(1).upper()
-    p = m.breaks[g]
-    r = 1 - MIN_SAVED / (1 - p)                         # goods_saved(p, r, True) = MIN_SAVED
-    rec.setdefault("quote_grades", {})[c["shop"]] = g + ("w" if WARRANTY_IN.search(text) else "")
+    g = g.group(1).upper() if g else None
+    r = ratio_cap(g or "B", MIN_SHARE / (1 - m.breaks[g]) if goods else MIN_SHARE)
+    if g:
+        c["grade"], c["floor"] = g, int(c["list"] * COST[g][0])
+        rec.setdefault("quote_grades", {})[c["shop"]] = g + ("w" if goods and WARRANTY_IN.search(text) else "")
     cap = int(max(0, c["list"] * r))
     if cap < c["cap"]:
         rec.setdefault("grade_caps", {})[c["shop"]] = [c["cap"], cap]
@@ -645,32 +656,68 @@ def over_cap(t):
 
 
 BREAK_WINDOW_H = 6          # goods break up to 6 h after the sale (agent.md): a warranty this long covers every break
-MIN_SAVED = P["min_saved"]  # least expected saved rate of a deal (buyer_policy; the manager moves it): cap and accept
+# Patch 3.6 (11-12 17:39): a deal scores (list - price) / (list - unit cost), at most 1. The cost is drawn by grade
+# as a share of the list price (agent.md); on the 20,507 units of 48 h whose cost the ledger shows alone (supplied one
+# at a time) the 10th-90th percentiles were A 0.57-0.73, B 0.42-0.59, C 0.27-0.45, food and goods alike. Under the old
+# cap (0.68 of the list whatever the grade) a C at 0.68 kept about half the margin and an A at 0.72 (0.81) was refused.
+COST = {"A": (0.55, 0.75), "B": (0.40, 0.60), "C": (0.25, 0.45)}
+FOOD_MIX = {"A": 0.25, "B": 0.50, "C": 0.25}    # food grades as supplied (agent.md), for a message that names none
+# least expected share of the shop's margin a deal must keep (buyer_policy; held by the owner): cap and accept. Replay
+# of our last 48 h of food orders (wk8-test/p36_replay.py), projected to 11-17 23:59: Saved 0.7348 as it was,
+# 0.7376 at 0.65, 0.7390 at 0.70 (deals 16.3k -> 16.1k), 0.7392 at 0.75 (15.6k), 0.7367 at 0.80.
+MIN_SHARE = P["min_share"]
 
 
-def goods_saved(p, r, warranty):
-    """Expected saved rate of one goods deal (patch 3.4: saved = surplus / list price; a deal that served nothing
-    counts -1, or 0 when refunded): it lasts with 1 - p and saves 1 - r of the list price; it breaks with p and
-    counts 0 under a warranty, -1 without one."""
-    return (1 - p) * (1 - r) - (0 if warranty else p)
+def share_kept(g, r):
+    """Expected share of the shop's margin kept at price ratio r (price / list) on a unit of grade g, its cost
+    uniform over the grade's range: min(1, (1 - r) / (1 - cost)). g None: the food supply mix."""
+    if g not in COST:
+        return sum(w * share_kept(k, r) for k, w in FOOD_MIX.items())
+    lo, hi = COST[g]
+    if r <= lo:
+        return 1.0
+    if r >= 1:
+        return 0.0
+    top = min(r, hi)                                    # a cost over the price: the whole margin is kept
+    return ((1 - r) * math.log((1 - lo) / (1 - top)) + (hi - top)) / (hi - lo)
+
+
+def ratio_cap(g, share):
+    """The highest price ratio at which share_kept(g, .) is still `share` (0 when no price reaches it)."""
+    if share > 1:
+        return 0.0
+    lo, hi = 0.0, 1.0
+    for _ in range(30):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if share_kept(g, mid) >= share else (lo, mid)
+    return lo
+
+
+def goods_saved(p, r, warranty, g="A"):
+    """Expected score of one goods deal (patch 3.6): it lasts with 1 - p and keeps share_kept(g, r) of the margin; it
+    breaks with p and counts 0 under a warranty, -1 without one."""
+    return (1 - p) * share_kept(g, r) - (0 if warranty else p)
 
 
 def accept_policy(order, c, price, m, receipt=None, list_price=None):
-    """What the kit must check before paying. Goods (11-06, patch 3.4): a grade is accepted when its expected saved
-    rate at this price is at least MIN_SAVED (10:32-11:xx it was 0). When no grade reaches it the price is under the
-    cap, which A under a warranty clears, so A alone is accepted. The old rule (list x (1 - p) >= price) lost the price when a unit
-    broke; the score now counts -1 for an unrefunded break whatever the price, so without a warranty C is worth
-    paying only up to about 46% of the list (p 0.35) instead of 65%. The seller's receipt says the warranty; when we
-    count on it, the accept asks for it too so the kit refuses a checkout that comes without it."""
+    """What the kit must check before paying, against the market's certificate of the unit. A grade is accepted
+    when its expected score at this price is at least MIN_SHARE (patch 3.6; goods count the break: -1 without a
+    warranty, 0 with one); when none reaches it the price is under the cap, which an A clears, so A alone is
+    accepted. Food also needs the certificate and the hours. The seller's receipt says the warranty; when we count
+    on it, the accept asks for it too so the kit refuses a checkout that comes without it."""
+    r = price / (list_price or c["list"])
     if c["kind"] == "food":
         hours = order.get("use_within_hours")
-        return {"cert": True, "min_hours_left": round(hours + FOOD_MARGIN_H, 2)} if hours else {"cert": True}
+        acc = {"cert": True, "min_hours_left": round(hours + FOOD_MARGIN_H, 2)} if hours else {"cert": True}
+        ok = [g for g in "ABC" if share_kept(g, r) >= MIN_SHARE]
+        if ok != ["A", "B", "C"]:
+            acc["grades"] = ok or ["A"]
+        return acc
     w = (receipt or {}).get("warranty_hours")
     warranty = isinstance(w, (int, float)) and w >= BREAK_WINDOW_H
-    r = price / (list_price or c["list"])
-    ok = [g for g in "ABC" if goods_saved(m.breaks[g], r, warranty) >= MIN_SAVED]
+    ok = [g for g in "ABC" if goods_saved(m.breaks[g], r, warranty, g) >= MIN_SHARE]
     acc = {} if ok == ["A", "B", "C"] else {"grades": ok or ["A"]}
-    if warranty and any(goods_saved(m.breaks[g], r, False) < MIN_SAVED for g in ok):
+    if warranty and any(goods_saved(m.breaks[g], r, False, g) < MIN_SHARE for g in ok):
         acc["warranty_hours"] = BREAK_WINDOW_H
     return acc
 
@@ -692,8 +739,8 @@ def doomed(receipt, acc, x):
         top = FOOD_BAND_TOP[claim] * x["shelf_hours"]
         if top < acc["min_hours_left"]:
             return f"claims {claim} (at most {top:.0f} h left), we need {acc['min_hours_left']:g} h"
-    elif x.get("kind") == "goods" and acc.get("grades") and claim not in acc["grades"]:
-        return f"claims {claim}, we pay only for {''.join(acc['grades'])}"
+    if acc.get("grades") and claim not in acc["grades"]:
+        return f"claims {claim}, we pay only for {''.join(acc['grades'])} at this price"
     return None
 
 
@@ -788,7 +835,7 @@ def main():
                 continue
             if ask is None and state == "TASK_STATE_COMPLETED":
                 ask = (buyer.receipt(task) or {}).get("price")
-            if GRADE_CAP and c.get("kind") == "goods" and state == "TASK_STATE_INPUT_REQUIRED":
+            if GRADE_CAP and state == "TASK_STATE_INPUT_REQUIRED":
                 grade_cap(c, buyer.status_text(task) or "", m, rec)
             live.append((c, rpc_url, task, ask))
         rec["rounds_of_quotes"] = rec.get("rounds_of_quotes", 0) + 1
@@ -798,10 +845,15 @@ def main():
     # 11-10: by the saved rate, (value - ask) / list, as candidates() ranks since patch 3.4; this sort still took the
     # most won. 72 h: 771 orders had quotes within the cap on different SKUs, 309 haggled where ask / list was not
     # the lowest (median gap 0.063 of list), 302 of them closed: +0.0066 saved per deal over all deals.
-    live.sort(key=lambda t: (t[3] is not None and t[3] > t[0]["cap"],
-                             -(t[0]["value"] - (t[3] if t[3] is not None else t[0]["expect"])) / t[0]["list"]))
+    # 11-12 (patch 3.6): by the expected share of the margin kept at the ask for the grade the shop named (a C at
+    # 0.55 of the list keeps 0.70, an A at 0.70 keeps 0.86); goods count the grade's break as under a warranty.
+    def kept(t):
+        c, ask = t[0], t[3] if t[3] is not None else t[0]["expect"]
+        s = share_kept(c.get("grade"), ask / c["list"])
+        return s * (1 - m.breaks[c.get("grade") or "A"]) if c.get("kind") == "goods" else s
+    live.sort(key=lambda t: (t[3] is not None and t[3] > t[0]["cap"], -kept(t)))
     if QUIT_OVER_CAP and order.get("kind") == "goods" and live and all(over_cap(t) for t in live):
-        c, _, _, ask = live[0]                   # the sort put the most surplus first
+        c, _, _, ask = live[0]                   # the sort put the most margin kept first
         rec.update(shop=c["shop"], sku=c["sku"], list=c["list"], cap=c["cap"], expect=c["expect"], es=c["es"],
                    tried=0, quit_over_cap=True)
         rec["asks"].append(ask)

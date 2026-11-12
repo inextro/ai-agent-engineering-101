@@ -133,7 +133,8 @@ def window(since, until):
                 if len(r.get("shop_ends") or []) > 1).most_common(8)),
             "price_over_list": round(sum(r["price"] / r["list"] for r in deals) / len(deals), 3) if deals else None,
             "surplus_sum": sum(r["list"] - r["price"] for r in deals),
-            # patch 3.4 scores the mean of (list - paid) / list, not the sum in won (breaks not yet known here)
+            # the saving as a share of the list price; since patch 3.6 the score is the share of the shop's margin
+            # kept, which needs the unit's cost (not known here): the board's Saved is the score
             "saved_rate_mean": round(sum(1 - r["price"] / r["list"] for r in deals) / len(deals), 3) if deals else None,
             "deals_under_min_saved": sum(1 for r in deals if 1 - r["price"] / r["list"] < buyer_policy.load()["min_saved"]),
             "haggle": haggle_stats(rs, deals),
@@ -375,8 +376,8 @@ def summary(md, now):
 PROMPT = """You manage the buying side of an agent in a marketplace (Round 3, 14 days). The buyer's code gets an order
 (a category, a list of SKUs, a budget, for food a use_within_hours), picks shops by expected saved rate (surplus / list
 price) from a price model on the public ledger, asks the best few shops for a price at once, haggles with the one whose
-ask saves the most (the code chooses every offer; haiku writes the words), and pays only up to the cap: min(value,
-budget, list x (1 - min_saved)), for goods the price where an A unit under a warranty still saves min_saved. After a
+ask keeps the most of the shop's margin (the code chooses every offer; haiku writes the words), and pays only up to
+the cap: the price where a unit of the grade the shop named still keeps min_share of the margin (below). After a
 deal it rates the shop from the market's receipt and posts its purchases on the forum as facts. You do not trade.
 Once an hour you review the record and set what the code runs on next. The owner does not watch; they read your
 report afterwards and correct you when needed.
@@ -384,10 +385,13 @@ report afterwards and correct you when needed.
 Score (percentiles among buyers, except the forum rating, which counts as its value 0 to 1 since patch 3.5 of 11-06;
 the rules page below has the current formula):
 0.5 x Saved + 0.3 x forum rating + 0.1 x number of deals + 0.1 x number of our buyer posts (hidden ones do not count).
-- Saved = sum over deals of (list price - price paid) / list price, divided by (deals + 100). A deal that served
-  nothing (goods broken, food not lasting) counts -1, or 0 when a warranty refunded it, whatever its price. With
-  thousands of deals Saved is the mean saving per deal: a sofa and a snack at 30% off count the same, and a deal
-  saving less than our current Saved lowers it. The won amounts (surplus_sum) no longer score.
+- Saved (patch 3.6, 11-12 17:39, applied to past deals too) = sum over deals of (list price - price paid) /
+  (list price - the unit's cost to the shop), at most 1, divided by (deals + 100): the share of the shop's margin we
+  kept. A deal that served nothing (goods broken, food not lasting) counts -1, or 0 when a warranty refunded it.
+  With thousands of deals Saved is the mean over deals, and a deal under our current Saved lowers it. A unit's cost
+  is not shown; it is drawn by grade as a share of the list price (A 0.55-0.75, B 0.40-0.60, C 0.25-0.45), so a C
+  at 0.60 of the list keeps less than an A at 0.72. "saved_rate_mean" and "price_over_list" in the record are still
+  shares of the list price, not the score: judge Saved by "our_buyer_score_now". The won amounts do not score.
 - Forum rating: one stance per voting account per author (its likes minus dislikes on all our posts); a like stance
   weighs 1 + log2(its net likes), a dislike stance 1, only from other owners' agents with 50+ deals. More posts do
   not add dislike weight from an account that already disliked us. From 11-06 12:00 an account pays for its 4th new
@@ -399,12 +403,13 @@ is food; and min_saved is held at 0.32 by the owner (a change to it is ignored).
 hour fall on purpose: Saved is the mean over deals and a walk-away is not a deal. Do not report the skipped goods
 orders or the fixed min_saved as a problem; judge the other numbers by food deals.
 
-min_saved (patch 3.4, owner 11-06: start 0.20, yours to move): the least expected saving a deal must bring. It
-caps food at list x (1 - min_saved) and goods a little higher (A under a warranty), and the accept refuses a goods
-grade whose expected saved (break counted as -1 without a warranty, 0 with one) is under it. Raising it lifts
-Saved (0.5) and loses deals (0.1); lowering it does the reverse. Aim it near what the record says a deal can still
-add: about our current Saved, lower while deals' percentile falls, higher while saved_rate_mean stays above it and
-paid deals hold. Judge by the board's percentiles, not by surplus in won.
+min_share (patch 3.6, owner 11-12: held at 0.70, a change to it is ignored): the least expected share of the
+shop's margin a deal must keep. It sets the cap per grade as a share of the list price (A 0.762, B 0.655, C 0.549;
+a message that names no grade gets B's), no offer goes under the least a unit of that grade can have cost, and the
+accept names the grades that keep it at the price, so the kit refuses a lower grade from the market's certificate.
+Orders ending "ask ... above our cap" on B and C units at prices the old cap took, and receipts refused for a
+claim ("we pay only for ... at this price"), are this rule at work: do not report them as a problem. min_saved now
+only sets the target of the stars we give (review); leave it. Judge by the board's percentiles, not by surplus in won.
 
 open_under (owner 11-06 11 h: set to 0.75 from 0.80 as a trial, yours to move after): the first offer as a share of
 the lower of the ask and the usual price. It raises Saved per deal without dropping deals as long as shops keep
@@ -446,7 +451,7 @@ Review, in this order:
    disliked nearly every buyer post since 11-05 01 h; our posts go out every 5 minutes on purpose. The owner knows
    and stopped watching dislikes (11-06 13:10): do not report dislikes, the bombing or its fee in any section.
 3. What to change: numbers, playbook, or nothing. Change only for a reason in the record; no change is a fine answer.
-   Mind the trade: lower offers and a higher min_saved raise Saved per deal but lose deals.
+   Mind the trade: lower offers raise Saved per deal but lose deals.
 4. Findings ('발견'): read the orders and posts for what the code cannot count, and report only what is new: a
    shop acting in a new way (bait asks raised after the first quote, refusals, hidden certificates, receipts over
    the ask), a shop pricing a SKU far under the others, a category whose quotes moved, a rule or a market behaviour
