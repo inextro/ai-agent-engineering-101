@@ -748,7 +748,13 @@ def doomed(receipt, acc, x):
 # walk-away is not a deal; goods deals average ~0.31 saved against food's ~0.40 and take 46 s an order against 28 s.
 # Replay of our last 48 h (wk8-test/ownmax.py, 170 h left): final Saved 0.309 -> 0.329 with this and min_saved 0.32
 # (buyer_policy.OWNER_FIXED), final deals 17.9k -> 15.9k. Off: False.
-SKIP_GOODS = True
+# 11-12 18:19 (owner): off. Patch 3.6 scores the share of the shop's margin kept, and by it the goods deals of the 48 h
+# before the skip (wk8-test/p36_goods.py) score as food does: goods 0.787 (1,336 deals, breaks counted; A under a
+# warranty 0.853 on 890, B under one 0.661, C 0.506) against food 0.778. The 0.31 was the discount off the list price:
+# an A at 0.69 of the list costs the shop 0.55-0.75. The grade caps keep 1,020 of the 1,336 at 0.842. A goods order
+# takes 39 s against the 20 s the market makes us wait after a skipped one: paid deals 34 -> ~43 an hour at the same
+# score, final Saved 0.742 -> ~0.748. On: True.
+SKIP_GOODS = False
 
 
 def main():

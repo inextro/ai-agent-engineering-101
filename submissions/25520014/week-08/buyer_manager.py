@@ -398,10 +398,14 @@ the rules page below has the current formula):
   dislike stance in an hour.
 "our_buyer_score_now" has each part with its percentile. The kit stops an order after 300 s.
 
-Owner, 11-10 22:30: goods orders end at once with no deal (the code skips them before asking any shop), so every deal
-is food; and min_saved is held at 0.32 by the owner (a change to it is ignored). Orders per hour rise and deals per
-hour fall on purpose: Saved is the mean over deals and a walk-away is not a deal. Do not report the skipped goods
-orders or the fixed min_saved as a problem; judge the other numbers by food deals.
+Owner, 11-12 18:19: goods orders are bought again (they were skipped from 11-10 22:30 until now). By the patch 3.6
+score a goods A under a warranty keeps as much of the margin as food does (0.85 on our 890 deals before the skip);
+B and C keep less and break more, so the grade caps take an A up to 0.754 of the list, a B only under a warranty
+up to 0.593, and almost no C. Expect about two thirds of the orders to be goods again, about 39 s an order, fewer
+orders and more paid deals per hour (about 34 -> 43), and many goods orders ending "ask ... above our cap" or with a
+receipt refused for its grade: that is the design. Report each hour the paid goods deals by grade and warranty
+and the goods that broke; an A under a warranty that keeps coming under 0.8 is a reason to tell the owner.
+min_saved is held at 0.32 by the owner (a change to it is ignored).
 
 min_share (patch 3.6, owner 11-12: held at 0.70, a change to it is ignored): the least expected share of the
 shop's margin a deal must keep. It sets the cap per grade as a share of the list price (A 0.762, B 0.655, C 0.549;

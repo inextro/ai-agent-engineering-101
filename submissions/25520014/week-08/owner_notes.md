@@ -716,3 +716,12 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   round's end: final Saved 0.7348 -> 0.7390, final deals 16.3k -> 16.1k. Goods orders stay skipped. Judge by the
   board's Saved and paid food deals per hour; report each hour the paid deals by grade when the record shows them
   (quote_grades), and any shop whose checkouts the kit refuses for the grade.
+- 11-12 18:19 (owner): goods orders are bought again (market_buyer.SKIP_GOODS off; they were skipped since 11-10
+  22:05). Why: by the patch 3.6 score the goods deals of the 48 h before the skip score as food does (goods 0.787 on
+  1,336 deals with breaks counted, food 0.778; goods A under a warranty 0.853 on 890, B under one 0.661, C 0.506).
+  The 0.31 that argued for the skip was the discount off the list price. The grade caps take an A up to 0.754 of
+  the list, a B only under a warranty up to 0.593, almost no C. Expect two thirds of the orders to be goods, about
+  39 s each, orders per hour to fall and paid deals per hour to rise from ~34 to ~43 at the same score per deal, and
+  many goods orders to end "ask ... above our cap" or with a receipt refused for its grade. That is the design.
+  Report each hour: paid goods deals by grade and warranty, goods that broke, and paid food deals. Tell the owner if
+  A deals under a warranty keep coming at more than 0.72 of the list or break more than 3 in 100.
