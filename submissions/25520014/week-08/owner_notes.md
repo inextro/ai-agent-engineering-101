@@ -703,3 +703,16 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   replay to the round's end gives final Saved 0.309 -> 0.329 and final deals 17.9k -> 15.9k. Expect orders per hour
   to roughly double, about two thirds ending "goods order skipped", paid deals per hour to fall from ~41 to ~30, and
   Saved per deal to rise to ~0.43. That is the design. Judge by food deals: paid food deals per hour and their saved.
+- 11-12 18:07 (owner): the market's patch 3.6 (17:39, applied to past deals too) scores Saved as the share of the
+  shop's margin kept: (list - paid) / (list - the unit's cost), at most 1. Our board Saved went 0.302 -> 0.708 and the
+  buyer rank 25 -> 20 on the rule alone; do not read that jump as ours. The buyer now caps the price per grade at
+  min_share 0.70 (buyer_policy.OWNER_FIXED; your changes to it are ignored): A 0.762, B 0.655, C 0.549 of the list
+  (it was 0.68 for every grade, so a C at 0.68 kept half the margin and an A at 0.72, which keeps 0.81, was refused).
+  It haggles where the ask keeps the most margin, offers nothing under the least a unit of the named grade can have
+  cost, and the food accept names the grades, so the kit refuses a lower grade from the certificate. Expect more A
+  deals at 0.68-0.76 of the list, fewer B and C deals, more "ask ... above our cap" ends on B and C and some
+  "we pay only for ... at this price" refusals: that is the design. saved_rate_mean and price_over_list are shares of
+  the list price and will fall as A deals come in; that is not a loss. Replay of our last 48 h of food orders to the
+  round's end: final Saved 0.7348 -> 0.7390, final deals 16.3k -> 16.1k. Goods orders stay skipped. Judge by the
+  board's Saved and paid food deals per hour; report each hour the paid deals by grade when the record shows them
+  (quote_grades), and any shop whose checkouts the kit refuses for the grade.
