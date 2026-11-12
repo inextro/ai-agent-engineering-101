@@ -141,6 +141,17 @@ STOCK_REFILL = 0.7
 # the stock would never come down to the target and every window would buy STOCK_REFILL of the last one's sales (the
 # 11-07 loop the other way round). The per-SKU counts (candidates) still count it: UW_A_UNCOUNTED stays off.
 STOCK_SKIP_KEPT = True
+# 11-12 (owner): the target is never under STOCK_MIN_SHARE of what we could hold (cash + the counted goods stock).
+# The target was made of our own sales alone, and our sales are held down by what is on the shelf: the quote stall of
+# 11-11 11-16 h cut them 38 -> 10M an hour, the target followed (190 -> 43M), every window bought 0.7 of the little
+# it sold, and it did not come back when the stall was fixed. To 11-12 10 h: goods bought 86-102M -> 20-36M per 6 h,
+# cash 20 -> 455M (57% of book), book flat at 788-792M. Not SKUs missing (93-97% of the market's goods volume was in
+# SKUs we held) but units that can sell: the share of the market's A volume for which we held an A costing no more
+# than the price paid fell 89% -> 45% (7.4 -> 2.2 such units per settle) while our share inside it was back at
+# 11-13%; for B the SKUs held fell 48% -> 19%. What was bought sold: 59-75% of a 6 h cohort's cost within 6 h, net
+# +9-10% of the cost sold (~/wk8-test/verify1112.py, verify2.py). 0.65 is where 11-11 06-10 h stood (counted stock
+# 510-566M, cash 227-285M, net +2.4M an hour, 76% of the A volume); it is a level, not a replayed optimum.
+STOCK_MIN_SHARE = 0.65
 
 
 def kept_a(inv, est, now):
@@ -176,11 +187,14 @@ def stock_room(inv, est, now, every_min, runs=1.0):
     stock = sum(u.get("cost") or 0 for u in inv.get("units", [])
                 if u.get("kind", "goods") == "goods" and u.get("grade") != "expired" and u.get("unit") not in kept)
     sold_w = rate * every_min / 60 / runs               # what a run's share of a window sells
-    if stock <= STOCK_HOURS * rate:
+    target = STOCK_HOURS * rate
+    if STOCK_MIN_SHARE:
+        target = max(target, STOCK_MIN_SHARE * ((inv.get("balance") or 0) + stock))
+    if stock <= target:
         # 11-10 22 h: under the target this returned None (all the cash above the reserve again), so the stock
         # would have jumped back past the target in one window once it got there; now the gap to the target plus
         # what the window sells
-        return STOCK_HOURS * rate - stock + sold_w, stock, rate
+        return target - stock + sold_w, stock, rate
     return STOCK_REFILL * sold_w, stock, rate
 # A goods SKU's demand is at least our sales of it per hour we held a sellable A (an A whose floor is under the market's
 # A price) over the last A_RATE_H hours (owner, 11-06 13 h). The in-stock hours of own_sku_rate count any grade, so a
