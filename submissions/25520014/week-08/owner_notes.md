@@ -725,3 +725,18 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   many goods orders to end "ask ... above our cap" or with a receipt refused for its grade. That is the design.
   Report each hour: paid goods deals by grade and warranty, goods that broke, and paid food deals. Tell the owner if
   A deals under a warranty keep coming at more than 0.72 of the list or break more than 3 in 100.
+- 11-13 01:09 (owner): two changes to lift the buyer's Saved, which enters the score as a percentile (one buyer
+  passed is +0.011 among students; seven buyers are projected to end within 0.011 of Saved above us).
+  (1) min_share 0.70 -> 0.75 (held by the owner): caps are now A 0.745, B 0.630, C 0.516 of the list (goods A about
+  0.736). Saved is a mean, so a deal under where it will end (about 0.78) lowers it; by the 430 deals of the 6.7 h
+  after 11-12 18:19 the final Saved is 0.7755 at 0.70 and 0.7784 at 0.75. Expect about 5 paid deals an hour fewer
+  (64 -> 59) at a higher score per deal; that is the design.
+  (2) A first-question refusal ("none of that in stock") now sends that (shop, SKU) last (2 in 6 h), and the whole
+  shop only when it was asked 6 times or more and refused half of them. Before, 3 refusals sent the whole shop last
+  for 6 h: psyoung82 and buzllightyear, the two largest shops, were last in 80-87% of our orders, and 448 of 453
+  goods orders without a deal never asked a large shop that listed the SKU. The list in the summary
+  (shops_skipped_now...) is short now (yms979, elm-street); data/buyer_avoid.json also names the pairs.
+  Unknown: whether those shops quote under our caps (psyoung82: 5% of 1,466 questions paid in 5 days, at the old
+  cap). Report each hour: paid goods deals and the share of goods orders paid (30% before), seconds per order,
+  deals paid at psyoung82, buzllightyear, seochanit, myeonggi, lee-sungsoo, and first-question refusals per hour.
+  Tell the owner if orders per hour fall under 125 (141 before) or the paid goods share does not rise.

@@ -25,16 +25,20 @@ NUMBERS = {
                                             # must bring; it sets the cap (food: list x (1 - this)) and the goods
                                             # accept. Saved is the mean over deals, so a deal under the mean lowers it.
                                             # Since patch 3.6 (11-12) only review.py reads it (the stars' target)
-    "min_share":      (0.70, 0.50, 0.90),   # patch 3.6 (11-12): least expected share of the shop's margin a deal must
+    "min_share":      (0.75, 0.50, 0.90),   # patch 3.6 (11-12): least expected share of the shop's margin a deal must
                                             # keep, (list - paid) / (list - unit cost); it sets the cap per grade
                                             # (market_buyer.ratio_cap: A 0.762, B 0.655, C 0.549 of the list at 0.70)
+                                            # 11-13: 0.75
 }   # the buyer's post interval is fixed in buyer_forum.POST_EVERY_S (11-04: every 5 min to the end; not the manager's)
 GUIDE_KEYS = ("negotiation", "forum")
 # Numbers the owner holds whatever buyer_policy.json or the manager says (load, clip). 11-10 22:30 (owner): with goods
 # orders skipped (market_buyer.SKIP_GOODS) the food floor is 0.32; replay of our last 48 h (wk8-test/ownmax.py) is flat
 # from 0.30 to 0.36 and falls past 0.40. Hand over: {}.
 # 11-12 (patch 3.6): min_share 0.70 from the replay of our last 48 h (wk8-test/p36_replay.py; see market_buyer.MIN_SHARE).
-OWNER_FIXED = {"min_saved": 0.32, "min_share": 0.70}
+# 11-13 (owner): 0.75. Saved is a mean, so a deal under where it will end (about 0.78) lowers it: by the 430 deals of the
+# 6.7 h after 11-12 18:19 the final Saved is 0.7755 at 0.70, 0.7784 at 0.75, 0.7782 at 0.78, 0.7719 at 0.85
+# (wk8-test/p36_room.py), and 0.003 is one rank where seven buyers end within 0.011 above us.
+OWNER_FIXED = {"min_saved": 0.32, "min_share": 0.75}
 
 
 def defaults():

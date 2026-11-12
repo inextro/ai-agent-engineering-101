@@ -77,6 +77,8 @@ FOOD_MARGIN_H = 0.5         # hours of shelf life asked on top of use_within_hou
 REFUSED = ("TASK_STATE_REJECTED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED")
 AVOID_H, AVOID_AFTER = 6, 3  # shops that turned us down this often in this many hours are skipped ...
 AVOID_RATE = 0.10           # ... unless at least this share of the orders we asked them about was paid
+AVOID_MIN_ASKED, AVOID_REFUSED = 6, 0.5   # 11-13: ... and only a shop asked this often that refused this share of it
+SKU_REFUSALS = 2            # first-question refusals of one (shop, SKU) in AVOID_H: that pair is asked last
 STOCK_FAILS = 2             # checkouts a shop refused for one SKU ("not in stock for this order", 409) in AVOID_H
 HOURS_SAID = re.compile(r"(\d+(?:\.\d+)?)\s*(?:h\b|hrs?\b|hours?\b|시간)", re.I)
 REPLY_MODEL, REPLY_EFFORT, REPLY_TIMEOUT = "haiku", "medium", 20
@@ -178,7 +180,14 @@ def avoid_list(now=None):
     first-question refusals (turned_down) in the last AVOID_H hours, and under AVOID_RATE of the orders we asked them
     about paid. Until 11-04 01:10 one paid deal let a shop off: bjeon01 was asked 129 times in 6 h, refused 50 and
     paid 3, and kept being asked first; jiseokkk (99 asked, 34 paid) stays. Written to data/buyer_avoid.json so the
-    buyer manager and the owner see it."""
+    buyer manager and the owner see it.
+
+    11-13 (owner): returns (shops, pairs). The refusals are nearly all "none of that in stock", about one SKU, yet 3
+    of them sent the whole shop last for 6 h: after goods orders came back (11-12 18:19) psyoung82 and buzllightyear,
+    the two largest shops of the market, were last in 80-87% of our orders (asked 21 and 8 times in 6 h), and 448 of
+    453 goods orders without a deal never asked a large shop that listed the SKU. Now a (shop, SKU) refused
+    SKU_REFUSALS times goes last (pairs), and the whole shop only when it was asked AVOID_MIN_ASKED times or more and
+    refused AVOID_REFUSED of them. Back to the old rule: AVOID_MIN_ASKED, AVOID_REFUSED = 0, 0 and SKU_REFUSALS = 10**9."""
     now = now or time.time()
     paid = set()
     try:
@@ -191,7 +200,7 @@ def avoid_list(now=None):
                 paid.add(x.get("order"))
     except OSError:
         pass
-    refused, asked, dealt = {}, {}, {}
+    refused, asked, dealt, by_sku = {}, {}, {}, {}
     for r in past_orders():
         if r.get("ts", 0) < now - AVOID_H * 3600:
             continue
@@ -201,15 +210,21 @@ def avoid_list(now=None):
             asked[shop] = asked.get(shop, 0) + 1
             if turned_down(r, shop):
                 refused[shop] = refused.get(shop, 0) + 1
+                sku = (r.get("quote_skus") or {}).get(shop)
+                if sku:
+                    by_sku[(shop, sku)] = by_sku.get((shop, sku), 0) + 1
     out = {s: n for s, n in refused.items()
-           if n >= AVOID_AFTER and dealt.get(s, 0) < AVOID_RATE * asked.get(s, n)}
+           if n >= AVOID_AFTER and dealt.get(s, 0) < AVOID_RATE * asked.get(s, n)
+           and asked.get(s, n) >= AVOID_MIN_ASKED and n >= AVOID_REFUSED * asked.get(s, n)}
+    pairs = {k for k, n in by_sku.items() if n >= SKU_REFUSALS and k[0] not in out}
     try:
         (policy.DATA / "buyer_avoid.json").write_text(json.dumps(
             {"ts": now, "hours": AVOID_H, "refusals": out, "asked": {k: asked.get(k) for k in out},
-             "paid": {k: dealt.get(k, 0) for k in out}}, ensure_ascii=False), encoding="utf-8")
+             "paid": {k: dealt.get(k, 0) for k in out},
+             "pairs": sorted(f"{a} {b}" for a, b in pairs)}, ensure_ascii=False), encoding="utf-8")
     except OSError:
         pass
-    return out
+    return out, pairs
 
 
 # 11-10 (owner: the buyer's throughput): every order built model.Prices (2.6 s: six days of settles) and the whole of
@@ -784,10 +799,10 @@ def main():
     timer.daemon = True                         # it must not keep the process alive after the result is printed
     timer.start()
     cands = [c for c in candidates(order, shops, cat, m) if c["es"] > 0]
-    avoid = avoid_list(started)
+    avoid, refused_pairs = avoid_list(started)
     # avoided shops go last, not out (owner, 11-04 01:25): they are asked only when every other shop has turned us
     # down and time is left, so a shop that holds the only units of a SKU can still sell them to us
-    bad = stock_fails(started)
+    bad = stock_fails(started) | refused_pairs
     later = {c["shop"] for c in cands if c["shop"] in avoid or (c["shop"], c["sku"]) in bad}
     if later:
         cands = [c for c in cands if c["shop"] not in later] + [c for c in cands if c["shop"] in later]

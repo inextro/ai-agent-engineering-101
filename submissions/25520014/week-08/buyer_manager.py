@@ -407,8 +407,8 @@ receipt refused for its grade: that is the design. Report each hour the paid goo
 and the goods that broke; an A under a warranty that keeps coming under 0.8 is a reason to tell the owner.
 min_saved is held at 0.32 by the owner (a change to it is ignored).
 
-min_share (patch 3.6, owner 11-12: held at 0.70, a change to it is ignored): the least expected share of the
-shop's margin a deal must keep. It sets the cap per grade as a share of the list price (A 0.762, B 0.655, C 0.549;
+min_share (patch 3.6, owner 11-13: held at 0.75, 0.70 until then; a change to it is ignored): the least expected share of the
+shop's margin a deal must keep. It sets the cap per grade as a share of the list price (A 0.745, B 0.630, C 0.516;
 a message that names no grade gets B's), no offer goes under the least a unit of that grade can have cost, and the
 accept names the grades that keep it at the price, so the kit refuses a lower grade from the market's certificate.
 Orders ending "ask ... above our cap" on B and C units at prices the old cap took, and receipts refused for a

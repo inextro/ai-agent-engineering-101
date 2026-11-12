@@ -5,7 +5,7 @@ most margin is kept, no offer under the least the unit can have cost, and the gr
     DATA_DIR=<scratch>/data MARKET_DIR=<scratch>/.market BUYER_LLM=0 python tests/buyer_share.py <scratch>
 
 A fake shop names a grade and an ask, comes down by a step to its floor, and closes when our offer reaches the floor.
-List price 20000, min_share 0.70: caps A 15236, B 13094, C 10972.
+List price 20000, min_share 0.75 (11-13; 0.70 before): caps A 14894, B 12601, C 10327.
 """
 import io
 import json
@@ -85,11 +85,11 @@ def check(label, ok, rec, result):
 good = True
 # 1. an A unit at 0.74 of the list: over the old cap (0.68 of the list), now a deal, and the accept names A alone
 rec, res = run({"a": {"grade": "A", "ask": 16000, "floor": 14800, "step": 400}})
-good &= check("A at 14800 closes", rec["end"] == "deal" and rec["price"] <= 15236 and res["accept"].get("grades") == ["A"]
+good &= check("A at 14800 closes", rec["end"] == "deal" and rec["price"] <= 14894 and res["accept"].get("grades") == ["A"]
               and min(rec["offers"]) >= 11000, rec, res)
-# 2. a C unit that stops at 0.60 of the list: under the old cap, now over C's (0.549)
+# 2. a C unit that stops at 0.60 of the list: under the old cap, now over C's (0.516)
 rec, res = run({"c": {"grade": "C", "ask": 13200, "floor": 12000, "step": 400}})
-good &= check("C at 12000 is refused", rec["end"].startswith("ask ") and not res.get("receipt") and rec["cap"] == 10972, rec, res)
+good &= check("C at 12000 is refused", rec["end"].startswith("ask ") and not res.get("receipt") and rec["cap"] == 10327, rec, res)
 # 3. a C asking 0.56 and an A asking 0.74: the A keeps more of the margin, so the haggle starts there
 rec, res = run({"c": {"grade": "C", "ask": 11200, "floor": 11000, "step": 100},
                 "a": {"grade": "A", "ask": 14800, "floor": 14000, "step": 400}})
@@ -101,6 +101,6 @@ good &= check("B under its least cost is taken at once", rec["end"] == "deal" an
 rec, res = run({"liar": {"grade": "B", "claim": "C", "ask": 13000, "floor": 12500, "step": 200}})
 good &= check("receipt claiming C at a B price is refused", not res.get("receipt") and "claims C" in str(rec.get("doomed")), rec, res)
 # 6. no grade in the message: B's cap, and the accept leaves C out at that price (the kit checks the certificate)
-rec, res = run({"mute": {"grade": None, "claim": None, "ask": 14000, "floor": 12800, "step": 400}})
-good &= check("no grade named: B's cap, accept A or B", rec["end"] == "deal" and rec["cap"] == 13094 and res["accept"].get("grades") == ["A", "B"], rec, res)
+rec, res = run({"mute": {"grade": None, "claim": None, "ask": 13400, "floor": 12400, "step": 400}})
+good &= check("no grade named: B's cap, accept A or B", rec["end"] == "deal" and rec["cap"] == 12601 and res["accept"].get("grades") == ["A", "B"], rec, res)
 print("ALL OK" if good else "FAILED")
