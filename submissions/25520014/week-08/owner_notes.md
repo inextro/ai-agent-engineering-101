@@ -529,6 +529,17 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   because of the 11:13 prices: do not read that stretch as the effect of `MKT_HOLD_GUARD` or `mkt_floor` 0.95. Judge
   the 11:13 change on the hours after 16:10.
 
+- 11-12 10:21 (owner) restock: the goods stock target is never under 0.65 of cash + the counted goods stock
+  (`restock.STOCK_MIN_SHARE`). The target was 5 h of our own goods sales, and our sales depend on the shelf: the
+  stall of 11-11 cut sales 38 -> 10M an hour, the target fell 190 -> 43M, each window bought 0.7 of the little it
+  sold, and it never came back. Goods bought fell 86-102M -> 20-36M per 6 h, cash rose to 455M (57% of book), book
+  stood at 788-792M from 11-11 16 h. The SKUs were on the shelf (93-97% of the market's goods volume) but not units
+  that sell: we held an A costing no more than the price paid for 89% -> 45% of the market's A volume, B SKUs held
+  48% -> 19%; inside what we could sell our share is 11-13% as before. Goods bought since 11-10 20 h made +9-10% of
+  the cost sold. Expect: goods buying up (43M the first run, then as the SKU caps allow), cash down toward 35% of
+  cash + stock, A and B margin back toward 11-11 morning (about +3M an hour together). Not fixed by this: the buyer
+  yms979, who paid for 39 of our 50 C sales (4.4M an hour), buys nothing here since 11-11 12 h.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
