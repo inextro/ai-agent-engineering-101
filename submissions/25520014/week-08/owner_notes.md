@@ -540,6 +540,37 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   cash + stock, A and B margin back toward 11-11 morning (about +3M an hour together). Not fixed by this: the buyer
   yms979, who paid for 39 of our 50 C sales (4.4M an hour), buys nothing here since 11-11 12 h.
 
+- 11-13 10:46 KST (owner): the round's end. Until now the floor slid to the cost over the last 24 h
+  (`liquidate_hours`) and restock stopped 6 h before the end; both came from the days the board scored cash. Under
+  book a sale at cost adds nothing, an unsold unit stays in the book at its cost, and a unit bought late pays 0.04%
+  of its cost an hour. Off (`policy.END_FLOOR_TO_COST = False`): the floor keeps `min_margin` to the end, restock
+  buys until the last hour (`LAST_HOURS_NO_RESTOCK`). Do not lower prices because the round is ending; moving
+  `liquidate_hours` does nothing now. Checked and left alone the same morning: a lower first ask on goods A
+  (1.04 -> 1.00 of the market's price) is worth -1.8M to +2.3M a day on 24 h of talks (`~/wk8-test/ask_replay.py`);
+  only 7% of the A talks we lose settle elsewhere between our floor and our ask, 66% settle nowhere.
+
+- 11-13 11:29 KST (owner): fair-furniture is the first priority. It is the largest goods buyer (650M a day) and
+  paid here twice in the round. Its first message is "I want to buy <SKU>. Please quote a price in credits."; it
+  bids min(0.90 x our first ask, 0.70 x list) and leaves unless the counter is well under the ask. Our A asked 0.73
+  of list, so it bid 0.655, under the floor. For this buyer only the ask is now at least 0.78 of list
+  (`seller.FAIR_ASK`) and its bid closes at once when it is at or over the floor (`FAIR_BUYER`, arm "fair_bid" in
+  the talks). It goes where its talks close (sergiobuilds: 2 deals -> 991 a day, 53% at exactly 0.70 of list), so
+  what counts is that every visit of it ends in a deal. Do not lower the ask for it, and do not undo this because
+  the ask looks high. Watch: talks with arm "fair_bid" per hour and how many close.
+
+- 11-13 13:28 KST (owner): two changes, both on purpose. (1) totato2203 and Q00 are served again (`seller.BLOCKED`
+  keeps only shaun0927's templates, which no longer come). totato2203-r3 has rated every shop 5.00 since 11-08 and
+  buys 240M of goods a day, much of it grade C without a warranty at about 0.51 of list; we were refusing 206 of
+  its buy attempts a day. Q00 rates 4.8-4.9 now and its mean here was already 1.00 over 7 deals, so it can only
+  rise, and each account weighs the same in the board's stars (50 deals at 5 stars: 4.394 -> 4.452). Watch
+  totato2203's stars at our shop (ledger `result`): if it goes back to 1 star, tell the owner; do not re-block by
+  yourself. Q00 gives 1 star with "forges receipts" to some shops: expected, it cannot lower its mean here.
+  (2) Goods caps x 3.0 (`restock.GOODS_CAP_X`, was 1.5). The profit is in B and C (B +23.4M a day, A +0.7M since
+  11-11 16:10; a talk makes +0.9k when we hold only A of the SKU, +17.8k with A and B, +35.6k with only B) and the
+  grade is drawn at supply, so more B needs more units. More goods bought per window (about 29M against 1M), more
+  A in stock and less idle cash are by design; book counts stock at cost. Watch: B and C sales a day (now 224 and
+  37) and the A stock at cost (now 283M).
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)

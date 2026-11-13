@@ -23,8 +23,8 @@ buyers' kits left 59% of our food C deals and 55% of goods C unpaid, none of foo
 Price:
   opening ask  = list price x the arm Thompson sampling picks (0.7/0.8/0.9/1.0, per kind, model.py), cut by
                  c_discount for grade C, never under the floor
-  floor        = cost x (1 + min_margin) + warranty premium (break rate of the grade x price), then lower in the
-                 last `liquidate_hours` (down to the cost, reached 6 hours before the end; never under it: since
+  floor        = cost x (1 + min_margin) + warranty premium (break rate of the grade x price), then (only with
+                 policy.END_FLOOR_TO_COST, off since 11-13) lower in the last `liquidate_hours` (down to the cost, reached 6 hours before the end; never under it: since
                  11-05 03:45 the board scores book, cash + cost of unsold units), and for food close to its date
                  (half the cost: it is thrown away at cost otherwise)
   clearance    = stock bought before the 11-03 23:55 demand fix, in a category other shops sell 1-10/h (clearance.py):
@@ -85,7 +85,12 @@ BLOCKED_LOG = policy.DATA / "blocked.jsonl"
 # its mean here goes 3.91 -> about 1.9 by 11-17 (-0.04 on the ranking). It bought 127M a day (24.5M margin), and
 # yms979's book grows faster than ours by more than that, so the book lead it protected is going anyway. Its two
 # templates were its alone in 48 h (269 + 16 of its 405 talks, 95% of its paid deals).
-BLOCKED = re.compile(r"Quote the total price\. Require a market certificate\.|\(buyer: q00\)|Certificate attached, please\."
+# 11-13 13 h (owner): totato2203 and Q00 are served again. totato2203-r3 has given 5.00 everywhere since 11-08 and
+# buys 240M of goods a day (825 C without a warranty in 48 h at 0.51 of list; we hold 268 C); we refused 206 of its
+# buy attempts a day. Q00 gives 4.8-4.9 now and its mean here is 1.00 over 7 deals, the least there is, so it can
+# only rise: 50 deals at 5 stars take our board mean 4.394 -> 4.452. Block totato2203 again if it returns to 1 star.
+# shaun0927 has not traded since 11-10; its templates stay.
+BLOCKED = re.compile(r"Certificate attached, please\."
                      r"|please ship a unit with at least [\d.]+ h of shelf life left, certificate attached\.", re.I)
 TURNS = policy.DATA / "turns.jsonl"         # every message and reply, for the manager's hourly review
 REPLY_MODEL, REPLY_EFFORT, REPLY_TIMEOUT = "haiku", "medium", 20
@@ -547,6 +552,24 @@ WANTS_WARRANTY = re.compile(r"warrant|guarantee|보증|보장", re.I)
 # have met the capped price, so more deals as well.
 STAR_BUYER = re.compile(r"\. Please include a \d+(?:\.\d+)?-hour warranty\.")
 STAR_CAP = 0.695
+# fair-furniture, the largest goods buyer (650M a day, 13% of the market's goods), has paid here twice in the round
+# (11-13, owner). Its first message is its own ("I want to buy <SKU>. Please quote a price in credits.", 73 talks
+# here, the 2 paid ones among them). It bids min(0.90 x our first ask, 0.70 x list) and leaves when the counter is
+# not about 2.5% under the ask: our A asks 0.73 of list, so it bid 0.655, under the floor, and we countered 0.5-2%
+# down (68 of 73 talks lost). It goes to shops where its talks close (dragonash, mjforge, 25620027, sergiobuilds in
+# turn: sergiobuilds went 2 deals -> 991 a day; 53% of its sales to it are at exactly 0.70 of list, the market's A
+# price). So for it: the ask is at least FAIR_ASK x list, which makes the bid 0.70 x list, and the talk is final
+# from the first reply, so that bid closes when it is at or over the floor. Other shops get 0.74-0.80 by countering;
+# the rule it accepts by is not known, so the sure close first.
+FAIR_BUYER = re.compile(r"Please quote a price in credits")
+FAIR_ASK = 0.78
+
+
+def fair_lift(o, steps):
+    """Option o for a FAIR_BUYER: asked at FAIR_ASK x list or more, final from the first reply."""
+    lp = o["unit"]["list_price"]
+    o["ask"] = max(o["ask"], min(lp, -int(-FAIR_ASK * lp // 1)))
+    o["step"] = steps
 
 
 # 11-10 (owner): goods are priced from the market, not from the unit's cost. The market draws an A's cost anywhere in
@@ -765,7 +788,7 @@ def floor_price(u, p, warranty, est_price):
     premium = BREAK.get(u.get("grade"), max(BREAK.values())) * est_price if warranty and not u.get("_no_premium") else 0
     floor = cost * (1 + p["min_margin"]) + premium
     left = policy.hours_left()
-    if left < p["liquidate_hours"]:       # toward the cost, never under it (book scoring, 11-05 03:45)
+    if policy.END_FLOOR_TO_COST and left < p["liquidate_hours"]:       # off since 11-13; toward the cost, never under it (book scoring, 11-05 03:45)
         span = p["liquidate_hours"] - policy.LAST_HOURS_BELOW_COST
         frac = max(0.0, (left - policy.LAST_HOURS_BELOW_COST) / span)
         floor = cost + (floor - cost) * frac
@@ -938,6 +961,7 @@ class Seller(AgentExecutor):
         # the whole negotiations file: in the thread, not on the event loop (11-05 01:40 review)
         wants_w = bool(WANTS_WARRANTY.search(text or ""))
         capped = kind == "goods" and bool(STAR_BUYER.search(text or ""))
+        fair = bool(FAIR_BUYER.search(text or ""))
         opts = {g: option(u, p, arm, wants_w, capped) for g, u in by_grade.items()}
         if len(opts) > 1:
             # one grade, chosen by the code: the best we hold, since buyers' kits refuse to pay for low grades
@@ -952,13 +976,16 @@ class Seller(AgentExecutor):
             g, alt = next(iter(opts)), None
         deal = self.open[task_id] = {"opts": opts, "cur": g, "alt": alt, "arm": arm,
                                      # a clearance price is not the arm's: the bandit must not learn from it
-                                     "log_arm": "clearance" if opts[g]["clearance"] else "star_cap" if capped else arm,
-                                     "capped": capped,
+                                     "log_arm": ("fair_bid" if fair else "clearance" if opts[g]["clearance"]
+                                                 else "star_cap" if capped else arm),
+                                     "capped": capped, "fair": fair,
                                      "steps": int(p["max_concessions"]), "lines": [], "t0": time.time(),
                                      "named": bool(NAMED_GRADE.search(text or "")), "wants_warranty": wants_w,
                                      "pv": p.get("version"), "bv": policy.load_playbook().get("version")}
         for k, o in opts.items():
-            if tight(o):
+            if fair:
+                fair_lift(o, deal["steps"])            # FAIR_BUYER: its bid closes when the floor allows
+            elif tight(o):
                 o["step"] = deal["steps"]              # TIGHT_GAP: final from the first reply
             u = o["unit"]
             log(f"[task {task_id[:8]}] {k} {u['sku']} {u.get('grade')} cost {u['cost']} list "
@@ -1019,8 +1046,8 @@ class Seller(AgentExecutor):
             if key == alt or not opening:    # chosen, or not asked for on the first reply: the talk has one unit
                 opts = deal["opts"] = {key: opts[key]}
                 deal["alt"] = None
-                deal["log_arm"] = ("clearance" if opts[key]["clearance"] else "star_cap" if deal.get("capped")
-                                   else deal["arm"])
+                deal["log_arm"] = ("fair_bid" if deal.get("fair") else "clearance" if opts[key]["clearance"]
+                                   else "star_cap" if deal.get("capped") else deal["arm"])
             u, m = opts[key]["unit"], moves[key]
             sit, tmpl = situation(m), template(u, m)
             if key == alt and not m["close"]:      # the first price of the lower unit, not a held one

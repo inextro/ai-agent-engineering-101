@@ -209,7 +209,12 @@ A_RATES = {}
 # with the A-held rates): now 706M revenue / book +111.6M / end stock 98M; A_RATE 753M / +115.8M / 109M; A_RATE and
 # x1.5 818M / +116.0M / 189M; A_RATE and x2 852M / +118.2M / 246M. With today's estimate as the truth x2 gave
 # +61M revenue at the same book. 1.5 for now (owner).
-GOODS_CAP_X = 1.5
+# 11-13 13 h (owner): 3.0. Since 11-11 16:10 a goods talk makes +0.9k when we hold only A of the SKU (2,911 talks a
+# day), +17.8k with A and B, +35.6k with only B (~/wk8-test/bavail.py): the profit is B and C (B +23.4M a day, A +0.7M)
+# and the grade is drawn at supply (60/24/16), so more B means more units. At 1.5 a window bought 7 goods units
+# (1.1M) with 457M of cash idle; dry run on the same state (~/wk8-test/cap_dry.py): x2 15 units 7.3M, x3 41 units
+# 29.1M, x5 94 units 61.7M. What the extra units sell for is not replayed: judge by B and C sales and the A stock.
+GOODS_CAP_X = 3.0
 GRADE_CAP = False                               # a goods SKU's B and C count only up to their share of its cap
 GRADE_SHARE_H = 6                               # our goods settles this recent give the grade shares
 # 11-04 21:15, offline only, not deployed (off): the seller sells the best grade first, so the cap filled with B and C left no room for A: 자코모 4인
@@ -724,7 +729,7 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
                 groom = max(0.0, cap)
         except Exception as e:                              # no sales rate: spend as before
             print(f"[restock] stock target unavailable: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
-    if left < policy.LAST_HOURS_BELOW_COST or room <= 0:   # the last hours sell at cost: buy nothing
+    if policy.restock_stops(left) or room <= 0:             # too close to the end to sell what it buys
         return [], dict(plan, target={}, cycle_minutes=None)
     cands, units, have_sku, by_cat, median, skip = candidates(inv, cat, demand, est, p, now)
     sold = {k for k in have_sku if est.sku_rate(k) > 0 or est.asked_sku.get(k, 0.0) > 0}
@@ -775,7 +780,7 @@ def decide(inv, cat, demand, est, p, now, lines=None, every=None):
         spent += top
         if x["kind"] == "goods":
             spent_g += top
-    if left >= p["liquidate_hours"]:
+    if not policy.END_FLOOR_TO_COST or left >= p["liquidate_hours"]:
         for w in asked(units, by_cat, median, skip, p, balance, cat, demand, now):
             if len(buy) < MAX_LINES and w["sku"] not in buy and spent + w["worst_cost"] <= room:
                 buy[w["sku"]] = w

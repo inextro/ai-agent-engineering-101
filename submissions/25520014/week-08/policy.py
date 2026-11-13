@@ -92,6 +92,16 @@ LAST_HOURS_BELOW_COST = 6       # in the last hours the floor is the cost and re
 # The name is from before 11-05 03:45 KST, when the floor fell to half the cost here: the board's ALL then used cash
 # and unsold stock was a total loss. Since then ALL uses book (cash + cost of unsold units), so a sale under cost
 # lowers the score by the gap and an unsold unit costs only its storage (food: its cost once past its date).
+# 11-13 (owner): under book a sale at cost adds nothing, a unit left over stays in the book at its cost, and a unit
+# bought late pays 0.04% of its cost an hour in storage, so the slide of the last day only gave the margin away
+# (and revenue weighs 0.3). Off: the floor keeps its margin to the end and restock buys until the last hour.
+END_FLOOR_TO_COST = False       # True: the floor falls to the cost over the last liquidate_hours, no restock in the last 6 h
+LAST_HOURS_NO_RESTOCK = 1       # with END_FLOOR_TO_COST off: restock stops this close to the end (nothing left to sell it in)
+
+
+def restock_stops(left):
+    """No more buying this close to the round's end."""
+    return left < (LAST_HOURS_BELOW_COST if END_FLOOR_TO_COST else LAST_HOURS_NO_RESTOCK)
 
 
 def defaults():
