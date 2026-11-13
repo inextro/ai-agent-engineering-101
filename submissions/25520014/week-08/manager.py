@@ -23,9 +23,12 @@ The hourly review (added 11-02): besides the numbers, opus gets
   - the archive index (data/manager_archive.jsonl): one line per past hour (deals, margin, misses, balance, alerts,
     the problems it found, what it changed); every hour of the last two days, older hours only when something
     happened.
-Before deciding it may look hours up: {"lookup": [{"hour": "MM-DD HH:00", "what": [...]}]} gets the raw record of
-those hours from the collector DB (settles, breaks, forum posts, balance, board) and the shop's logs (negotiations
-verbatim, its own decision then), then it is asked again; at most LOOKUP_ROUNDS rounds of LOOKUP_HOURS hours.
+Before deciding it may use tools (tools.py): {"tool": [{"name": ..., "args": {...}}]} instead of the decision runs
+the calls and asks again with the results, at most tools.ROUNDS rounds. lookup_hour gets the raw record of past hours
+from the collector DB (settles, breaks, forum posts, balance, board) and the shop's logs (negotiations verbatim, its
+own decision then); sql runs one read-only SELECT on the last 72 hours; save_tool keeps a SELECT of its own as a
+named tool for the hours after (data/tools_shop.json). No tool changes anything: the policy still moves only
+through policy.clip below.
 It answers with number changes, playbook edits (negotiation and forum guidance as text, categories restock skips;
 policy.clip_playbook refuses digits, unknown categories, too long or too many), notes for the next hour, the new memory, and a
 report in Korean for the owner, who reads data/reports.md (and the same report on Telegram, notify.py) after the
@@ -53,6 +56,7 @@ import model
 import notify
 import policy
 import rules
+import tools
 
 os.environ["TZ"] = "Asia/Seoul"             # the lab server runs on UTC; reports, archive hours and lookups read KST
 time.tzset()
@@ -80,7 +84,7 @@ MEMORY = policy.DATA / "manager_memory.md"
 ARCHIVE = policy.DATA / "manager_archive.jsonl"
 MEMORY_CHARS = 1500
 ARCHIVE_FULL_H = 48                      # every hour this recent is in the index; older ones only when flagged
-LOOKUP_ROUNDS, LOOKUP_HOURS = 2, 3
+LOOKUP_ROUNDS, LOOKUP_HOURS = tools.ROUNDS, 3       # 11-13: the rounds are the tools' (lookup is one of them)
 WHAT = ("negotiations", "settles", "broken", "forum", "balance", "board", "decision")
 UPVOTES_MAX = 5
 UPVOTES_OFF = True    # owner 11-06 11:40: no likes from our shop or buyer. Patch 3.4 scores buyers by stances from other
@@ -726,9 +730,10 @@ Your memory (what you have learned so far, written by you):
 Archive index (one line per past hour; older hours only when something happened):
 {index}
 
-Before deciding you may look up past hours to see their raw record: answer {{"lookup": [{{"hour": "MM-DD HH:00",
-"what": [some of {what}]}}]}} instead (at most {hours} hours; {rounds_left} lookup rounds left). Look up only when an
-hour in the index or your memory bears on what you are deciding now.
+Before deciding you may use tools: answer {{"tool": [{{"name": "<tool>", "args": {{...}}}}]}} instead of the
+decision (at most {calls} calls in a round; {rounds_left} rounds left). Use a tool only when its answer bears on what
+you decide or report now. A question you expect to ask again is worth saving as a tool of your own (save_tool).
+{tools}
 {looked}
 With the decision, also give "memory": the full new text of your memory (at most {chars} characters): lessons that
 should outlive this hour, each with the hours it rests on, e.g. "C warranty off -> more break complaints (11-05 14:00,
@@ -858,23 +863,31 @@ def decide(md, now):
     memory = MEMORY.read_text(encoding="utf-8") if MEMORY.exists() else ""
     index, looked, used, answer = archive_index(now), [], [], None
     db = model.connect()
+    box = tools.Toolbox("shop", now, {"lookup_hour": (
+        "The raw record of past hours (negotiations word for word, settles, broken, forum, balance, board, your "
+        f"decision then; at most {LOOKUP_HOURS} hours). Use it when an hour in the index or your memory bears on the decision.",
+        {"hours": [{"hour": "MM-DD HH:00", "what": list(WHAT)}]},
+        lambda a: lookup(a.get("hours") if isinstance(a.get("hours"), list) else [a], now, db))})
     for rnd in range(LOOKUP_ROUNDS + 1):
-        left = LOOKUP_ROUNDS - rnd
-        extra = LOOKUP.format(memory=memory or "(empty)", index=index, what=list(WHAT), hours=LOOKUP_HOURS,
+        left = 0 if tools.OFF else LOOKUP_ROUNDS - rnd
+        extra = LOOKUP.format(memory=memory or "(empty)", index=index, calls=tools.CALLS, tools=box.describe(),
                               rounds_left=left, chars=MEMORY_CHARS,
-                              looked=("\nWhat you looked up:\n" + "\n".join(looked) + "\n") if looked else "")
+                              looked=("\nWhat your tools returned:\n" + "\n".join(looked) + "\n") if looked else "")
         if not left:
-            extra += "\nNo lookups left: answer with the decision now."
+            extra += "\nNo tool rounds left: answer with the decision now."
         answer, who = ask_model(prompt + extra)
         if answer is None:
             break
         used.append(who)
-        if not (left and answer.get("lookup") and "review" not in answer):
+        calls = answer.get("tool")
+        if not calls and answer.get("lookup"):          # the form before 11-13
+            calls = [{"name": "lookup_hour", "args": {"hours": answer["lookup"] if isinstance(answer["lookup"], list)
+                                                      else [answer["lookup"]]}}]
+        if not (left and calls and "review" not in answer):
             break
-        reqs = answer["lookup"]
-        got = lookup(reqs if isinstance(reqs, list) else [reqs], now, db)
+        got = box.run(calls)
         looked.append(got)
-        log(f"{who}: looked up {json.dumps(answer['lookup'], ensure_ascii=False)[:200]} ({len(got)} chars)")
+        log(f"{who}: tools {json.dumps(calls, ensure_ascii=False)[:300]} ({len(got)} chars)")
     used = " + ".join(used)
     if answer is None or "review" not in answer:
         log("no decision this hour; the policy stays")

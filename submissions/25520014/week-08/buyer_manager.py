@@ -28,6 +28,7 @@ from pathlib import Path
 
 import buyer_policy
 import rules
+import tools
 import model
 import notify
 import policy
@@ -474,6 +475,15 @@ Answer with one JSON object only:
  "report_ko": "{report_spec}"}}"""
 
 
+TOOLS = """
+
+Before deciding you may use tools: answer {{"tool": [{{"name": "<tool>", "args": {{...}}}}]}} instead of the
+decision (at most {calls} calls in a round; {rounds_left} rounds left). Use a tool only when its answer bears on what
+you decide or report now. A question you expect to ask again is worth saving as a tool of your own (save_tool).
+{tools}
+{looked}"""
+
+
 def describe(p):
     return "\n".join(f"  {k} = {p[k]}  (range {lo} .. {hi})" for k, (_, lo, hi) in buyer_policy.NUMBERS.items())
 
@@ -486,7 +496,24 @@ def decide(md, now):
                            summary=json.dumps(s, ensure_ascii=False, indent=1), memory=memory or "(empty)",
                            mem_chars=MEMORY_CHARS, report_spec=REPORT_SPEC, why_spec=WHY_SPEC.format(skip="")) + "\n\n" + UPVOTE_RULE + rules.section("buyer")
     alerts = s["forum_strategy_checks"].get("alerts") or []
-    answer, used = ask_model(prompt)
+    box, looked, used, answer = tools.Toolbox("buyer", now), [], [], None
+    for rnd in range(tools.ROUNDS + 1):                # 11-13: tools before the decision (tools.py), as the shop's manager
+        left = 0 if tools.OFF else tools.ROUNDS - rnd
+        extra = "" if tools.OFF else TOOLS.format(
+            calls=tools.CALLS, rounds_left=left, tools=box.describe(),
+            looked=("\nWhat your tools returned:\n" + "\n".join(looked) + "\n") if looked else "")
+        if not left and not tools.OFF:
+            extra += "\nNo tool rounds left: answer with the decision now."
+        answer, who = ask_model(prompt + extra)
+        if answer is None:
+            break
+        used.append(who)
+        if not (left and answer.get("tool") and "review" not in answer):
+            break
+        got = box.run(answer["tool"])
+        looked.append(got)
+        log(f"{who}: tools {json.dumps(answer['tool'], ensure_ascii=False)[:300]} ({len(got)} chars)")
+    used = " + ".join(used) or None
     if answer is None or "review" not in answer:
         log("no decision this hour; the policy stays")
         report(now, used, {}, {}, [], "모델 호출이 실패해 이번 시간은 판단하지 못했습니다. buyer 정책과 playbook은 그대로입니다.",
@@ -515,7 +542,7 @@ def decide(md, now):
         f.write(json.dumps({"ts": now, "model": used, "upvoted": liked, "asked": answer.get("changes"), "changed": changed,
                             "playbook_asked": answer.get("playbook"), "playbook_changed": pb_changed, "why": answer.get("why_ko"),
                             "refused": refused, "review": answer.get("review"), "problems": answer.get("problems"),
-                            "reason": reason, "notes": str(answer.get("notes", ""))[:1000],
+                            "reason": reason, "notes": str(answer.get("notes", ""))[:1000], "tool_rounds": len(looked),
                             "prompt_chars": len(prompt)}, ensure_ascii=False) + "\n")
     report(now, used, changed, pb_changed, refused, str(answer.get("report_ko", ""))[:REPORT_CHARS], liked,
            answer.get("why_ko"), alerts)
