@@ -68,6 +68,7 @@ import clearance
 import harness
 import model
 import policy
+import warranty_memo
 
 SHOP = os.environ.get("SHOP_TITLE", "Inextro Market")       # the display name; the market knows us as `inextro`
 MARKET_DIR = Path(os.environ.get("MARKET_DIR", ".market"))
@@ -538,6 +539,13 @@ WARRANTY_ON_ASK = ("C",)
 # 11-06 15:50 the owner kept it: psyoung82 came back (2 -> 8 -> 24 paid deals here at 12, 13, 14 h) and the 44 B
 # sold with it by 15:35 broke once (0.35M refunded). C still gets one only on ask.
 B_NO_PREMIUM = True
+# 11-13 (owner): the warranty per buyer and grade from what the buyer pays for across the market (warranty_memo.py):
+# without one where it pays without one (A too), 72 h where it refuses without one. 48 h replayed on our receipts:
+# 754 refused B get one (11im asks "a 6 hours warranty if you offer one" and paid 0 of 712 B without), 1,470 paid A
+# go without (their buyers paid 97-100% of A without a warranty elsewhere; A refunds were 3.2% of A revenue).
+# Where the memo does not know (under 5 of our receipts from the template, or too few receipts per buyer), the
+# rules above. Off: False.
+WARRANTY_MEMO = True
 MKT_BASE = 0.95          # a goods ask starts from at least this share of the market's price for its SKU and grade
 WANTS_WARRANTY = re.compile(r"warrant|guarantee|보증|보장", re.I)
 
@@ -611,15 +619,19 @@ def hold_floor(cost, warranty, now=None):
     return keep / (1 - (BREAK.get("A", 0.0) if warranty else 0.0))
 
 
-def option(u, p, arm, wants_warranty=True, capped=False):
+def option(u, p, arm, wants_warranty=True, capped=False, memo=None):
     """One unit the shop can offer, with its own asking price, floor and concession step. wants_warranty: the buyer
     asked for a warranty (WARRANTY_ON_ASK grades get one only then). capped: a STAR_BUYER, whose ask (and so every
-    price the talk can close at) is held at STAR_CAP x list, the floor lowered to it but never under break-even."""
+    price the talk can close at) is held at STAR_CAP x list, the floor lowered to it but never under break-even.
+    memo: warranty_memo's decision for this buyer and grade (0, hours, or None for the rules above)."""
     kind = u.get("kind", "goods")
     warranty = int(p["warranty_hours"]) if kind == "goods" and p.get(f"warranty_{u.get('grade')}") else 0
     if u.get("grade") in WARRANTY_ON_ASK and not wants_warranty:
         warranty = 0
-    if B_NO_PREMIUM and u.get("grade") == "B" and not wants_warranty:
+    if kind == "goods" and memo is not None:
+        warranty = int(p["warranty_hours"]) if memo else 0
+    # a warranty the memo gives carries its refund in the floor: B with one unpriced lost 34M in 56 h (11-10)
+    if B_NO_PREMIUM and u.get("grade") == "B" and not wants_warranty and not (kind == "goods" and memo):
         u = dict(u, _no_premium=True)
     u = dict(u, _warranty=warranty)
     if kind == "goods" and arm in policy.GOODS_ARMS:
@@ -900,7 +912,8 @@ class Seller(AgentExecutor):
                     and x["unit"] not in held and x["unit"] != u["unit"]), None)
         if alt is None:
             return False
-        new = option(alt, policy.load(), deal["arm"], deal.get("wants_warranty", True), deal.get("capped", False))
+        new = option(alt, policy.load(), deal["arm"], deal.get("wants_warranty", True), deal.get("capped", False),
+                     deal.get("memo", {}).get(alt.get("grade")))
         o["unit"], o["floor"] = new["unit"], max(o["floor"], new["floor"])
         log(f"[task {task_id[:8]}] unit {u['unit']} was taken meanwhile; offering {alt['unit']}")
         return True
@@ -930,7 +943,8 @@ class Seller(AgentExecutor):
                 c = dict(c, _pool_cost=sum(x["cost"] for x in cs) / len(cs))
             else:                                    # the cheapest on its own cost, as find_units (POOL_FLOOR)
                 c = min(cs, key=lambda x: (x["cost"], x.get("supplied_at") or 0))
-            co = option(c, policy.load(), deal["arm"], deal.get("wants_warranty", True), deal.get("capped", False))
+            co = option(c, policy.load(), deal["arm"], deal.get("wants_warranty", True), deal.get("capped", False),
+                        deal.get("memo", {}).get(g))
             if offer < close_floor(co):
                 continue
             co["ask"], co["step"] = max(min(round(offer), co["cap"] or round(offer)), co["floor"]), deal["steps"]
@@ -962,7 +976,9 @@ class Seller(AgentExecutor):
         wants_w = bool(WANTS_WARRANTY.search(text or ""))
         capped = kind == "goods" and bool(STAR_BUYER.search(text or ""))
         fair = bool(FAIR_BUYER.search(text or ""))
-        opts = {g: option(u, p, arm, wants_w, capped) for g, u in by_grade.items()}
+        tpl = warranty_memo.template(text, next(iter(by_grade.values())).get("name")) if WARRANTY_MEMO else None
+        memo = {g: warranty_memo.MEMO.decide(tpl, g) for g in ("A", "B", "C")} if tpl else {}
+        opts = {g: option(u, p, arm, wants_w, capped, memo.get(g)) for g, u in by_grade.items()}
         if len(opts) > 1:
             # one grade, chosen by the code: the best we hold, since buyers' kits refuse to pay for low grades
             # (11-04, 6 h of our receipts: unpaid food A 0 of 33, B 29 of 105, C 34 of 58; goods C 6 of 11),
@@ -980,7 +996,7 @@ class Seller(AgentExecutor):
                                                  else "star_cap" if capped else arm),
                                      "capped": capped, "fair": fair,
                                      "steps": int(p["max_concessions"]), "lines": [], "t0": time.time(),
-                                     "named": bool(NAMED_GRADE.search(text or "")), "wants_warranty": wants_w,
+                                     "named": bool(NAMED_GRADE.search(text or "")), "wants_warranty": wants_w, "memo": memo,
                                      "pv": p.get("version"), "bv": policy.load_playbook().get("version")}
         for k, o in opts.items():
             if fair:
@@ -1131,6 +1147,7 @@ class Seller(AgentExecutor):
                                   "mentioned": deal.get("alt"), "clearance": bool(opts[key]["clearance"]),
                                   # share_watch's warranty signal reads these two (11-06 11 h)
                                   "warranty": opts[key]["warranty"], "wants_warranty": deal["wants_warranty"],
+                                  "wmemo": deal.get("memo", {}).get(u.get("grade")),
                                   "policy": deal["pv"], "playbook": deal["bv"]})
         if m["close"]:
             await self.close(task_id, deal, m["price"], reply, up, say)
@@ -1224,4 +1241,6 @@ if __name__ == "__main__":
         threading.Thread(target=warm_loop, name="warm", daemon=True).start()
     clearance.BACKGROUND = True        # talks read the table the warm thread keeps; they never rebuild it
     watch_rules()
+    if WARRANTY_MEMO:
+        warranty_memo.start(log)       # until its first build (about 10 s) every decision is None: the rules
     uvicorn.run(build_app(args.port), host="127.0.0.1", port=args.port, log_level="warning")

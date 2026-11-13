@@ -571,6 +571,16 @@ the code does, so the managers do not read a deliberate effect as a fault and un
   A in stock and less idle cash are by design; book counts stock at cost. Watch: B and C sales a day (now 224 and
   37) and the A stock at cost (now 283M).
 
+- 11-13 14 h (owner): warranty per buyer and grade (seller.WARRANTY_MEMO, warranty_memo.py). The shop tells a buyer
+  by its first message (product name, SKUs and numbers taken out; our receipts of 72 h teach which buyers send it) and
+  looks up what that buyer paid for across the whole market in 48 h, per grade, with and without a warranty. Paid 90%+
+  without one: no warranty, A included. Paid under 50% without one and not refused with one: 72 h, with the refund in
+  the floor. Otherwise the old rules (A 72 h, B none, C on ask). Why: 11-10 20 h to 11-13 04 h about 1,900 of our B/C
+  receipts without a warranty were refused at payment (11im B 724, iyen-dori C 868, YAHO1212 C 258), and A refunds
+  cost 3.2% of A revenue while sergiobuilds sells A without one at the same stars (4.61 against 4.64) and 92% paid.
+  Replay of 48 h: 754 refused B get a warranty, 1,470 paid A go without. Fewer A with a warranty and more B with one
+  are by design. Watch: paid share of our goods receipts (B was 39%, C 2%), A refunds a day, the open log's `wmemo`.
+
 ## buyer
 
 - 11-04 07:18 a (shop, SKU) that answered 409 "not in stock" twice in 6 h goes to the end of the list (not skipped)
