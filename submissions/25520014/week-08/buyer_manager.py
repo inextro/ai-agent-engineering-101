@@ -27,6 +27,7 @@ from collections import Counter
 from pathlib import Path
 
 import buyer_policy
+import race
 import rules
 import tools
 import model
@@ -341,6 +342,12 @@ def summary(md, now):
         checks = forum_alerts(db, now, us)
     except Exception as e:
         checks = {"alerts": [f"forum 점검 실패: {type(e).__name__}: {str(e)[:120]}"]}
+    try:            # owner 11-13: the Players race (race.py), alerts 1-4 are the buyer's
+        new_race, standing = race.alerts("buyer", now)
+        standing.pop("_end_margins", None)
+        standing.pop("book", None)
+    except Exception as e:
+        new_race, standing = [f"순위 계산 실패: {type(e).__name__}: {str(e)[:120]}"], None
     last =[r for r in jsonl(ORDERS, now - 3600) if r.get("kind")][-ORDERS_SHOWN:]
     s = {
         "time": time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(now)),
@@ -348,6 +355,7 @@ def summary(md, now):
         "our_buyer_settles_this_round_vs_20_needed_to_rank": [len(ours), 20],
         "market_settles_this_round": len(settles),
         "our_buyer_score_now": score_now(db, us),
+        "players_race": {"standing": standing, "new_alerts": new_race},
         "last_hour": window(now - 3600, now),
         "last_6_hours": window(now - 6 * 3600, now),
         "shops_skipped_now_for_refusing_us_at_the_first_question": read_avoid(),
@@ -398,6 +406,18 @@ the rules page below has the current formula):
   not add dislike weight from an account that already disliked us. From 11-06 12:00 an account pays for its 4th new
   dislike stance in an hour.
 "our_buyer_score_now" has each part with its percentile. The kit stops an order after 300 s.
+
+Owner, 11-13: the goal is first place among students on the board's Players table (student_total, 2.0 at most;
+"players_race" gives it in points of 200, now and at the end if every buyer keeps its board pace of the last 12 h
+and the shops stay as they are; "now" has our place). The buyer's Saved is what moves us most: each student buyer we pass
+in Saved is +1.1 points, and passing the leader's buyer (yms979) also takes 1.1 from them. Who passes whom by the end
+is decided by Saved per deal, not by today's rise: a buyer converges to its own mean, ours is about 0.87, and the
+buyers just above us are at 0.77-0.85, so we pass most of them in the last days if ours holds. "rivals_in_reach"
+has each with its gap now, its gap at the end and the hour we pass it. The race is for you to watch, not a reason
+to change numbers: pushing harder loses deals, and min_share is the owner's. "new_alerts" are the code's checks
+(Saved per deal under 0.85 for 3 h, a pass we had lost, the end gap to the leader worse by 1+ point in 6 h, our
+share of the market's deals down 20%+): put each in '결정 필요:' with its likely cause from the record (which
+orders, shops, grades) and the owner's options. "active_alerts" are those still on; do not raise them again.
 
 Owner, 11-12 18:19: goods orders are bought again (they were skipped from 11-10 22:30 until now). By the patch 3.6
 score a goods A under a warranty keeps as much of the margin as food does (0.85 on our 890 deals before the skip);
@@ -496,6 +516,7 @@ def decide(md, now):
                            summary=json.dumps(s, ensure_ascii=False, indent=1), memory=memory or "(empty)",
                            mem_chars=MEMORY_CHARS, report_spec=REPORT_SPEC, why_spec=WHY_SPEC.format(skip="")) + "\n\n" + UPVOTE_RULE + rules.section("buyer")
     alerts = s["forum_strategy_checks"].get("alerts") or []
+    race_alerts = s["players_race"]["new_alerts"]
     box, looked, used, answer = tools.Toolbox("buyer", now), [], [], None
     for rnd in range(tools.ROUNDS + 1):                # 11-13: tools before the decision (tools.py), as the shop's manager
         left = 0 if tools.OFF else tools.ROUNDS - rnd
@@ -517,7 +538,7 @@ def decide(md, now):
     if answer is None or "review" not in answer:
         log("no decision this hour; the policy stays")
         report(now, used, {}, {}, [], "모델 호출이 실패해 이번 시간은 판단하지 못했습니다. buyer 정책과 playbook은 그대로입니다.",
-               alerts=alerts)
+               alerts=alerts, race_alerts=race_alerts)
         return
     for k in ("changes", "playbook"):
         if not isinstance(answer.get(k), dict):
@@ -545,14 +566,16 @@ def decide(md, now):
                             "reason": reason, "notes": str(answer.get("notes", ""))[:1000], "tool_rounds": len(looked),
                             "prompt_chars": len(prompt)}, ensure_ascii=False) + "\n")
     report(now, used, changed, pb_changed, refused, str(answer.get("report_ko", ""))[:REPORT_CHARS], liked,
-           answer.get("why_ko"), alerts)
+           answer.get("why_ko"), alerts, race_alerts)
     log(f"{used}: {'changed ' + json.dumps(changed, ensure_ascii=False) if changed else 'no change'}"
         f"{' | playbook ' + ', '.join(pb_changed) if pb_changed else ''}"
         f"{' | refused ' + '; '.join(refused) if refused else ''} | {reason}")
 
 
-def report(now, used, changed, pb_changed, refused, text, liked=(), why=None, alerts=()):
+def report(now, used, changed, pb_changed, refused, text, liked=(), why=None, alerts=(), race_alerts=()):
     lines = [f"## {time.strftime('%m-%d %H:%M', time.localtime(now))} ({used or '판단 없음'})", ""]
+    if race_alerts:  # race.py, raised once when they turn on
+        lines += ["[순위 점검 필요]"] + [f"- {a}" for a in race_alerts] + [""]
     if alerts:      # the code's checks, word for word, so they stand out of the hourly report whatever opus wrote
         lines += ["[forum 점검 필요]"] + [f"- {a}" for a in alerts] + [""]
     lines += [text.strip() or "(보고 없음)", ""] + change_lines(changed, pb_changed, why)

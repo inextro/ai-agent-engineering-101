@@ -55,6 +55,7 @@ import harness
 import model
 import notify
 import policy
+import race
 import rules
 import tools
 
@@ -634,6 +635,13 @@ def summary(md, now):
         s["market_gaps"] = market_gaps(est, now, model.catalog(db))
     except Exception as e:
         s["market_gaps"] = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
+    try:            # owner 11-13: the Players race (race.py), alert 5 (Book) is the shop's
+        new_race, r = race.alerts("shop", now)
+        s["players_race"] = {"now": r["now"], "end_at_board_paces": r["end_at_board_paces"], "book": r["book"],
+                             "active_alerts": r["active_alerts"]}
+        s["health"]["alerts"] += new_race
+    except Exception as e:
+        s["players_race"] = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
     s["your_last_decisions_and_what_followed"] = recent_decisions(now)
     s["negotiations_last_hour"] = talks
     s["buyers_who_left_after_our_first_reply"] = left_after_first(now)
@@ -659,6 +667,13 @@ units cost; since 11-05 03:45, before that cash alone) + 0.3 x revenue + 0.2 x s
 by the gap; an unsold unit keeps its cost in book. Food rots (thrown away at cost); goods pay 1% of cost a day in storage and a
 hidden share breaks within 6 h of the sale (a warranty refunds the full price from our balance). Buyers see only
 shops that hold stock in the ordered category. Our claims are always true and certificates always shown.
+
+Owner, 11-13: the goal is first place among students on the board's Players table (shop part + buyer part, in
+"players_race" as points of 200, now and at the end at the board paces). Book is the shop's part of it: the board
+counts places, not won, so passing the shop above us in Book is +1.1 points (Book 2nd, from 4th: +2.2), whatever the
+margin. "book" has the shops just above and below us. A Book alert in the code's alerts (the gap to the shop above
+not narrower than 6 h ago) goes in '결정 필요:' with its likely cause from the record (sales, margin, refunds, stock,
+cash) and the owner's options; it is no reason by itself to move a number. The buyer's part is buyer_manager's.
 
 Policy now, with the allowed range of each number (a change moves at most a quarter of the range):
 {policy}
