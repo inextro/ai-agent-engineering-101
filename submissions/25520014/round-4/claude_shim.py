@@ -5,9 +5,9 @@ The Round 4 kit calls its model only over HTTP (POST <base>/chat/completions) an
 `claude -p` is a command, not an endpoint, so this small server sits between them. It is infrastructure, not one of
 the agent's tools: the agent never sees it, and agent.json points at it with
 
-    "llm": {"base": "http://127.0.0.1:8790/v1", "model": "<claude model id or alias>", "key_env": "CLAUDE_SHIM_KEY"}
+    "llm": {"base": "http://127.0.0.1:18790/v1", "model": "<claude model id or alias>", "key_env": "CLAUDE_SHIM_KEY"}
 
-    python claude_shim.py --dir submissions/25520014/round-4 [--port 8790] [--claude ~/.local/bin/claude]
+    python claude_shim.py --dir submissions/25520014/round-4 [--port 18790] [--claude ~/.local/bin/claude]
 
 - Listens on 127.0.0.1 only. The key is not checked (the kit sends one; any value works).
 - Each request is one fresh `claude -p` call: system messages become --system-prompt, the rest becomes one
@@ -124,7 +124,7 @@ def handler(shim):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dir", default=".")
-    p.add_argument("--port", type=int, default=8790)
+    p.add_argument("--port", type=int, default=18790)
     p.add_argument("--claude", default="claude")
     a = p.parse_args()
     shim = Shim(a.dir, str(Path(a.claude).expanduser()))
