@@ -160,8 +160,7 @@ textarea::placeholder{color:var(--text-mute)}
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
-let me = 'guest-' + Math.random().toString(36).slice(2, 6);
-try { me = localStorage.getItem('miniapp-user') || me; localStorage.setItem('miniapp-user', me) } catch (e) {}
+const me = 'inextro';   // fixed: the owner, so the agent sees one steady name for the person in the app
 const touch = matchMedia('(pointer: coarse)').matches;
 let view = {chat: [], consents: [], moves: [], forged: {}, app_tools: {}}, cards = [], pending = [], waiting = 0, seen = 0, drawn = '';
 const handled = new Set();
